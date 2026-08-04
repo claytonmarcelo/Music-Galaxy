@@ -220,21 +220,19 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           />
         </Animated.View>
 
-        {/* Download — permite salvar arquivo localmente */}
-        {release.download_url && (
-          <Animated.View
-            style={{
-              opacity: fadeInAnim,
-              transform: [{ translateY: slideConteudeAnim }],
-            }}
-          >
-            <DownloadProgress
-              url={release.download_url}
-              titulo={release.version_name}
-              artista={release.artist_name}
-            />
-          </Animated.View>
-        )}
+        {/* Download — permite salvar arquivo localmente — SEMPRE VISÍVEL */}
+        <Animated.View
+          style={{
+            opacity: fadeInAnim,
+            transform: [{ translateY: slideConteudeAnim }],
+          }}
+        >
+          <DownloadProgress
+            url={release.download_url || 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3'}
+            titulo={release.version_name}
+            artista={release.artist_name}
+          />
+        </Animated.View>
         <Animated.View
           style={{
             opacity: fadeInAnim,
