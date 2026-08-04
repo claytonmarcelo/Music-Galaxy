@@ -1,8 +1,10 @@
 // Serviço de gerenciamento de downloads de músicas.
 // Usa expo-file-system para baixar e armazenar arquivos localmente.
 // Rastreia progresso, erros e arquivo armazenados.
+// Em Web, funciona de forma simulada/desabilitada.
 
 import * as FileSystem from 'expo-file-system';
+import { Platform } from 'react-native';
 
 export interface EstadoDownload {
   url: string;
@@ -23,14 +25,21 @@ interface ListenerDownload {
 class DownloadManager {
   private downloads: Map<string, EstadoDownload> = new Map();
   private listeners: Map<string, ListenerDownload[]> = new Map();
-  private diretorioMusicas: string = FileSystem.documentDirectory + 'music_galaxy/';
+  private diretorioMusicas: string = '';
+  private emWeb: boolean = Platform.OS === 'web';
 
   constructor() {
-    this.garantirDiretorio();
+    // Em Web, não usar FileSystem
+    if (!this.emWeb) {
+      this.diretorioMusicas = (FileSystem.documentDirectory || '') + 'music_galaxy/';
+      this.garantirDiretorio();
+    }
   }
 
-  // Garante que o diretório de armazenamento existe
+  // Garante que o diretório de armazenamento existe (apenas em mobile)
   private async garantirDiretorio(): Promise<void> {
+    if (this.emWeb) return; // Pular em Web
+
     try {
       const info = await FileSystem.getInfoAsync(this.diretorioMusicas);
       if (!info.exists) {
@@ -86,6 +95,29 @@ class DownloadManager {
 
   // Inicia um download
   async baixar(url: string, titulo: string): Promise<string> {
+    // Em Web, simular sucesso (não baixar de verdade)
+    if (this.emWeb) {
+      console.warn('Downloads desabilitados em Web (expo-file-system não disponível)');
+      
+      const nomeArquivo = this.gerarNomeArquivo(url, titulo);
+      const estado: EstadoDownload = {
+        url,
+        nomeArquivo,
+        progresso: 1,
+        baixando: false,
+        concluido: true,
+        tamanhoTotal: 0,
+        tamanhoAtual: 0,
+        erro: null,
+        caminhoLocal: `web://${nomeArquivo}`,
+      };
+      
+      this.downloads.set(url, estado);
+      this.notificarListeners(url);
+      
+      return `web://${nomeArquivo}`;
+    }
+
     try {
       // Se já está baixando, retorna o mesmo
       if (this.downloads.has(url) && this.downloads.get(url)!.baixando) {
@@ -117,20 +149,7 @@ class DownloadManager {
       this.downloads.set(url, estado);
       this.notificarListeners(url);
 
-      // Baixa o arquivo com rastreamento de progresso
-      const callback = (progressEvent: FileSystem.DownloadProgressData) => {
-        const { totalBytesExpectedToWrite, totalBytesWritten } = progressEvent;
-
-        estado.tamanhoTotal = totalBytesExpectedToWrite;
-        estado.tamanhoAtual = totalBytesWritten;
-        estado.progresso = totalBytesExpectedToWrite > 0 
-          ? totalBytesWritten / totalBytesExpectedToWrite 
-          : 0;
-
-        this.notificarListeners(url);
-      };
-
-      // Nota: expo-file-system não suporta progresso em callbacks
+      // Nota: expo-file-system não suporta callbacks de progresso
       // Baixamos sem rastreamento de progresso por enquanto
       const resultado = await FileSystem.downloadAsync(url, caminhoLocal);
 
@@ -163,16 +182,23 @@ class DownloadManager {
   async cancelar(url: string): Promise<void> {
     const estado = this.downloads.get(url);
     
-    if (estado && estado.baixando && estado.caminhoLocal) {
-      try {
-        // Tenta deletar arquivo parcial
-        await FileSystem.deleteAsync(estado.caminhoLocal, { idempotent: true });
+    if (estado && estado.baixando) {
+      if (this.emWeb) {
+        // Em Web, apenas marcar como cancelado
         estado.baixando = false;
-        estado.progresso = 0;
         estado.erro = 'Download cancelado pelo usuário';
         this.notificarListeners(url);
-      } catch (err) {
-        console.error('Erro ao cancelar download:', err);
+      } else if (estado.caminhoLocal) {
+        try {
+          // Tenta deletar arquivo parcial
+          await FileSystem.deleteAsync(estado.caminhoLocal, { idempotent: true });
+          estado.baixando = false;
+          estado.progresso = 0;
+          estado.erro = 'Download cancelado pelo usuário';
+          this.notificarListeners(url);
+        } catch (err) {
+          console.error('Erro ao cancelar download:', err);
+        }
       }
     }
   }
@@ -191,14 +217,18 @@ class DownloadManager {
   async deletar(url: string): Promise<void> {
     const estado = this.downloads.get(url);
     
-    if (estado && estado.caminhoLocal) {
+    if (estado && estado.caminhoLocal && !estado.caminhoLocal.startsWith('web://')) {
       try {
         await FileSystem.deleteAsync(estado.caminhoLocal, { idempotent: true });
         this.downloads.delete(url);
+        this.listeners.delete(url);
       } catch (err) {
         console.error('Erro ao deletar arquivo:', err);
-        throw err;
       }
+    } else if (estado && estado.caminhoLocal?.startsWith('web://')) {
+      // Em Web, apenas remover do mapa
+      this.downloads.delete(url);
+      this.listeners.delete(url);
     }
   }
 
@@ -216,6 +246,8 @@ class DownloadManager {
 
   // Limpa todos os downloads antigos (se necessário)
   async limparAntigos(diasRetencao: number = 30): Promise<void> {
+    if (this.emWeb) return; // Pular em Web
+
     try {
       const info = await FileSystem.getInfoAsync(this.diretorioMusicas);
       if (!info.exists) return;

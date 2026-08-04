@@ -1,7 +1,13 @@
 // Sistema de Animações Globais Premium
 // Fornece configurações e presets para animações suaves e elegantes
+// Suporta Web (sem useNativeDriver) e Mobile/Native (com useNativeDriver)
 
-import { Animated } from 'react-native';
+import { Animated, Platform } from 'react-native';
+
+// Detectar se está em Web
+const IS_WEB = Platform.OS === 'web';
+// Em Web, não usar useNativeDriver (não é suportado)
+const USE_NATIVE_DRIVER = !IS_WEB;
 
 /**
  * Configurações de timing padrão para animações
@@ -41,7 +47,7 @@ export const fadeInOut = (
   Animated.timing(animValue, {
     toValue: isVisible ? 1 : 0,
     duration,
-    useNativeDriver: true,
+    useNativeDriver: USE_NATIVE_DRIVER,
   }).start();
 };
 
@@ -55,7 +61,7 @@ export const scaleSpring = (
 ) => {
   Animated.spring(animValue, {
     toValue: isVisible ? 1 : 0.7,
-    useNativeDriver: true,
+    useNativeDriver: USE_NATIVE_DRIVER,
     ...config,
   }).start();
 };
@@ -71,7 +77,7 @@ export const slideVertical = (
   Animated.timing(animValue, {
     toValue: isVisible ? 0 : 50,
     duration,
-    useNativeDriver: true,
+    useNativeDriver: USE_NATIVE_DRIVER,
   }).start();
 };
 
@@ -89,7 +95,7 @@ export const slideHorizontal = (
   Animated.timing(animValue, {
     toValue: finalValue,
     duration,
-    useNativeDriver: true,
+    useNativeDriver: USE_NATIVE_DRIVER,
   }).start();
 };
 
@@ -111,12 +117,12 @@ export const pulsar = (
       Animated.timing(animValue, {
         toValue: 1.1,
         duration: duration / 2,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }),
       Animated.timing(animValue, {
         toValue: 1,
         duration: duration / 2,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }),
     ])
   ).start();
@@ -139,7 +145,7 @@ export const girar = (
     Animated.timing(animValue, {
       toValue: 1,
       duration,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
     })
   ).start();
 };
@@ -210,7 +216,7 @@ export const transicaoSuave = (
   Animated.timing(animValue, {
     toValue,
     duration,
-    useNativeDriver: true,
+    useNativeDriver: USE_NATIVE_DRIVER,
   }).start();
 };
 
@@ -221,13 +227,13 @@ export const bounce = (animValue: Animated.Value) => {
   Animated.sequence([
     Animated.spring(animValue, {
       toValue: -10,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
       tension: 100,
       friction: 10,
     }),
     Animated.spring(animValue, {
       toValue: 0,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
       tension: 100,
       friction: 10,
     }),
