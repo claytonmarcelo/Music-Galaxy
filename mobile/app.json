@@ -8,23 +8,38 @@
     "scheme": "musicgalaxy",
     "icon": "./assets/icon.png",
     "splash": {
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#0F0F1A"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.musicgalaxy.app"
+      "bundleIdentifier": "com.musicgalaxy.app",
+      "splash": {
+        "image": "./assets/splash.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#0F0F1A"
+      }
     },
     "android": {
       "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0F0F1A"
       },
-      "package": "com.musicgalaxy.app"
+      "package": "com.musicgalaxy.app",
+      "splash": {
+        "image": "./assets/splash.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#0F0F1A"
+      }
     },
     "web": {
       "bundler": "metro",
-      "output": "single"
+      "output": "single",
+      "favicon": "./assets/icon.png"
     },
-    "newArchEnabled": false
+    "newArchEnabled": false,
+    "sdkVersion": "57.0.0"
   }
 }
+
