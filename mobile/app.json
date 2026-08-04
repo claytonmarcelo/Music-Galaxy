@@ -1,18 +1,30 @@
 {
   "expo": {
-    "name": "musicgalaxy",
+    "name": "Music Galaxy",
     "slug": "musicgalaxy",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "scheme": "musicgalaxy",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0F0F1A"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.musicgalaxy.app"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE"
+        "backgroundColor": "#0F0F1A"
       },
-      "predictiveBackGestureEnabled": false
-    }
+      "package": "com.musicgalaxy.app"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "newArchEnabled": false
   }
 }

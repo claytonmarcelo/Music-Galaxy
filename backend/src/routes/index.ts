@@ -5,9 +5,10 @@ import { Router } from 'express';
 import { asyncHandler } from '../middleware/errorHandler';
 import { validarParametroBusca, validarPaginacao, validarParamId } from '../middleware/validacao';
 import { buscarMusicas, forcarIngestion } from '../controllers/searchController';
-import { detalharWork, listarReleasesDeWork } from '../controllers/worksController';
-import { detalharRelease } from '../controllers/releasesController';
+import { detalharWork, listarReleasesDeWork, listarWorksPorDecada } from '../controllers/worksController';
+import { detalharRelease, listarReleasesPorData } from '../controllers/releasesController';
 import { listarReleaseTypes } from '../controllers/releaseTypesController';
+import { detalharArtista, listarObrasArtista } from '../controllers/artistsController';
 
 const router = Router();
 
@@ -53,6 +54,14 @@ router.get(
   asyncHandler(listarReleasesDeWork)
 );
 
+// GET /api/works/by-decade/:decade
+// Obras lançadas em uma década específica (ex: 1990, 2000, 2010)
+router.get(
+  '/works/by-decade/:decade',
+  validarPaginacao,
+  asyncHandler(listarWorksPorDecada)
+);
+
 // ============================================================
 // Releases (Versões)
 // ============================================================
@@ -65,6 +74,14 @@ router.get(
   asyncHandler(detalharRelease)
 );
 
+// GET /api/releases/by-date
+// Releases recentes ordenados por data de criação
+router.get(
+  '/releases/by-date',
+  validarPaginacao,
+  asyncHandler(listarReleasesPorData)
+);
+
 // ============================================================
 // Catálogo de Tipos
 // ============================================================
@@ -74,6 +91,27 @@ router.get(
 router.get(
   '/release-types',
   asyncHandler(listarReleaseTypes)
+);
+
+// ============================================================
+// Artistas (Artists)
+// ============================================================
+
+// GET /api/artists/:id
+// Detalhes de um artista específico
+router.get(
+  '/artists/:id',
+  validarParamId,
+  asyncHandler(detalharArtista)
+);
+
+// GET /api/artists/:id/works
+// Lista todas as obras de um artista
+router.get(
+  '/artists/:id/works',
+  validarParamId,
+  validarPaginacao,
+  asyncHandler(listarObrasArtista)
 );
 
 export default router;

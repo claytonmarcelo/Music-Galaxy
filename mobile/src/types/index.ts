@@ -48,10 +48,95 @@ export interface RespostaErro {
 }
 
 // ============================================================
+// Obra Musical (conceitual, independente de versões)
+// ============================================================
+
+export interface Work {
+  id: number;
+  title: string;
+  original_release_year: number | null;
+  created_at: string;
+  artist: {
+    id: number;
+    name: string;
+    country: string | null;
+  };
+}
+
+// Resposta do endpoint GET /api/works/:id
+export interface RespostaWork {
+  success: boolean;
+  data: Work;
+}
+
+// Resposta do endpoint GET /api/works/:id/releases
+export interface RespostaReleasesDeWork {
+  success: boolean;
+  data: {
+    work: {
+      id: number;
+      title: string;
+    };
+    results: Release[];
+    total: number;
+    limit: number;
+    offset: number;
+  };
+}
+
+// ============================================================
+// Artista com seus dados básicos
+// ============================================================
+
+export interface Artista {
+  id: number;
+  name: string;
+  country: string | null;
+  created_at: string;
+}
+
+// Resposta do endpoint GET /api/artists/:id
+export interface RespostaArtista {
+  success: boolean;
+  data: Artista;
+}
+
+// Resposta do endpoint GET /api/artists/:id/works
+export interface RespostaObrasArtista {
+  success: boolean;
+  data: {
+    artist: Artista;
+    results: Work[];
+    total: number;
+    limit: number;
+    offset: number;
+  };
+}
+
+// ============================================================
 // Parâmetros de navegação
 // ============================================================
 
 export type RootStackParamList = {
+  // Bottom Tabs (principais)
+  BuscaTab: undefined;
+  BibliotecaTab: undefined;
+  ExplorarTab: undefined;
+  FavoritosTab: undefined;
+  SettingsTab: undefined;
+
+  // Stacks dentro das abas
   Busca: undefined;
+  Biblioteca: undefined;
+  Explorar: undefined;
+  Favoritos: undefined;
+  Settings: undefined;
+
+  // Telas de detalhe (compartilhadas por múltiplas stacks)
   DetalheRelease: { release: Release };
+  DetalheWork: { workId: number };
+  DetalheArtista: { artistaId: number };
+
+  // Admin
+  AdminIngestao: undefined;
 };

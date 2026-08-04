@@ -148,3 +148,74 @@ export async function listarReleasesDeWork(
     next(err);
   }
 }
+
+
+// GET /api/works/by-decade/:decade — obras de uma década específica
+export async function listarWorksPorDecada(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const decada = parseInt(req.params['decade']!, 10);
+    const limit  = Math.min(parseInt(req.query['limit']  as string || '100', 10), 100);
+    const offset = Math.max(parseInt(req.query['offset'] as string || '0',   10), 0);
+
+    // Valida a década (0000s, 1900s, 1910s, etc)
+    if (isNaN(decada) || decada < 0 || decada % 10 !== 0) {
+      throw new ErroAplicacao('Década deve ser um múltiplo de 10 (ex: 1990, 2000, 2010).', 400);
+    }
+
+    const anoInicio = decada;
+    const anoFim = decada + 9;
+
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT
+         w.id,
+         w.title,
+         w.original_release_year,
+         w.created_at,
+         a.id      AS artist_id,
+         a.name    AS artist_name,
+         a.country AS artist_country
+       FROM works w
+       JOIN artists a ON w.artist_id = a.id
+       WHERE w.original_release_year >= ? AND w.original_release_year <= ?
+       ORDER BY w.original_release_year DESC, w.title ASC
+       LIMIT ? OFFSET ?`,
+      [anoInicio, anoFim, limit, offset]
+    );
+
+    const [countRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS total FROM works 
+       WHERE original_release_year >= ? AND original_release_year <= ?`,
+      [anoInicio, anoFim]
+    );
+    const total = (countRows[0]?.['total'] as number) ?? 0;
+
+    const works = (rows as any[]).map(row => ({
+      id:                   row['id'],
+      title:                row['title'],
+      original_release_year: row['original_release_year'],
+      created_at:           row['created_at'],
+      artist: {
+        id:      row['artist_id'],
+        name:    row['artist_name'],
+        country: row['artist_country'],
+      },
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        decade: `${anoInicio}s`,
+        results: works,
+        total,
+        limit,
+        offset,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}

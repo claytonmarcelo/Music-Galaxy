@@ -22,14 +22,32 @@ const PORT = parseInt(process.env['PORT'] || '3001', 10);
 // Middlewares de segurança e parsing
 // ============================================================
 
-// Helmet — define cabeçalhos HTTP de segurança automaticamente
-app.use(helmet());
+// Helmet — define cabeçalhos HTTP de segurança
+// Em desenvolvimento, desabilita CSP para não bloquear o Expo web
+app.use(helmet({
+  contentSecurityPolicy: process.env['NODE_ENV'] === 'production',
+  crossOriginEmbedderPolicy: false,
+}));
 
-// CORS — permite requisições do app mobile (Expo) e do localhost
+// CORS — permite requisições do app mobile (Expo) e do browser local
+// Aceita qualquer origem em desenvolvimento para facilitar testes no browser,
+// Expo Go no celular e emuladores Android/iOS.
 app.use(cors({
-  origin: process.env['CORS_ORIGIN'] || '*',
-  methods: ['GET', 'POST'],
+  origin: (origin, callback) => {
+    // Permite requisições sem origin (apps nativos, curl, Postman)
+    if (!origin) return callback(null, true);
+    // Em desenvolvimento aceita tudo; em produção restringir por lista
+    if (process.env['NODE_ENV'] !== 'production') return callback(null, true);
+    // Em produção usa a variável de ambiente CORS_ORIGIN
+    const permitidas = (process.env['CORS_ORIGIN'] || '*').split(',').map(o => o.trim());
+    if (permitidas.includes('*') || permitidas.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`Origem não permitida: ${origin}`));
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
 }));
 
 // Parse de JSON no body das requisições
