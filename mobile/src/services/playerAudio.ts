@@ -5,12 +5,12 @@
 // Mantém estado de reprodução (tocando, pausado, parado).
 
 import { Platform } from 'react-native';
-let Audio: any;
+let ExpoAudio: any;
 
 // Importa expo-av apenas em ambiente React Native
 if (Platform.OS !== 'web') {
   try {
-    Audio = require('expo-av').Audio;
+    ExpoAudio = require('expo-av').Audio;
   } catch (e) {
     console.warn('expo-av não disponível');
   }
@@ -40,8 +40,8 @@ class PlayerAudio {
 
   constructor() {
     // Configura modo de áudio apenas em React Native
-    if (!this.isWeb && Audio?.setAudioModeAsync) {
-      Audio.setAudioModeAsync({
+    if (!this.isWeb && ExpoAudio?.setAudioModeAsync) {
+      ExpoAudio.setAudioModeAsync({
         playsInSilentModeIOS: true,
         shouldDuckAndroid: true,
         staysActiveInBackground: true,
@@ -101,7 +101,13 @@ class PlayerAudio {
       if (this.isWeb) {
         // Implementação Web com HTML5 Audio
         if (!this.audioWeb) {
-          this.audioWeb = new Audio();
+          // Cria elemento de áudio nativo do HTML5
+          if (typeof document !== 'undefined') {
+            this.audioWeb = document.createElement('audio');
+          } else {
+            throw new Error('HTML5 Audio não disponível neste navegador');
+          }
+
           this.audioWeb.addEventListener('timeupdate', () => {
             this.estado.tempo = (this.audioWeb?.currentTime ?? 0) * 1000;
             this.notificarListeners();
@@ -159,7 +165,7 @@ class PlayerAudio {
 
         // Carrega novo som
         if (!this.som || this.estado.urlAtual !== url) {
-          const { sound } = await Audio.Sound.createAsync(
+          const { sound } = await ExpoAudio.Sound.createAsync(
             { uri: url },
             { shouldPlay: true },
             this.aoMudarStatus.bind(this)
