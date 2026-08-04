@@ -206,21 +206,19 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           </View>
         </Animated.View>
 
-        {/* Player de áudio — permite reprodução de preview */}
-        {(release.audio_preview_url || release.streaming_url) && (
-          <Animated.View
-            style={{
-              opacity: fadeInAnim,
-              transform: [{ translateY: slideConteudeAnim }],
-            }}
-          >
-            <PlayerControls
-              url={release.audio_preview_url || release.streaming_url || ''}
-              titulo={release.version_name}
-              artista={release.artist_name}
-            />
-          </Animated.View>
-        )}
+        {/* Player de áudio — permite reprodução de preview SEMPRE VISÍVEL */}
+        <Animated.View
+          style={{
+            opacity: fadeInAnim,
+            transform: [{ translateY: slideConteudeAnim }],
+          }}
+        >
+          <PlayerControls
+            url={release.audio_preview_url || release.streaming_url || release.source_reference_url || 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'}
+            titulo={release.version_name}
+            artista={release.artist_name}
+          />
+        </Animated.View>
 
         {/* Download — permite salvar arquivo localmente */}
         {release.download_url && (
