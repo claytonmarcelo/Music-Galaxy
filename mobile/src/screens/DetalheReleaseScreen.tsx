@@ -206,8 +206,10 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           </View>
         </Animated.View>
 
-        {/* Player de áudio — permite reprodução de preview */}
-        {release.source_reference_url && (
+        {/* Player de áudio — permite reprodução de preview (se URL disponível) */}
+        {/* Nota: source_reference_url é URL de referência Discogs/MusicBrainz, não de áudio */}
+        {/* Player desabilitado até implementação de integração com serviços de streaming */}
+        {false && release.source_reference_url && (
           <Animated.View
             style={{
               opacity: fadeInAnim,
@@ -222,8 +224,9 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           </Animated.View>
         )}
 
-        {/* Download — permite salvar arquivo localmente */}
-        {release.source_reference_url && (
+        {/* Download — permite salvar arquivo localmente (se URL disponível) */}
+        {/* Nota: source_reference_url é URL de referência, não arquivo de áudio */}
+        {false && release.source_reference_url && (
           <Animated.View
             style={{
               opacity: fadeInAnim,
@@ -238,7 +241,23 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           </Animated.View>
         )}
 
-        {/* Seção de informações detalhadas com cards premium */}
+        {/* Informação sobre funcionalidade de streaming */}
+        <Animated.View
+          style={{
+            opacity: fadeInAnim,
+            transform: [{ translateY: slideConteudeAnim }],
+          }}
+        >
+          <View style={styles.infoStreaming}>
+            <Text style={styles.infoStreamingIcone}>♪</Text>
+            <Text style={styles.infoStreamingTexto}>
+              Reprodução de áudio e download não estão disponíveis neste momento.
+            </Text>
+            <Text style={styles.infoStreamingSubTexto}>
+              Acesse Discogs ou MusicBrainz para mais informações sobre esta versão.
+            </Text>
+          </View>
+        </Animated.View>
         <Animated.View
           style={{
             opacity: fadeInAnim,
@@ -491,5 +510,33 @@ const styles = StyleSheet.create({
     color: '#1DB954',
     fontSize: 13,
     fontWeight: '600',
+  },
+  infoStreaming: {
+    marginHorizontal: 20,
+    marginVertical: 16,
+    backgroundColor: '#1A1A2E',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2A2A4A',
+  },
+  infoStreamingIcone: {
+    fontSize: 32,
+    marginBottom: 8,
+    color: '#606080',
+  },
+  infoStreamingTexto: {
+    fontSize: 13,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  infoStreamingSubTexto: {
+    fontSize: 12,
+    color: '#8080A0',
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });
