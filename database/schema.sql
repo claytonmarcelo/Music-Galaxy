@@ -108,6 +108,11 @@ CREATE TABLE IF NOT EXISTS releases (
   metadata_source_id SMALLINT UNSIGNED NOT NULL, -- Origem dos metadados desta versão
   source_reference_url VARCHAR(500) NULL,   -- Link direto ao registro na fonte original (auditoria)
 
+  -- URLs de mídia - nunca inventar, apenas quando a fonte fornece
+  audio_preview_url VARCHAR(500) NULL,      -- URL para preview de áudio (ex: Spotify preview)
+  streaming_url VARCHAR(500) NULL,          -- URL para streaming (ex: Spotify, YouTube Music)
+  download_url VARCHAR(500) NULL,           -- URL para download (ex: arquivo MP3, FLAC)
+
   -- Identificador do registro na fonte externa (ex.: MBID do MusicBrainz
   -- ou release_id do Discogs). Combinado com metadata_source_id, impede
   -- que a mesma versão seja duplicada em reprocessamentos de sincronização.
