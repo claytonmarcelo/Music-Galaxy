@@ -1,155 +1,103 @@
 Music Galaxy
-O Music Galaxy é um aplicativo de busca musical projetado para DJs, colecionadores, produtores e pesquisadores, com foco absoluto em precisão e veracidade dos dados — nunca inventando informações, apenas refletindo o que existe nas fontes consultadas.
-Principais Pilares
-🎯 Regras Fundamentais
-Capa Oficial Apenas: Exibe somente a arte original disponível nas fontes; sem IA, sem imagens fictícias ou modificadas.
-Resultado Completo: Retorna todas as versões de uma obra — qualquer formato (álbum, single, promo, bootleg legal etc.) e qualquer variação (remix, edit, instrumental, playback etc.).
-🛠️ Tecnologias Utilizadas
-Tabela
-Camada	Tecnologias
-Aplicativo	React Native + TypeScript + Expo SDK 57
-Servidor	Node.js + TypeScript + Express
-Banco de Dados	MariaDB (porta 3307 via WampServer64)
-📡 Fontes de Dados Integradas
-MusicBrainz: Metadados completos de obras e artistas
-Cover Art Archive: Capas oficiais
-Discogs: Detalhes de lançamentos físicos e variações
-Estrutura e Funcionamento
-O endpoint principal (GET /api/search) primeiro consulta o banco local; se não encontrar ou se os dados estiverem desatualizados, busca automaticamente nas fontes externas e armazena em cache.
-O banco é normalizado: separa artistas, obras e cada lançamento/versão individualmente — garantindo que nenhuma informação seja perdida ou substituída.
-Há sistema de auditoria, respeito aos limites de requisição das APIs e regras claras de uso para evitar bloqueios.
-Status Atual
-✅ Banco de dados estruturado
-✅ API REST implementada
-✅ Interface básica do aplicativo pronta
-🔄 Em desenvolvimento: Integração definitiva com Discogs/MusicBrainz, tela de detalhes, favoritos e filtros avançados.
-Gostaria que eu transformasse essa documentação em um guia rápido de instalação, um diagrama de funcionamento ou até um resumo executivo para apresentar o projeto?
-melhore este readme.md de forma profissional completo.
-Music Galaxy
-Busca musical com precisão absoluta: dados reais, fontes confiáveis, nenhuma informação inventada.
-Sumário
-Sobre o Projeto
-Princípios Fundamentais
-Público-Alvo
+Aplicativo de busca musical focado em precisão de dados e completude de resultados. O diferencial do aplicativo é nunca inventar informações: capas de música e versões de lançamento devem refletir exatamente o que existe nas fontes de dados consultadas.
+Visão Geral
+Music Galaxy é destinado a DJs, colecionadores, produtores musicais e pesquisadores que precisam localizar versões específicas de uma mesma obra (remixes, edições, formatos de lançamento, instrumentais, playback, entre outros).
 Stack Tecnológica
+Frontend: React Native + TypeScript + Expo SDK 57
+Backend: Node.js + TypeScript + Express
+Banco de Dados: MariaDB (porta 3307 via WampServer64)
+Regras de Negócio
+Regra 1 — Capa Oficial da Música
+O Music Galaxy deve exibir exclusivamente a capa oficial correspondente ao resultado da pesquisa, quando essa capa estiver disponível na fonte consultada.
+Nunca gerar capas por inteligência artificial
+Nunca criar capas fictícias
+Nunca utilizar capas de outra música, álbum ou artista
+Nunca modificar a arte oficial
+Nunca substituir a capa correta por uma imagem semelhante
+Se a fonte não disponibilizar a capa oficial, o aplicativo não deve inventar uma
+Regra 2 — Pesquisa Musical Completa
+O mecanismo de pesquisa deve localizar e apresentar todas as versões existentes de uma mesma obra musical, independentemente do formato de lançamento.
+Formatos suportados: Álbum, Single, EP, Maxi Single, CD Single, Promo, White Label, Coletâneas, Box Set, Deluxe Edition, Remastered, Reissue, Soundtrack, Bootleg (legal), Demo, Live Album, e muitos mais.
+Versões suportadas: Instrumental, Acapella, Karaoke, Radio Edit, Extended Mix, Club Mix, Remix, Dub Mix, VIP Mix, Rework, Mashup, DJ Version, e muito mais.
 Estrutura do Projeto
-Instalação e Configuração
-Documentação da API
-Modelo de Dados
-Integração com Fontes Externas
-Fluxo de Busca e Cache
-Validação e Testes
-Próximos Passos
-Resolução de Problemas
-Licença e Suporte
-Sobre o Projeto
-O Music Galaxy é uma plataforma de busca musical desenvolvida para entregar a máxima completude e fidelidade de dados. Seu diferencial é a política de nunca gerar ou inventar informações: capas, versões, formatos e detalhes refletem exclusivamente o que é registrado nas fontes oficiais consultadas.
-Diferente de soluções generalistas, ele foi projetado para localizar todas as variações de uma mesma obra — atendendo a demandas que exigem exatidão sobre lançamentos e versões.
-Princípios Fundamentais
-🎨 Regra 1 — Capa Oficial Exclusiva
-Apenas a arte oficial correspondente ao resultado é exibida, quando disponível na fonte consultada.
-Proibido: geração de capas por IA, criação de imagens fictícias, uso de capas de outras obras/artistas, modificação de artes ou substituição por imagens semelhantes.
-Se não houver capa oficial disponível, nenhuma imagem é apresentada no lugar.
-🔍 Regra 2 — Busca Completa e Inalterada
-Todas as versões existentes de uma obra são retornadas, independentemente do formato ou edição.
-Formatos suportados: Álbum, Single, EP, Maxi Single, CD Single, Promo, White Label, Coletâneas, Box Set, Deluxe Edition, Remastered, Reissue, Trilha Sonora, Bootleg (legal), Demo, Ao Vivo, entre outros.
-Versões suportadas: Instrumental, Acapella, Karaokê, Radio Edit, Extended Mix, Club Mix, Remix, Dub Mix, VIP Mix, Reelaboração, Mashup, Versão DJ, entre outras.
-Público-Alvo
-DJs
-Colecionadores de discos e mídias
-Produtores e profissionais da música
-Pesquisadores e arquivistas musicais
-Entusiastas que buscam versões específicas de obras
-Stack Tecnológica
-Tabela
-Camada	Tecnologias
-Aplicativo	React Native + TypeScript + Expo SDK 57
-Backend	Node.js + TypeScript + Express
-Banco de Dados	MariaDB (porta 3307 via WampServer64)
-Integrações	MusicBrainz, Cover Art Archive, Discogs
-Segurança	Helmet, CORS, Rate Limiting
-Estrutura do Projeto
-plaintext
+```plaintext
 musicgalaxy/
 ├── mobile/                    # Aplicativo React Native
 │   ├── src/
-│   │   ├── components/        # Componentes reutilizáveis
+│   │   ├── components/       # Componentes reutilizáveis
 │   │   ├── screens/           # Telas do aplicativo
-│   │   ├── services/          # Comunicação com API
+│   │   ├── services/          # Serviços de API
 │   │   ├── types/             # Definições TypeScript
-│   │   ├── navigation/        # Configuração de rotas
-│   │   └── styles/            # Estilos e temas globais
+│   │   ├── navigation/        # Configuração de navegação
+│   │   └── styles/            # Estilos globais
 │   ├── App.tsx
 │   ├── package.json
 │   └── index.ts
 │
-├── backend/                   # API REST
+├── backend/                   # API Backend
 │   ├── src/
-│   │   ├── config/            # Conexão com banco e variáveis
-│   │   ├── controllers/      # Lógica das requisições
-│   │   ├── models/            # Modelos de dados
-│   │   ├── routes/            # Definição de endpoints
-│   │   ├── services/          # Regras de negócio e integrações
-│   │   ├── types/             # Tipos e interfaces
-│   │   ├── middleware/       # Tratamento de requisições
-│   │   └── index.ts           # Entrada da aplicação
+│   │   ├── config/            # Configurações (banco de dados)
+│   │   ├── controllers/       # Controladores da API
+│   │   ├── models/            # Modelos TypeScript
+│   │   ├── routes/            # Rotas Express
+│   │   ├── services/          # Serviços de negócio
+│   │   ├── types/             # Tipos TypeScript
+│   │   ├── middleware/        # Middleware Express
+│   │   └── index.ts           # Ponto de entrada
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── .env.example
 │
-├── database/                  # Scripts do banco
-│   ├── schema.sql             # Estrutura completa
+├── database/                  # Scripts do banco de dados
+│   ├── schema.sql             # Schema completo
 │   ├── seeds/                 # Dados iniciais
 │   └── README.md
 │
-├── AGENTS.md                  # Orientações para agentes de IA
-└── README.md                  # Documentação principal
+├── AGENTS.md                  # Instruções para agentes de IA
+└── README.md
 
-Instalação e Configuração
-Pré-requisitos
-Node.js 20+
-WampServer64 (com MariaDB ativado na porta 3307)
-Expo CLI (npm install -g @expo/cli)
-1. Banco de Dados
-Acesse o phpMyAdmin em http://localhost/phpmyadmin e crie o banco musicgalaxy. Execute o script:
-bash
+```
+Configuração Inicial
+1. Configurar Banco de Dados MariaDB
+Certifique-se de que o WampServer64 está rodando e acesse o phpMyAdmin em http://localhost/phpmyadmin.
+Execute o script do banco de dados (inclui schema e seeds):
+```bash
+# Via phpMyAdmin ou linha de comando:
 mysql -u root -p -P 3307 musicgalaxy < database/schema.sql
 
-2. Backend
-bash
+```
+2. Configurar Backend
+```bash
 cd backend
 npm install
-cp .env.example .env
-
-Edite o .env com credenciais do banco, chaves das APIs e e-mail válido para o User-Agent do MusicBrainz. Inicie o servidor:
-bash
+cp .env.example .env  # Configurar porta do MariaDB (3307)
 npm run dev
 
-A API estará disponível em http://localhost:3001
-3. Aplicativo Mobile
-bash
+```
+O backend estará disponível em http://localhost:3001
+3. Configurar Frontend React Native
+```bash
 cd mobile
 npm install
 npm start
 
-Use o Expo Go no celular ou emulador para visualizar o projeto.
-Documentação da API
+```
+Use o Expo Go no seu dispositivo ou emulador para testar.
+API Endpoints
 Busca Musical
-Tabela
-Método	Endpoint	Descrição
-GET	/api/search?q={termo}	Busca principal (consulta cache e fontes externas)
-POST	/api/search/ingest	Sincronização manual (uso interno/administrativo)
-Parâmetros da busca:
-q (obrigatório): termo de pesquisa
-limit (opcional): máximo de resultados (padrão 50, máximo 100)
-offset (opcional): paginação (padrão 0)
-category (opcional): filtro por tipo de lançamento/versão
-Resposta padrão:
-json
+GET /api/search?q={termo}
+único endpoint que o aplicativo mobile chama para busca. Internamente, consulta primeiro o banco local; se não houver resultado local, ou os dados existentes estiverem além do TTL de external_api_cache, o próprio endpoint dispara a ingestão das fontes externas através do orquestrador antes de responder.
+Query Params:
+q (obrigatório) - Termo de busca
+limit (opcional) - Limite de resultados (padrão: 50, máximo: 100)
+offset (opcional) - Offset para paginação (padrão: 0)
+category (opcional) - Filtrar por categoria (release_format, mix_edit, instrumental, playback)
+Resposta:
+```json
 {
   "success": true,
   "data": {
-    "results": [],
+    "results": [...],
     "total": 100,
     "page": 1,
     "per_page": 50,
@@ -157,77 +105,148 @@ json
   }
 }
 
-Demais Endpoints
-GET /api/works/:id → Detalhes de uma obra
-GET /api/works/:id/releases → Todas as versões de uma obra
-GET /api/releases/:id → Detalhes de um lançamento
-GET /api/release-types → Lista completa de tipos de lançamento
-GET /health → Verificação de status da API
-Modelo de Dados
-O banco segue estrutura normalizada para evitar duplicações e preservar a separação entre obra e lançamento:
-Tabela
-Tabela	Finalidade
-artists	Dados de artistas e bandas
-works	Obras musicais (conceito original, independente de versão)
-releases	Cada lançamento/versão específica de uma obra
-release_types	Catálogo fixo com mais de 60 tipos de lançamento/versão
-metadata_sources	Registro das fontes consultadas
-external_api_cache	Cache de respostas de APIs externas
-ingestion_log	Auditoria de todas as importações de dados
+```
+Exemplo:
+```bash
+curl "http://localhost:3001/api/search?q=daft%20punk&limit=10"
+
+```
+POST /api/search/ingest
+Endpoint administrativo/interno, fora do fluxo normal do app. Serve apenas para forçar resincronização manual de um termo (script de manutenção, painel administrativo futuro). Documentado como "uso interno apenas" até existir camada de autenticação.
+Body:
+```json
+{
+  "q": "termo de busca"
+}
+
+```
+GET /api/works/:id
+Detalhes de uma obra específica.
+GET /api/works/:id/releases
+Lista todas as versões/releases de uma obra.
+GET /api/releases/:id
+Detalhes de uma versão/release específica.
+GET /api/release-types
+Lista o catálogo de tipos de versão disponíveis.
+Sistema
+GET /health
+Health check da API.
+Schema do Banco de Dados
+O schema usa uma estrutura normalizada com tabelas principais:
+artists - Artistas/bandas
+works - Obras musicais (conceituais, independentes de versões)
+releases - Cada versão/lançamento específico de uma obra
+release_types - Catálogo fixo de tipos (60+ tipos)
+metadata_sources - Fontes de metadados (Discogs, MusicBrainz, etc)
+external_api_cache - Cache de respostas de APIs externas em MariaDB
+ingestion_log - Auditoria de ingestão de dados externos
+Cada release é um registro independente, seguindo a Regra 2: nenhuma versão substitui outra.
 Integração com Fontes Externas
-Fontes Oficiais
-MusicBrainz: Base aberta e confiável de metadados musicais
-Cover Art Archive: Capas oficiais vinculadas ao MusicBrainz
-Discogs: Detalhes completos de formatos físicos e variações
-Regras de Integração
-Respeito aos limites de requisição: 1 req/s no MusicBrainz; 60 req/min no Discogs (autenticado)
-Dados armazenados em cache no MariaDB conforme TTL configurado
-Todas as operações registradas para rastreabilidade
-Configuração Obrigatória no .env
-env
-MUSICBRAINZ_USER_AGENT=MusicGalaxy/1.0 (contato: seu-email@valido.com.br)
+O Music Galaxy integra com APIs externas para buscar metadados musicais:
+Fontes de Dados
+MusicBrainz - Banco de dados aberto de metadados musicais
+Cover Art Archive - Capas oficiais associadas ao MusicBrainz
+Discogs - Catálogo com detalhes de formatos físicos e variações
+Sistema de Ingestão
+POST /api/search/ingest - Busca e ingere dados de fontes externas
+Cache em MariaDB - Reduz chamadas repetidas e respeita limites de taxa
+Rate Limiting - Respeita limites de cada API (1 req/seg MusicBrainz, 60 req/min Discogs)
+Auditoria - Log de todas as operações de ingestão para rastreabilidade
+Configuração
+Adicione ao backend/.env:
+```env
+MUSICBRAINZ_USER_AGENT=MusicGalaxy/1.0 (contato: seu-email@exemplo.com)
 DISCOGS_TOKEN=seu_token_pessoal_discogs
 DISCOGS_USER_AGENT=MusicGalaxy/1.0
 
-⚠️ O User-Agent do MusicBrainz requer e-mail válido — valores genéricos causam bloqueio. O token do Discogs deve ser gerado na sua conta do serviço.
-Fluxo de Busca e Cache
-O usuário envia o termo de busca
-A API consulta primeiro o banco local
-Se não houver dados ou estiverem vencidos:
-Busca nas fontes externas
-Armazena os dados novos no banco e no cache
-Registra a operação no log de auditoria
-Retorna os resultados completos ao aplicativo
-Validação e Testes
-Após implementar as integrações, confirme o funcionamento completo:
-bash
-# 1. Primeira busca — deve popular banco e cache
+```
+Validação da Integração
+TypeScript compilar sem erro não comprova que a lógica funciona. Antes de considerar a integração concluída, rodar e confirmar:
+```bash
+# 1. Busca real de ponta a ponta — deve popular works, releases,
+#    external_api_cache e ingestion_log na primeira chamada.
 curl "http://localhost:3001/api/search?q=One%20More%20Time%20Daft%20Punk"
 
-# 2. Busca repetida — deve retornar do cache
+# 2. Repetir a mesma busca — deve responder do cache/banco local,
+#    sem gerar nova linha em external_api_cache.
 curl "http://localhost:3001/api/search?q=One%20More%20Time%20Daft%20Punk"
 
-# 3. Verificar cache no banco
+# 3. Confirmar no banco que o cache não duplicou:
 mysql -u root -p -P 3307 musicgalaxy -e \
   "SELECT request_key, fetched_at, expires_at FROM external_api_cache;"
 
-# 4. Verificar auditoria
+# 4. Confirmar que a auditoria registrou a operação:
 mysql -u root -p -P 3307 musicgalaxy -e \
   "SELECT metadata_source_id, request_type, status, works_created, releases_created FROM ingestion_log ORDER BY created_at DESC LIMIT 10;"
 
+```
+Configuração não opcional:
+MUSICBRAINZ_USER_AGENT no .env real precisa ter um e-mail de contato válido (nunca o placeholder seu-email@exemplo.com) — o MusicBrainz bloqueia User-Agents genéricos.
+DISCOGS_TOKEN precisa ser um token pessoal real gerado na conta Discogs do projeto; sem ele, o adapter opera no limite de 25 req/min (não autenticado) em vez de 60 req/min, e algumas rotas podem responder 401.
+Desenvolvimento
+Frontend (Mobile)
+```bash
+cd mobile
+npm start          # Inicia o Expo
+npm run android    # Executa no Android
+npm run ios        # Executa no iOS
+npm run web        # Executa no web
+
+```
+Backend (API)
+```bash
+cd backend
+npm run dev        # Inicia servidor de desenvolvimento
+npm run build      # Build para produção
+npm start          # Inicia servidor em produção
+
+```
+Funcionalidades Implementadas
+✅ Banco de Dados
+Schema normalizado com artists, works, releases
+Catálogo completo de release_types (60+ tipos)
+Sistema de metadados com rastreamento de fonte
+Suporte a todas as categorias: release_format, mix_edit, instrumental, playback
+✅ Backend API
+API RESTful com Express e TypeScript
+Conexão com MariaDB (porta 3307)
+Endpoints conforme especificação: /api/search, /api/works, /api/releases
+Implementação das Regras 1 e 2
+Middleware de segurança (Helmet, CORS, Rate Limiting)
+✅ Frontend React Native
+Tela de busca musical com campo de pesquisa
+Cards de release com capa oficial (Regra 1)
+Busca retorna todas as versões (Regra 2)
+Paginação infinita
+Loading states e tratamento de erros
 Próximos Passos
- Finalizar integração com Discogs e MusicBrainz
- Implementar tela de detalhes de obra e lançamento
- Sistema de favoritos e histórico de buscas
- Filtros avançados por formato, país, ano e selo
- Suporte a tema escuro e melhorias de acessibilidade
- Painel administrativo para gestão de cache e sincronização
-Resolução de Problemas
-Tabela
-Problema	Solução
-Falha na conexão com o banco	Verifique se o WampServer está ativo, porta 3307 e credenciais corretas
-Instalação de dependências	Limpe o cache do npm, remova node_modules e instale novamente
-Expo não inicia	Confira porta 19000 livre, use expo start --clear ou ajuste firewall
-APIs externas bloqueiam requisições	Atualize o User-Agent com e-mail válido e verifique o token do Discogs
-Licença e Suporte
-Este projeto é propriedade exclusiva de seus desenvolvedores. Para dúvidas, orientações técnicas ou contribuições, consulte o arquivo AGENTS.md ou entre em contato com a equipe responsável.
+Integração com APIs Externas
+Implementar integração com Discogs API
+Implementar integração com MusicBrainz API
+Sistema de sincronização de dados
+Funcionalidades Adicionais
+Tela de detalhes de obra/release
+Sistema de favoritos
+Histórico de buscas
+Filtros avançados
+Melhorias de UI/UX
+Animações e transições
+Tema escuro
+Acessibilidade
+Troubleshooting
+Erro de conexão com banco de dados
+Verifique se o WampServer64 está rodando
+Verifique se a porta 3307 está configurada em backend/.env
+Certifique-se de que o banco musicgalaxy existe
+Erro ao instalar dependências
+Verifique se o Node.js está instalado
+Limpe o cache: npm cache clean --force
+Delete node_modules e package-lock.json, reinstale
+Expo não inicia
+Verifique se a porta 19000 está disponível
+Tente expo start --clear
+Verifique seu firewall/antivírus
+Licença
+Este projeto é propriedade exclusiva de seus desenvolvedores.
+Suporte
+Para dúvidas ou problemas, consulte a documentação técnica em AGENTS.md.
