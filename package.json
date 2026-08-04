@@ -1,22 +1,21 @@
 {
   "name": "musicgalaxy",
   "version": "1.0.0",
-  "main": "index.ts",
-  "dependencies": {
-    "expo": "~57.0.9",
-    "expo-status-bar": "~57.0.1",
-    "react": "19.2.3",
-    "react-native": "0.86.2"
+  "description": "Music Galaxy - Aplicativo de busca musical com precisão de dados",
+  "private": true,
+  "workspaces": [
+    "mobile",
+    "backend"
+  ],
+  "scripts": {
+    "install:all": "npm install && cd mobile && npm install && cd ../backend && npm install",
+    "dev:mobile": "cd mobile && npm start",
+    "dev:backend": "cd backend && npm run dev",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:mobile\"",
+    "build:mobile": "cd mobile && npm run build",
+    "build:backend": "cd backend && npm run build"
   },
   "devDependencies": {
-    "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
-  },
-  "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
-  },
-  "private": true
+    "concurrently": "^8.2.2"
+  }
 }
