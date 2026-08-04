@@ -20,6 +20,9 @@ export interface Release {
   release_type_category: 'release_format' | 'mix_edit' | 'instrumental' | 'playback';
   metadata_source: string;
   source_reference_url: string | null;
+  // URLs de mídia - null se não disponível (ex: Spotify preview, YouTube Music)
+  audio_preview_url: string | null;
+  download_url: string | null;
   work_title: string;
   artist_name: string;
   artist_country: string | null;

@@ -207,9 +207,7 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
         </Animated.View>
 
         {/* Player de áudio — permite reprodução de preview (se URL disponível) */}
-        {/* Nota: source_reference_url é URL de referência Discogs/MusicBrainz, não de áudio */}
-        {/* Player desabilitado até implementação de integração com serviços de streaming */}
-        {false && release.source_reference_url && (
+        {release.audio_preview_url && (
           <Animated.View
             style={{
               opacity: fadeInAnim,
@@ -217,7 +215,7 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
             }}
           >
             <PlayerControls
-              url={release.source_reference_url}
+              url={release.audio_preview_url}
               titulo={release.version_name}
               artista={release.artist_name}
             />
@@ -225,8 +223,7 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
         )}
 
         {/* Download — permite salvar arquivo localmente (se URL disponível) */}
-        {/* Nota: source_reference_url é URL de referência, não arquivo de áudio */}
-        {false && release.source_reference_url && (
+        {release.download_url && (
           <Animated.View
             style={{
               opacity: fadeInAnim,
@@ -234,7 +231,7 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
             }}
           >
             <DownloadProgress
-              url={release.source_reference_url}
+              url={release.download_url}
               titulo={release.version_name}
               artista={release.artist_name}
             />
@@ -242,22 +239,24 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
         )}
 
         {/* Informação sobre funcionalidade de streaming */}
-        <Animated.View
-          style={{
-            opacity: fadeInAnim,
-            transform: [{ translateY: slideConteudeAnim }],
-          }}
-        >
-          <View style={styles.infoStreaming}>
-            <Text style={styles.infoStreamingIcone}>♪</Text>
-            <Text style={styles.infoStreamingTexto}>
-              Reprodução de áudio e download não estão disponíveis neste momento.
-            </Text>
-            <Text style={styles.infoStreamingSubTexto}>
-              Acesse Discogs ou MusicBrainz para mais informações sobre esta versão.
-            </Text>
-          </View>
-        </Animated.View>
+        {!release.audio_preview_url && !release.download_url && (
+          <Animated.View
+            style={{
+              opacity: fadeInAnim,
+              transform: [{ translateY: slideConteudeAnim }],
+            }}
+          >
+            <View style={styles.infoStreaming}>
+              <Text style={styles.infoStreamingIcone}>♪</Text>
+              <Text style={styles.infoStreamingTexto}>
+                Reprodução de áudio e download não estão disponíveis neste momento.
+              </Text>
+              <Text style={styles.infoStreamingSubTexto}>
+                Acesse Discogs ou MusicBrainz para mais informações sobre esta versão.
+              </Text>
+            </View>
+          </Animated.View>
+        )}
         <Animated.View
           style={{
             opacity: fadeInAnim,
