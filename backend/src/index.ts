@@ -115,8 +115,9 @@ async function iniciar(): Promise<void> {
     // Testa a conexão com o banco antes de aceitar requisições
     await testarConexaoBanco();
 
-    app.listen(PORT, () => {
-      console.log(`[SERVER] Music Galaxy API rodando em http://localhost:${PORT}`);
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`[SERVER] Music Galaxy API rodando em http://0.0.0.0:${PORT}`);
+      console.log(`[SERVER] Acessar de http://localhost:${PORT}, http://127.0.0.1:${PORT} ou http://192.168.0.153:${PORT}`);
       console.log(`[SERVER] Ambiente: ${process.env['NODE_ENV'] || 'development'}`);
       console.log(`[SERVER] Banco: ${process.env['DB_HOST']}:${process.env['DB_PORT']}/${process.env['DB_NAME']}`);
     });
