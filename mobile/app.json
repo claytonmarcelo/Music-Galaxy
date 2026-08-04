@@ -13,9 +13,6 @@
         "backgroundColor": "#E6F4FE"
       },
       "predictiveBackGestureEnabled": false
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
     }
   }
 }
