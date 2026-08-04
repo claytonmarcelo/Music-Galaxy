@@ -258,6 +258,17 @@ npm start          # Inicia servidor em produção
 - Conexão com MariaDB (porta 3307)
 - Endpoints conforme especificação: /api/search, /api/works, /api/releases, /api/artists
 - Implementação das Regras 1 e 2 (capa oficial + busca completa)
+
+### ✅ Fluxo de Player e Download
+- O player e o download usam a URL original da release selecionada pelo usuário
+- Não há áudio sintético, mock ou URL de teste no fluxo de reprodução
+- A seleção de mídia respeita a ordem natural da release: streaming, preview e download quando disponíveis
+- O download mantém o controle de progresso e o caminho local persistido no gerenciador de arquivos do Expo
+
+### ✅ Verificação do Web Expo
+- O bundler web foi validado com exportação estável do Metro
+- O app web responde em `http://localhost:8082` após a correção do entrypoint do workspace
+- A API de busca foi validada diretamente via `curl` com retorno real de resultados de release
 - Middleware de segurança (Helmet, CORS, Rate Limiting)
 - Sistema de ingestão de dados de MusicBrainz e Discogs
 - Cache em MariaDB com TTL
