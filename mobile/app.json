@@ -39,7 +39,7 @@
       "favicon": "./assets/icon.png"
     },
     "newArchEnabled": false,
-    "sdkVersion": "57.0.0"
+    "sdkVersion": "~57.0.10"
   }
 }
 
