@@ -9,6 +9,7 @@ import { detalharWork, listarReleasesDeWork, listarWorksPorDecada } from '../con
 import { detalharRelease, listarReleasesPorData } from '../controllers/releasesController';
 import { listarReleaseTypes } from '../controllers/releaseTypesController';
 import { detalharArtista, listarObrasArtista } from '../controllers/artistsController';
+import { streamAudio, downloadAudio } from '../controllers/audioController';
 
 const router = Router();
 
@@ -112,6 +113,26 @@ router.get(
   validarParamId,
   validarPaginacao,
   asyncHandler(listarObrasArtista)
+);
+
+// ============================================================
+// Áudio (Streaming e Download completo via YouTube)
+// ============================================================
+
+// GET /api/releases/:id/stream
+// Faz pipe do áudio completo do YouTube diretamente ao player do app
+router.get(
+  '/releases/:id/stream',
+  validarParamId,
+  asyncHandler(streamAudio)
+);
+
+// GET /api/releases/:id/download
+// Entrega o áudio completo como arquivo .mp3 para download
+router.get(
+  '/releases/:id/download',
+  validarParamId,
+  asyncHandler(downloadAudio)
 );
 
 export default router;

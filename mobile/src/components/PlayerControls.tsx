@@ -12,7 +12,7 @@ import {
   Platform,
   Animated,
 } from 'react-native';
-import Slider from '@react-native-community/slider';
+import SliderModule from '@react-native-community/slider';
 import { playerAudio, EstadoPlayer } from '../services/playerAudio';
 import { useModal } from '../contexts/ModalContext';
 import { TIMINGS, EASING } from '../utils/animacoes';
@@ -22,6 +22,8 @@ interface Props {
   titulo: string;
   artista: string;
 }
+
+const Slider = SliderModule as unknown as React.ComponentType<any>;
 
 export default function PlayerControls({ url, titulo, artista }: Props): React.JSX.Element {
   const [estado, setEstado] = useState<EstadoPlayer>(playerAudio.obterEstado());
@@ -81,6 +83,13 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
 
   const handlePlayPause = async () => {
     try {
+      if (!url) {
+        const mensagem = 'Nenhuma URL de áudio original disponível para esta release.';
+        setErro(mensagem);
+        toastErro(mensagem);
+        return;
+      }
+
       // Anima botão ao clicar
       Animated.sequence([
         Animated.spring(playButtonScaleAnim, {
@@ -105,7 +114,6 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
         await playerAudio.retomar();
         toastInfo('Reprodução retomada');
       } else {
-        // Começa do zero
         await playerAudio.tocar(url);
         toastInfo('Reproduzindo...');
       }

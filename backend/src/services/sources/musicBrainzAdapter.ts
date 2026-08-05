@@ -96,6 +96,9 @@ export class MusicBrainzAdapter implements AdapterFonteExterna {
         source_reference_url: `https://musicbrainz.org/release/${release.id}`,
         external_id: release.id,
         metadata_source_name: this.nomeFonte,
+        audio_preview_url: null,
+        streaming_url: null,
+        download_url: null,
       });
     }
 
@@ -117,6 +120,9 @@ export class MusicBrainzAdapter implements AdapterFonteExterna {
         source_reference_url: `https://musicbrainz.org/recording/${recording.id}`,
         external_id: recording.id,
         metadata_source_name: this.nomeFonte,
+        audio_preview_url: null,
+        streaming_url: null,
+        download_url: null,
       });
     }
 

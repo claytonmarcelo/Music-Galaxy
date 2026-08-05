@@ -1,430 +1,247 @@
-// Tela de Configurações.
-// Gerencia tema, idioma, notificações e informações sobre o app.
+// Tela de Configurações
+// Permite mudar o tema, gerenciar downloads e outras configurações
 
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
+  ScrollView,
   TouchableOpacity,
   Switch,
-  Alert,
-  Linking,
 } from 'react-native';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTheme } from '../contexts/ThemeContext';
+import { MusicEmojis } from '../components/AnimatedIcon';
+import { downloadManager } from '../services/downloadManager';
+import CustomButton from '../components/CustomButton';
 
-import { RootStackParamList } from '../types';
-import { useTema } from '../contexts/TemaContext';
+export default function SettingsScreen(): React.JSX.Element {
+  const { theme, isDark, colors, setTheme, toggleTheme } = useTheme();
+  const [stats, setStats] = React.useState({
+    total: 0,
+    pending: 0,
+    downloading: 0,
+    completed: 0,
+    error: 0,
+    totalSize: 0,
+  });
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
+  useEffect(() => {
+    downloadManager.initialize();
+    loadStats();
+  }, []);
 
-const VERSAO_APP = '1.0.0';
-const DATA_VERSAO = 'Agosto 2026';
-
-export default function SettingsScreen({ navigation }: Props): React.JSX.Element {
-  const { tema, alternarTema } = useTema();
-  const [notificacoesAtivas, setNotificacoesAtivas] = useState(true);
-  const [idiomaSelecionado, setIdiomaSelecionado] = useState('pt-BR');
-
-  // Alterna notificações
-  const handleAlternarNotificacoes = (): void => {
-    setNotificacoesAtivas(!notificacoesAtivas);
-    Alert.alert(
-      'Notificações',
-      notificacoesAtivas
-        ? 'Notificações desativadas'
-        : 'Notificações ativadas'
-    );
+  const loadStats = () => {
+    const currentStats = downloadManager.getStats();
+    setStats(currentStats);
   };
 
-  // Alterna tema
-  const handleAlternarTema = async (): Promise<void> => {
-    await alternarTema();
+  const handleThemeChange = (newTheme: 'light' | 'dark' | 'auto') => {
+    setTheme(newTheme);
   };
 
-  // Muda idioma
-  const handleMudarIdioma = (novoIdioma: string): void => {
-    setIdiomaSelecionado(novoIdioma);
-    Alert.alert('Idioma', `Idioma alterado para ${novoIdioma === 'pt-BR' ? 'Português' : 'English'}`);
+  const clearCompleted = async () => {
+    await downloadManager.clearCompleted();
+    loadStats();
   };
 
-  // Abre link externo
-  const handleAbrirLink = async (url: string): Promise<void> => {
-    try {
-      const pode = await Linking.canOpenURL(url);
-      if (pode) {
-        await Linking.openURL(url);
-      } else {
-        Alert.alert('Erro', 'Não foi possível abrir este link');
-      }
-    } catch (err) {
-      Alert.alert('Erro', 'Erro ao abrir link');
-    }
+  const clearErrors = async () => {
+    await downloadManager.clearErrors();
+    loadStats();
   };
-
-  // Renderiza item de configuração com switch
-  const renderConfigSwitch = (
-    label: string,
-    valor: boolean,
-    onToggle: () => void,
-    descricao?: string
-  ): React.JSX.Element => (
-    <View style={styles.itemConfig}>
-      <View style={styles.conteudoItem}>
-        <Text style={styles.labelConfig}>{label}</Text>
-        {descricao && (
-          <Text style={styles.descricaoConfig}>{descricao}</Text>
-        )}
-      </View>
-      <Switch
-        value={valor}
-        onValueChange={onToggle}
-        trackColor={{ false: '#2E2E4E', true: '#FF6B35' }}
-        thumbColor={valor ? '#FFFFFF' : '#AAAAAA'}
-      />
-    </View>
-  );
-
-  // Renderiza item de configuração com selector
-  const renderConfigSelector = (
-    label: string,
-    opcoes: Array<{ label: string; valor: string }>,
-    valorAtual: string,
-    onSelecionar: (valor: string) => void,
-    descricao?: string
-  ): React.JSX.Element => (
-    <View style={styles.secaoConfig}>
-      <Text style={styles.labelConfig}>{label}</Text>
-      {descricao && (
-        <Text style={styles.descricaoConfig}>{descricao}</Text>
-      )}
-      <View style={styles.selectorOpcoes}>
-        {opcoes.map(opcao => (
-          <TouchableOpacity
-            key={opcao.valor}
-            style={[
-              styles.opcao,
-              valorAtual === opcao.valor && styles.opcaoSelecionada,
-            ]}
-            onPress={() => onSelecionar(opcao.valor)}
-          >
-            <Text
-              style={[
-                styles.textoOpcao,
-                valorAtual === opcao.valor && styles.textoOpcaoSelecionada,
-              ]}
-            >
-              {opcao.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-    </View>
-  );
-
-  // Renderiza item de link
-  const renderLinkItem = (
-    titulo: string,
-    descricao: string,
-    url: string
-  ): React.JSX.Element => (
-    <TouchableOpacity
-      style={styles.itemConfig}
-      onPress={() => handleAbrirLink(url)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.conteudoItem}>
-        <Text style={styles.labelConfig}>{titulo}</Text>
-        <Text style={styles.descricaoConfig}>{descricao}</Text>
-      </View>
-      <Text style={styles.seta}>→</Text>
-    </TouchableOpacity>
-  );
 
   return (
-    <View style={styles.container}>
-      {/* Cabeçalho */}
-      <View style={styles.headerBox}>
-        <TouchableOpacity
-          style={styles.botaoVoltar}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.textoVoltar}>← Voltar</Text>
-        </TouchableOpacity>
-        <Text style={styles.tituloHeader}>Configurações</Text>
-      </View>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <ScrollView style={styles.scrollView}>
+        {/* Seção de Tema */}
+        <View style={[styles.section, { backgroundColor: colors.card }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            {MusicEmojis.settings} Aparência
+          </Text>
 
-      {/* Conteúdo */}
-      <ScrollView style={styles.conteudo}>
-        {/* Seção: Tema */}
-        <View style={styles.secao}>
-          <Text style={styles.tituloSecao}>🎨 Aparência</Text>
-          {renderConfigSelector(
-            'Tema',
-            [
-              { label: '🌙 Escuro', valor: 'dark' },
-              { label: '☀️ Claro', valor: 'light' },
-            ],
-            tema,
-            async (valor) => {
-              if (valor !== tema) {
-                await alternarTema();
-              }
-            },
-            'Escolha entre tema claro e escuro'
-          )}
-        </View>
+          <View style={styles.option}>
+            <Text style={[styles.optionLabel, { color: colors.text }]}>Tema</Text>
+            <View style={styles.themeButtons}>
+              <TouchableOpacity
+                style={[
+                  styles.themeButton,
+                  theme === 'light' && { backgroundColor: colors.button },
+                ]}
+                onPress={() => handleThemeChange('light')}
+              >
+                <Text style={[
+                  styles.themeButtonText,
+                  { color: theme === 'light' ? colors.buttonText : colors.text }
+                ]}>
+                  {MusicEmojis.sun} Claro
+                </Text>
+              </TouchableOpacity>
 
-        {/* Seção: Idioma */}
-        <View style={styles.secao}>
-          <Text style={styles.tituloSecao}>🌐 Idioma</Text>
-          {renderConfigSelector(
-            'Idioma do App',
-            [
-              { label: '🇧🇷 Português (BR)', valor: 'pt-BR' },
-              { label: '🇺🇸 English (US)', valor: 'en-US' },
-            ],
-            idiomaSelecionado,
-            handleMudarIdioma,
-            'Selecione o idioma do aplicativo'
-          )}
-        </View>
+              <TouchableOpacity
+                style={[
+                  styles.themeButton,
+                  theme === 'dark' && { backgroundColor: colors.button },
+                ]}
+                onPress={() => handleThemeChange('dark')}
+              >
+                <Text style={[
+                  styles.themeButtonText,
+                  { color: theme === 'dark' ? colors.buttonText : colors.text }
+                ]}>
+                  {MusicEmojis.moon} Escuro
+                </Text>
+              </TouchableOpacity>
 
-        {/* Seção: Notificações */}
-        <View style={styles.secao}>
-          <Text style={styles.tituloSecao}>🔔 Notificações</Text>
-          {renderConfigSwitch(
-            'Ativar Notificações',
-            notificacoesAtivas,
-            handleAlternarNotificacoes,
-            'Receba atualizações sobre novas versões'
-          )}
-        </View>
-
-        {/* Seção: Sobre */}
-        <View style={styles.secao}>
-          <Text style={styles.tituloSecao}>ℹ️ Sobre</Text>
-
-          <View style={styles.itemInfo}>
-            <Text style={styles.labelInfo}>Music Galaxy</Text>
-            <Text style={styles.valorInfo}>v{VERSAO_APP} ({DATA_VERSAO})</Text>
+              <TouchableOpacity
+                style={[
+                  styles.themeButton,
+                  theme === 'auto' && { backgroundColor: colors.button },
+                ]}
+                onPress={() => handleThemeChange('auto')}
+              >
+                <Text style={[
+                  styles.themeButtonText,
+                  { color: theme === 'auto' ? colors.buttonText : colors.text }
+                ]}>
+                  {MusicEmojis.auto} Auto
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
-          <View style={styles.itemInfo}>
-            <Text style={styles.labelInfo}>Stack Tecnológica</Text>
-            <Text style={styles.valorInfo}>React Native + TypeScript + Node.js</Text>
-          </View>
-
-          <View style={styles.itemInfo}>
-            <Text style={styles.labelInfo}>Banco de Dados</Text>
-            <Text style={styles.valorInfo}>MariaDB (Porta 3307)</Text>
-          </View>
-
-          <View style={styles.itemInfo}>
-            <Text style={styles.labelInfo}>Fontes de Dados</Text>
-            <Text style={styles.valorInfo}>MusicBrainz • Discogs • Cover Art Archive</Text>
+          <View style={styles.option}>
+            <Text style={[styles.optionLabel, { color: colors.text }]}>Tema atual</Text>
+            <Text style={[styles.optionValue, { color: colors.textSecondary }]}>
+              {theme === 'auto' ? (isDark ? 'Escuro (sistema)' : 'Claro (sistema)') : (theme === 'dark' ? 'Escuro' : 'Claro')}
+            </Text>
           </View>
         </View>
 
-        {/* Seção: Links Úteis */}
-        <View style={styles.secao}>
-          <Text style={styles.tituloSecao}>🔗 Links Úteis</Text>
+        {/* Seção de Downloads */}
+        <View style={[styles.section, { backgroundColor: colors.card }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            {MusicEmojis.download} Downloads
+          </Text>
 
-          {renderLinkItem(
-            'MusicBrainz',
-            'Banco de dados aberto de metadados musicais',
-            'https://musicbrainz.org'
-          )}
-
-          {renderLinkItem(
-            'Discogs',
-            'Catálogo de música e formatos físicos',
-            'https://www.discogs.com'
-          )}
-
-          {renderLinkItem(
-            'Cover Art Archive',
-            'Capas oficiais de lançamentos musicais',
-            'https://coverartarchive.org'
-          )}
-        </View>
-
-        {/* Seção: Desenvolvedor */}
-        <View style={styles.secao}>
-          <Text style={styles.tituloSecao}>👨‍💻 Desenvolvedor</Text>
-
-          <View style={styles.itemInfo}>
-            <Text style={styles.labelInfo}>Desenvolvido com ❤️</Text>
-            <Text style={styles.valorInfo}>Music Galaxy Project 2026</Text>
+          <View style={styles.statsContainer}>
+            <View style={styles.statItem}>
+              <Text style={[styles.statValue, { color: colors.button }]}>{stats.total}</Text>
+              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Total</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={[styles.statValue, { color: colors.success }]}>{stats.completed}</Text>
+              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Concluídos</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={[styles.statValue, { color: colors.warning }]}>{stats.pending}</Text>
+              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Pendentes</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={[styles.statValue, { color: colors.error }]}>{stats.error}</Text>
+              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Erros</Text>
+            </View>
           </View>
 
-          <View style={styles.itemInfo}>
-            <Text style={styles.labelInfo}>Licença</Text>
-            <Text style={styles.valorInfo}>Propriedade Exclusiva</Text>
-          </View>
+          <CustomButton
+            title="Limpar Concluídos"
+            onPress={clearCompleted}
+            variant="outline"
+            size="small"
+            icon={MusicEmojis.success}
+          />
+
+          <CustomButton
+            title="Limpar Erros"
+            onPress={clearErrors}
+            variant="outline"
+            size="small"
+            icon={MusicEmojis.error}
+          />
         </View>
 
-        {/* Espaço extra */}
-        <View style={{ height: 40 }} />
+        {/* Seção de Informações */}
+        <View style={[styles.section, { backgroundColor: colors.card }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            {MusicEmojis.info} Sobre
+          </Text>
+
+          <View style={styles.option}>
+            <Text style={[styles.optionLabel, { color: colors.text }]}>Versão</Text>
+            <Text style={[styles.optionValue, { color: colors.textSecondary }]}>1.0.0</Text>
+          </View>
+
+          <View style={styles.option}>
+            <Text style={[styles.optionLabel, { color: colors.text }]}>Nome</Text>
+            <Text style={[styles.optionValue, { color: colors.textSecondary }]}>Music Galaxy</Text>
+          </View>
+        </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
-
-// ============================================================
-// Estilos
-// ============================================================
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F1A',
   },
-
-  headerBox: {
+  scrollView: {
+    flex: 1,
+  },
+  section: {
+    margin: 16,
+    borderRadius: 12,
+    padding: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  option: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1A1A2E',
     borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
+    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
   },
-
-  botaoVoltar: {
-    padding: 8,
+  optionLabel: {
+    fontSize: 16,
+    fontWeight: '500',
   },
-
-  textoVoltar: {
-    color: '#FF6B35',
+  optionValue: {
     fontSize: 14,
-    fontWeight: 'bold',
   },
-
-  tituloHeader: {
-    flex: 1,
-    textAlign: 'center',
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginRight: 40,
-  },
-
-  conteudo: {
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingTop: 16,
-  },
-
-  secao: {
-    marginBottom: 24,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
-  },
-
-  tituloSecao: {
-    color: '#FF6B35',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-
-  itemConfig: {
-    backgroundColor: '#1A1A2E',
-    borderRadius: 8,
-    marginBottom: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+  themeButtons: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 8,
   },
-
-  conteudoItem: {
-    flex: 1,
+  themeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.2)',
   },
-
-  labelConfig: {
-    color: '#FFFFFF',
-    fontSize: 15,
+  themeButtonText: {
+    fontSize: 12,
     fontWeight: '600',
-    marginBottom: 4,
   },
-
-  descricaoConfig: {
-    color: '#AAAAAA',
-    fontSize: 12,
-  },
-
-  secaoConfig: {
-    backgroundColor: '#1A1A2E',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-  },
-
-  selectorOpcoes: {
+  statsContainer: {
     flexDirection: 'row',
-    marginTop: 12,
-    justifyContent: 'space-between',
+    justifyContent: 'space-around',
+    marginBottom: 16,
   },
-
-  opcao: {
-    flex: 1,
-    backgroundColor: '#0F0F1A',
-    borderRadius: 6,
-    paddingVertical: 10,
-    marginHorizontal: 4,
-    justifyContent: 'center',
+  statItem: {
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#2E2E4E',
   },
-
-  opcaoSelecionada: {
-    backgroundColor: '#FF6B35',
-    borderColor: '#FF6B35',
+  statValue: {
+    fontSize: 24,
+    fontWeight: '700',
   },
-
-  textoOpcao: {
-    color: '#AAAAAA',
+  statLabel: {
     fontSize: 12,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-
-  textoOpcaoSelecionada: {
-    color: '#FFFFFF',
-  },
-
-  itemInfo: {
-    backgroundColor: '#1A1A2E',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-  },
-
-  labelInfo: {
-    color: '#FF6B35',
-    fontSize: 13,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-
-  valorInfo: {
-    color: '#AAAAAA',
-    fontSize: 13,
-    lineHeight: 18,
-  },
-
-  seta: {
-    color: '#FF6B35',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 8,
+    marginTop: 4,
   },
 });

@@ -1,281 +1,400 @@
-// Serviço de gerenciamento de downloads de músicas.
-// Usa expo-file-system para baixar e armazenar arquivos localmente.
-// Rastreia progresso, erros e arquivo armazenados.
-// Em Web, funciona de forma simulada/desabilitada.
+// Gerenciador de Downloads com Persistência.
+// Mantém a fila, o estado de progresso e o estado público
+// compatível com os componentes de UI do projeto.
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
-import { Platform } from 'react-native';
+import { Release } from '../types';
 
-export interface EstadoDownload {
+export interface DownloadItem {
+  id: string;
+  release: Release;
   url: string;
-  nomeArquivo: string;
-  progresso: number; // 0-1
-  baixando: boolean;
-  concluido: boolean;
-  tamanhoTotal: number;
-  tamanhoAtual: number;
-  erro: string | null;
-  caminhoLocal: string | null;
+  status: 'pending' | 'downloading' | 'completed' | 'error';
+  progress: number;
+  filePath: string | null;
+  fileSize: number;
+  error: string | null;
+  createdAt: number;
+  completedAt: number | null;
 }
 
-interface ListenerDownload {
-  (estado: EstadoDownload): void;
+export interface EstadoDownload {
+  baixando: boolean;
+  concluido: boolean;
+  erro: string | null;
+  progresso: number;
+  caminhoLocal: string | null;
+  tamanhoAtual: number;
+  tamanhoTotal: number;
 }
 
 class DownloadManager {
-  private downloads: Map<string, EstadoDownload> = new Map();
-  private listeners: Map<string, ListenerDownload[]> = new Map();
-  private diretorioMusicas: string = '';
-  private emWeb: boolean = Platform.OS === 'web';
+  private downloads: Map<string, DownloadItem> = new Map();
+  private queue: string[] = [];
+  private isProcessing = false;
+  private maxConcurrent = 1;
+  private currentDownloads = 0;
+  private estadosByUrl: Map<string, EstadoDownload> = new Map();
+  private listeners: Map<string, Array<(estado: EstadoDownload) => void>> = new Map();
+  private downloadResumables: Map<string, any> = new Map();
 
-  constructor() {
-    // Em Web, não usar FileSystem
-    if (!this.emWeb) {
-      this.diretorioMusicas = (FileSystem.documentDirectory || '') + 'music_galaxy/';
-      this.garantirDiretorio();
-    }
+  // Inicializar gerenciador.
+  async initialize(): Promise<void> {
+    await this.loadFromStorage();
   }
 
-  // Garante que o diretório de armazenamento existe (apenas em mobile)
-  private async garantirDiretorio(): Promise<void> {
-    if (this.emWeb) return; // Pular em Web
-
+  // Carregar downloads persistidos em storage.
+  private async loadFromStorage(): Promise<void> {
     try {
-      const info = await FileSystem.getInfoAsync(this.diretorioMusicas);
-      if (!info.exists) {
-        await FileSystem.makeDirectoryAsync(this.diretorioMusicas, { intermediates: true });
+      const data = await AsyncStorage.getItem('@musicgalaxy:downloads');
+      if (data) {
+        const parsed = JSON.parse(data) as DownloadItem[];
+        this.downloads = new Map(parsed.map((item) => [item.id, item]));
+        this.queue = parsed
+          .filter((item) => item.status === 'pending')
+          .map((item) => item.id);
       }
-    } catch (err) {
-      console.error('Erro ao criar diretório:', err);
+    } catch (error) {
+      console.error('Erro ao carregar downloads:', error);
     }
   }
 
-  // Gera nome de arquivo a partir da URL
-  private gerarNomeArquivo(url: string, titulo: string): string {
-    // Remove caracteres inválidos do título
-    const tituloLimpo = titulo
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '_')
-      .replace(/_+/g, '_')
-      .slice(0, 30);
-
-    const extensao = url.endsWith('.mp3') ? '.mp3' : '.m4a';
-    const timestamp = Date.now();
-
-    return `${tituloLimpo}_${timestamp}${extensao}`;
+  // Salvar downloads no AsyncStorage.
+  private async saveToStorage(): Promise<void> {
+    try {
+      const data = Array.from(this.downloads.values());
+      await AsyncStorage.setItem('@musicgalaxy:downloads', JSON.stringify(data));
+    } catch (error) {
+      console.error('Erro ao salvar downloads:', error);
+    }
   }
 
-  // Inscreve listener para mudanças de progresso
-  subscribe(url: string, callback: ListenerDownload): () => void {
-    if (!this.listeners.has(url)) {
-      this.listeners.set(url, []);
-    }
-    this.listeners.get(url)!.push(callback);
+  // Requisita o estado público de um download por URL.
+  obterEstado(url: string): EstadoDownload | null {
+    const estado = this.estadosByUrl.get(url);
+    return estado ? { ...estado } : null;
+  }
 
-    // Retorna função para desinscrever
+  // Acompanha mudanças de progresso por URL.
+  subscribe(url: string, callback: (estado: EstadoDownload) => void): () => void {
+    const lista = this.listeners.get(url) ?? [];
+    lista.push(callback);
+    this.listeners.set(url, lista);
+
     return () => {
-      const listeners = this.listeners.get(url);
-      if (listeners) {
-        this.listeners.set(
-          url,
-          listeners.filter(l => l !== callback)
-        );
+      const atual = this.listeners.get(url) ?? [];
+      const filtrada = atual.filter((item) => item !== callback);
+      if (filtrada.length > 0) {
+        this.listeners.set(url, filtrada);
+      } else {
+        this.listeners.delete(url);
       }
     };
   }
 
-  // Notifica todos os listeners de uma URL
-  private notificarListeners(url: string): void {
-    const estado = this.downloads.get(url);
-    if (estado) {
-      const listeners = this.listeners.get(url) || [];
-      listeners.forEach(listener => listener(estado));
-    }
+  private notificar(url: string, estado: EstadoDownload): void {
+    const lista = this.listeners.get(url) ?? [];
+    lista.forEach((callback) => callback({ ...estado }));
   }
 
-  // Inicia um download
-  async baixar(url: string, titulo: string): Promise<string> {
-    // Em Web, simular sucesso (não baixar de verdade)
-    if (this.emWeb) {
-      console.warn('Downloads desabilitados em Web (expo-file-system não disponível)');
-      
-      const nomeArquivo = this.gerarNomeArquivo(url, titulo);
-      const estado: EstadoDownload = {
-        url,
-        nomeArquivo,
-        progresso: 1,
-        baixando: false,
-        concluido: true,
-        tamanhoTotal: 0,
-        tamanhoAtual: 0,
-        erro: null,
-        caminhoLocal: `web://${nomeArquivo}`,
-      };
-      
-      this.downloads.set(url, estado);
-      this.notificarListeners(url);
-      
-      return `web://${nomeArquivo}`;
+  private criarEstadoPadrao(url: string): EstadoDownload {
+    return {
+      baixando: false,
+      concluido: false,
+      erro: null,
+      progresso: 0,
+      caminhoLocal: null,
+      tamanhoAtual: 0,
+      tamanhoTotal: 0,
+    };
+  }
+
+  // Adiciona um download usando a release original do usuário.
+  async addDownload(release: Release): Promise<string> {
+    if (!release.download_url) {
+      throw new Error('URL de download não disponível');
     }
+
+    return this.baixar(release.download_url, release.version_name);
+  }
+
+  // Compatibilidade com o componente de UI antigo.
+  async baixar(url: string, titulo: string): Promise<string> {
+    if (!url) {
+      throw new Error('URL de download não disponível');
+    }
+
+    const estadoAnterior = this.obterEstado(url);
+    if (estadoAnterior?.concluido && estadoAnterior.caminhoLocal) {
+      return estadoAnterior.caminhoLocal;
+    }
+
+    const estado = this.criarEstadoPadrao(url);
+    estado.baixando = true;
+    this.estadosByUrl.set(url, estado);
+    this.notificar(url, estado);
+
+    const fileName = `${titulo || 'download'}.mp3`;
+    const cacheDirectory = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? '';
+    const fileUri = `${cacheDirectory}${fileName}`;
 
     try {
-      // Se já está baixando, retorna o mesmo
-      if (this.downloads.has(url) && this.downloads.get(url)!.baixando) {
-        throw new Error('Este arquivo já está sendo baixado');
-      }
-
-      // Se já foi baixado, retorna o caminho
-      if (this.downloads.has(url) && this.downloads.get(url)!.concluido) {
-        const caminhoLocal = this.downloads.get(url)!.caminhoLocal;
-        if (caminhoLocal) return caminhoLocal;
-      }
-
-      const nomeArquivo = this.gerarNomeArquivo(url, titulo);
-      const caminhoLocal = this.diretorioMusicas + nomeArquivo;
-
-      // Inicializa estado
-      const estado: EstadoDownload = {
+      const resumable = FileSystem.createDownloadResumable(
         url,
-        nomeArquivo,
-        progresso: 0,
-        baixando: true,
-        concluido: false,
-        tamanhoTotal: 0,
-        tamanhoAtual: 0,
-        erro: null,
-        caminhoLocal,
-      };
+        fileUri,
+        {},
+        (downloadProgress) => {
+          const total = downloadProgress.totalBytesExpectedToWrite || downloadProgress.totalBytesWritten || 0;
+          const progresso = total > 0
+            ? downloadProgress.totalBytesWritten / total
+            : 0;
 
-      this.downloads.set(url, estado);
-      this.notificarListeners(url);
-
-      // Nota: expo-file-system não suporta callbacks de progresso
-      // Baixamos sem rastreamento de progresso por enquanto
-      const resultado = await FileSystem.downloadAsync(url, caminhoLocal);
-
-      if (resultado.status === 200) {
-        estado.baixando = false;
-        estado.concluido = true;
-        estado.progresso = 1;
-        estado.erro = null;
-        this.notificarListeners(url);
-        return caminhoLocal;
-      } else {
-        throw new Error(`Erro de download: status ${resultado.status}`);
-      }
-    } catch (err) {
-      const mensagem = err instanceof Error ? err.message : 'Erro desconhecido';
-      const estado = this.downloads.get(url);
-      
-      if (estado) {
-        estado.baixando = false;
-        estado.concluido = false;
-        estado.erro = mensagem;
-        this.notificarListeners(url);
-      }
-
-      throw new Error(`Erro ao baixar: ${mensagem}`);
-    }
-  }
-
-  // Cancela um download em progresso
-  async cancelar(url: string): Promise<void> {
-    const estado = this.downloads.get(url);
-    
-    if (estado && estado.baixando) {
-      if (this.emWeb) {
-        // Em Web, apenas marcar como cancelado
-        estado.baixando = false;
-        estado.erro = 'Download cancelado pelo usuário';
-        this.notificarListeners(url);
-      } else if (estado.caminhoLocal) {
-        try {
-          // Tenta deletar arquivo parcial
-          await FileSystem.deleteAsync(estado.caminhoLocal, { idempotent: true });
-          estado.baixando = false;
-          estado.progresso = 0;
-          estado.erro = 'Download cancelado pelo usuário';
-          this.notificarListeners(url);
-        } catch (err) {
-          console.error('Erro ao cancelar download:', err);
+          const estadoAtual = this.estadosByUrl.get(url) ?? this.criarEstadoPadrao(url);
+          estadoAtual.baixando = true;
+          estadoAtual.progresso = progresso;
+          estadoAtual.tamanhoAtual = downloadProgress.totalBytesWritten;
+          estadoAtual.tamanhoTotal = total;
+          estadoAtual.erro = null;
+          this.estadosByUrl.set(url, estadoAtual);
+          this.notificar(url, estadoAtual);
         }
+      );
+
+      this.downloadResumables.set(url, resumable);
+      const result = await resumable.downloadAsync();
+
+      const estadoFinal = this.estadosByUrl.get(url) ?? this.criarEstadoPadrao(url);
+      estadoFinal.baixando = false;
+      estadoFinal.concluido = true;
+      estadoFinal.progresso = 1;
+      const caminhoLocal = result?.uri ?? fileUri;
+      estadoFinal.caminhoLocal = caminhoLocal;
+      estadoFinal.tamanhoAtual = estadoFinal.tamanhoTotal || 0;
+      estadoFinal.erro = null;
+      this.estadosByUrl.set(url, estadoFinal);
+      this.notificar(url, estadoFinal);
+
+      if (!caminhoLocal) {
+        throw new Error('Download concluído, mas o arquivo local não foi persistido.');
       }
+
+      return caminhoLocal;
+    } catch (error) {
+      const mensagem = error instanceof Error ? error.message : 'Erro desconhecido';
+      const estadoErro = this.estadosByUrl.get(url) ?? this.criarEstadoPadrao(url);
+      estadoErro.baixando = false;
+      estadoErro.concluido = false;
+      estadoErro.erro = mensagem;
+      this.estadosByUrl.set(url, estadoErro);
+      this.notificar(url, estadoErro);
+      throw error;
+    } finally {
+      this.downloadResumables.delete(url);
     }
   }
 
-  // Retorna estado atual de um download
-  obterEstado(url: string): EstadoDownload | null {
-    return this.downloads.get(url) || null;
+  // Cancelar download em andamento.
+  async cancelar(url: string): Promise<void> {
+    const estado = this.estadosByUrl.get(url);
+    if (!estado || !estado.baixando) {
+      return;
+    }
+
+    const resumable = this.downloadResumables.get(url);
+    if (resumable && typeof resumable.pauseAsync === 'function') {
+      await resumable.pauseAsync();
+    }
+
+    estado.baixando = false;
+    estado.concluido = false;
+    estado.erro = 'Download cancelado';
+    this.estadosByUrl.set(url, estado);
+    this.notificar(url, estado);
   }
 
-  // Lista todos os downloads
-  listarDownloads(): EstadoDownload[] {
-    return Array.from(this.downloads.values());
-  }
-
-  // Deleta um arquivo baixado
+  // Remove um arquivo local já baixado.
   async deletar(url: string): Promise<void> {
-    const estado = this.downloads.get(url);
-    
-    if (estado && estado.caminhoLocal && !estado.caminhoLocal.startsWith('web://')) {
+    const estado = this.estadosByUrl.get(url);
+    if (estado?.caminhoLocal) {
       try {
         await FileSystem.deleteAsync(estado.caminhoLocal, { idempotent: true });
-        this.downloads.delete(url);
-        this.listeners.delete(url);
-      } catch (err) {
-        console.error('Erro ao deletar arquivo:', err);
+      } catch (error) {
+        console.error('Erro ao deletar arquivo local:', error);
       }
-    } else if (estado && estado.caminhoLocal?.startsWith('web://')) {
-      // Em Web, apenas remover do mapa
-      this.downloads.delete(url);
-      this.listeners.delete(url);
     }
+
+    this.estadosByUrl.delete(url);
+    this.listeners.delete(url);
+    this.downloadResumables.delete(url);
   }
 
-  // Verifica se um arquivo já foi baixado
-  jaFoiBaixado(url: string): boolean {
-    const estado = this.downloads.get(url);
-    return !!(estado && estado.concluido && estado.caminhoLocal);
+  // Processar fila de downloads.
+  private async processQueue(): Promise<void> {
+    if (this.isProcessing || this.currentDownloads >= this.maxConcurrent) {
+      return;
+    }
+
+    this.isProcessing = true;
+
+    while (this.queue.length > 0 && this.currentDownloads < this.maxConcurrent) {
+      const id = this.queue.shift();
+      if (id) {
+        this.currentDownloads++;
+        this.processDownload(id).finally(() => {
+          this.currentDownloads--;
+        });
+      }
+    }
+
+    this.isProcessing = false;
   }
 
-  // Retorna o caminho local do arquivo baixado
-  obterCaminhoLocal(url: string): string | null {
-    const estado = this.downloads.get(url);
-    return (estado && estado.concluido && estado.caminhoLocal) ? estado.caminhoLocal : null;
-  }
-
-  // Limpa todos os downloads antigos (se necessário)
-  async limparAntigos(diasRetencao: number = 30): Promise<void> {
-    if (this.emWeb) return; // Pular em Web
+  // Processar download individual.
+  private async processDownload(id: string): Promise<void> {
+    const downloadItem = this.downloads.get(id);
+    if (!downloadItem) return;
 
     try {
-      const info = await FileSystem.getInfoAsync(this.diretorioMusicas);
-      if (!info.exists) return;
+      downloadItem.status = 'downloading';
+      await this.saveToStorage();
 
-      const arquivos = await FileSystem.readDirectoryAsync(this.diretorioMusicas);
-      const agora = Date.now();
-      const diasMs = diasRetencao * 24 * 60 * 60 * 1000;
+      const fileName = `${downloadItem.release.artist_name} - ${downloadItem.release.work_title} - ${downloadItem.release.version_name}.mp3`;
+      const cacheDirectory = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? '';
+      const fileUri = `${cacheDirectory}${fileName}`;
+      const resumable = FileSystem.createDownloadResumable(
+        downloadItem.url,
+        fileUri,
+        {},
+        (downloadProgress) => {
+          const total = downloadProgress.totalBytesExpectedToWrite || downloadProgress.totalBytesWritten || 0;
+          const progresso = total > 0 ? downloadProgress.totalBytesWritten / total : 0;
+          downloadItem.progress = progresso * 100;
+          downloadItem.fileSize = total;
+          this.saveToStorage();
+        }
+      );
 
-      for (const arquivo of arquivos) {
+      const result = await resumable.downloadAsync();
+
+      downloadItem.status = 'completed';
+      downloadItem.filePath = result?.uri || fileUri;
+      downloadItem.progress = 100;
+      downloadItem.completedAt = Date.now();
+      downloadItem.error = null;
+    } catch (error) {
+      downloadItem.status = 'error';
+      downloadItem.error = error instanceof Error ? error.message : 'Erro desconhecido';
+    } finally {
+      await this.saveToStorage();
+    }
+  }
+
+  // Pausar download antigo, preservando compatibilidade.
+  async pauseDownload(id: string): Promise<void> {
+    const downloadItem = this.downloads.get(id);
+    if (downloadItem && downloadItem.status === 'downloading') {
+      downloadItem.status = 'pending';
+      await this.saveToStorage();
+    }
+  }
+
+  // Cancelar download antigo, preservando compatibilidade.
+  async cancelDownloadLegacy(id: string): Promise<void> {
+    const downloadItem = this.downloads.get(id);
+    if (downloadItem) {
+      if (downloadItem.filePath) {
         try {
-          const caminhoCompleto = this.diretorioMusicas + arquivo;
-          const fileInfo = await FileSystem.getInfoAsync(caminhoCompleto);
-          
-          // A API expo-file-system não retorna modificationTime, então usamos criação
-          // Se o arquivo existe e é mais velho que diasRetencao, deleta
-          if (fileInfo.exists && 'isDirectory' in fileInfo && !fileInfo.isDirectory) {
-            // Nota: Expo não fornece modificationTime, então pulamos limpeza de antigos por agora
-            // Implementar quando a API for disponibilizada
-          }
-        } catch (err) {
-          console.error(`Erro ao limpar ${arquivo}:`, err);
+          await FileSystem.deleteAsync(downloadItem.filePath);
+        } catch (error) {
+          console.error('Erro ao deletar arquivo:', error);
         }
       }
-    } catch (err) {
-      console.error('Erro ao limpar downloads antigos:', err);
+      this.downloads.delete(id);
+      this.queue = this.queue.filter((item) => item !== id);
+      await this.saveToStorage();
     }
+  }
+
+  // Retomar download antigo, preservando compatibilidade.
+  async resumeDownload(id: string): Promise<void> {
+    const downloadItem = this.downloads.get(id);
+    if (downloadItem && downloadItem.status === 'pending') {
+      this.queue.push(id);
+      await this.saveToStorage();
+      this.processQueue();
+    }
+  }
+
+  // Obter todos os downloads.
+  getAllDownloads(): DownloadItem[] {
+    return Array.from(this.downloads.values()).sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  // Obter download por ID.
+  getDownload(id: string): DownloadItem | undefined {
+    return this.downloads.get(id);
+  }
+
+  // Obter downloads de uma release.
+  getDownloadsByRelease(releaseId: number): DownloadItem[] {
+    return this.getAllDownloads().filter((item) => item.release.id === releaseId);
+  }
+
+  // Limpar downloads concluídos.
+  async clearCompleted(): Promise<void> {
+    const completedIds = Array.from(this.downloads.entries())
+      .filter(([_, item]) => item.status === 'completed')
+      .map(([id]) => id);
+
+    for (const id of completedIds) {
+      const downloadItem = this.downloads.get(id);
+      if (downloadItem?.filePath) {
+        try {
+          await FileSystem.deleteAsync(downloadItem.filePath);
+        } catch (error) {
+          console.error('Erro ao deletar arquivo:', error);
+        }
+      }
+      this.downloads.delete(id);
+    }
+
+    await this.saveToStorage();
+  }
+
+  // Limpar downloads com erro.
+  async clearErrors(): Promise<void> {
+    const errorIds = Array.from(this.downloads.entries())
+      .filter(([_, item]) => item.status === 'error')
+      .map(([id]) => id);
+
+    for (const id of errorIds) {
+      this.downloads.delete(id);
+    }
+
+    await this.saveToStorage();
+  }
+
+  // Estatísticas do gerenciador.
+  getStats(): {
+    total: number;
+    pending: number;
+    downloading: number;
+    completed: number;
+    error: number;
+    totalSize: number;
+  } {
+    const downloads = this.getAllDownloads();
+    return {
+      total: downloads.length,
+      pending: downloads.filter((d) => d.status === 'pending').length,
+      downloading: downloads.filter((d) => d.status === 'downloading').length,
+      completed: downloads.filter((d) => d.status === 'completed').length,
+      error: downloads.filter((d) => d.status === 'error').length,
+      totalSize: downloads.reduce((sum, d) => sum + d.fileSize, 0),
+    };
   }
 }
 
-// Exporta instância singleton
+// Instância singleton.
 export const downloadManager = new DownloadManager();

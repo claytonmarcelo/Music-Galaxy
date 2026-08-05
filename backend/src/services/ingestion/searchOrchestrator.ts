@@ -15,6 +15,7 @@ import { MusicBrainzAdapter } from '../sources/musicBrainzAdapter';
 import { DiscogsAdapter } from '../sources/discogsAdapter';
 import { buscarDoCache, salvarNoCache, buscarIdFonte } from '../cache/externalApiCache';
 import { registrarLogIngestion, emitirEvento } from '../logger/ingestionLogger';
+import { enriquecerComAudio } from '../audio/audioEnricher';
 
 // Controle de concorrência — máximo de fontes consultadas simultaneamente.
 const MAX_CONCORRENCIA = 5;
@@ -158,6 +159,9 @@ async function persistirReleases(
   let worksCreated    = 0;
   let releasesCreated = 0;
 
+  // Busca áudio no iTunes/Deezer e preenche os campos nas releases
+  await enriquecerComAudio(releases);
+
   for (const release of releases) {
     try {
       const idMetadataSource = await buscarIdFonte(release.metadata_source_name);
@@ -207,12 +211,14 @@ async function persistirReleases(
       }
 
       // 4. Release — INSERT IGNORE pela constraint unique (metadata_source_id, external_id)
+      const youtubeVideoId = (release as any).youtube_video_id ?? null;
       const [resRelease] = await pool.execute<ResultSetHeader>(
         `INSERT IGNORE INTO releases
            (work_id, release_type_id, version_name, album_name, release_year,
             label, country, quality, cover_url, metadata_source_id,
-            source_reference_url, external_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            source_reference_url, external_id, audio_preview_url, streaming_url, download_url,
+            youtube_video_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           workId,
           releaseTypeId,
@@ -226,8 +232,13 @@ async function persistirReleases(
           idMetadataSource,
           release.source_reference_url ?? null,
           release.external_id,
+          release.audio_preview_url     ?? null,
+          release.streaming_url        ?? null,
+          release.download_url         ?? null,
+          youtubeVideoId,
         ]
       );
+
       if (resRelease.affectedRows > 0) releasesCreated++;
 
     } catch (err) {

@@ -14,32 +14,27 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.musicgalaxy.app",
-      "splash": {
-        "image": "./assets/splash.png",
-        "resizeMode": "contain",
-        "backgroundColor": "#0F0F1A"
-      }
+      "bundleIdentifier": "com.musicgalaxy.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0F0F1A"
       },
-      "package": "com.musicgalaxy.app",
-      "splash": {
-        "image": "./assets/splash.png",
-        "resizeMode": "contain",
-        "backgroundColor": "#0F0F1A"
-      }
+      "package": "com.musicgalaxy.app"
     },
     "web": {
       "bundler": "metro",
       "output": "single",
       "favicon": "./assets/icon.png"
     },
-    "newArchEnabled": false,
-    "sdkVersion": "~57.0.10"
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "plugins": [
+      "expo-web-browser"
+    ]
   }
 }
-

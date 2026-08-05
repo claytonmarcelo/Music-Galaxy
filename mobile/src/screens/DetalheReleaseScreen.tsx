@@ -214,7 +214,7 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           }}
         >
           <PlayerControls
-            url={release.audio_preview_url || release.streaming_url || release.source_reference_url || 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'}
+            url={release.audio_preview_url || release.streaming_url || release.download_url || ''}
             titulo={release.version_name}
             artista={release.artist_name}
           />
@@ -228,7 +228,7 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           }}
         >
           <DownloadProgress
-            url={release.download_url || 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3'}
+            url={release.download_url || ''}
             titulo={release.version_name}
             artista={release.artist_name}
           />
@@ -292,7 +292,7 @@ function InfoLinha({
   return (
     <View style={infoStyles.container}>
       <Text style={infoStyles.label}>{label}</Text>
-      <Text style={[infoStyles.valor, cor && { color: cor }]}>{valor}</Text>
+      <Text style={[infoStyles.valor, cor ? { color: cor } : undefined]}>{valor}</Text>
     </View>
   );
 }

@@ -72,6 +72,10 @@ export interface ReleaseCompleto {
   release_type_category: string;
   metadata_source: string;
   source_reference_url: string | null;
+  // URLs de mídia - null quando não disponível
+  audio_preview_url: string | null;
+  streaming_url: string | null;
+  download_url: string | null;
   // Dados da obra
   work_title: string;
   artist_name: string;
@@ -122,6 +126,10 @@ export interface DadosReleaseExterno {
   source_reference_url?: string | null;
   external_id: string;
   metadata_source_name: string;
+  // URLs de mídia - null quando não disponível
+  audio_preview_url?: string | null;
+  streaming_url?: string | null;
+  download_url?: string | null;
 }
 
 // ============================================================

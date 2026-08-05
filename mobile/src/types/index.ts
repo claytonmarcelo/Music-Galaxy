@@ -22,6 +22,7 @@ export interface Release {
   source_reference_url: string | null;
   // URLs de mídia - null se não disponível (ex: Spotify preview, YouTube Music)
   audio_preview_url: string | null;
+  streaming_url: string | null;
   download_url: string | null;
   work_title: string;
   artist_name: string;

@@ -1,10 +1,11 @@
 // Configuração de navegação do app Music Galaxy.
 // Usa React Navigation com StackNavigator para transições entre telas.
+// Otimizado sem lazy loading para evitar problemas de estado
 
 import React from 'react';
-import { Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useTheme } from '../contexts/ThemeContext';
 
 import { RootStackParamList } from '../types';
 import BuscaScreen from '../screens/BuscaScreen';
@@ -20,14 +21,17 @@ import TelaAdminIngestao from '../screens/TelaAdminIngestao';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function AppNavigator(): React.JSX.Element {
+  const { colors } = useTheme();
+  
   return (
     <NavigationContainer>
       <Stack.Navigator
         initialRouteName="Busca"
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: '#0F0F1A' },
+          contentStyle: { backgroundColor: colors.background },
           animation: 'slide_from_right',
+          animationTypeForReplace: 'push',
         }}
       >
         <Stack.Screen name="Busca" component={BuscaScreen} />

@@ -25,9 +25,12 @@ import ReleaseCard from '../components/ReleaseCard';
 import { useFavoritos } from '../contexts/FavoritosContext';
 import { useHistorico } from '../contexts/HistoricoContext';
 import { useModal } from '../contexts/ModalContext';
+import { useTheme } from '../contexts/ThemeContext';
 import FiltrosModal, { Filtros } from '../components/FiltrosModal';
 import { ItemHistorico } from '../contexts/HistoricoContext';
 import { TIMINGS, EASING, fadeInOut, slideVertical } from '../utils/animacoes';
+import { MusicEmojis } from '../components/AnimatedIcon';
+import CustomButton from '../components/CustomButton';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Busca'>;
 
@@ -39,6 +42,7 @@ export default function BuscaScreen(): React.JSX.Element {
   const { favoritos } = useFavoritos();
   const { historico, adicionarBusca, removerBusca } = useHistorico();
   const { abrirErro, toastSucesso, toastErro } = useModal();
+  const { colors, isDark, toggleTheme } = useTheme();
 
   const [termo, setTermo]           = useState('');
   const [releases, setReleases]     = useState<Release[]>([]);
@@ -300,8 +304,8 @@ export default function BuscaScreen(): React.JSX.Element {
   }, [releases.length, releasesFiltrados, fromCache, fadeListaAnim]);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F0F1A" />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.background} />
 
       {/* Cabeçalho com animação */}
       <Animated.View
@@ -313,8 +317,8 @@ export default function BuscaScreen(): React.JSX.Element {
         ]}
       >
         <View style={styles.tituloContainer}>
-          <Text style={styles.titulo}>Music Galaxy</Text>
-          <Text style={styles.subtitulo}>Busque versões e lançamentos</Text>
+          <Text style={[styles.titulo, { color: colors.text }]}>Music Galaxy</Text>
+          <Text style={[styles.subtitulo, { color: colors.textSecondary }]}>Busque versões e lançamentos</Text>
         </View>
         <TouchableOpacity
           style={styles.botaoFavoritos}
@@ -322,7 +326,7 @@ export default function BuscaScreen(): React.JSX.Element {
           activeOpacity={0.7}
           accessibilityLabel="Ver favoritos"
         >
-          <Text style={styles.botaoFavoritosTexto}>❤️</Text>
+          <Text style={styles.botaoFavoritosTexto}>{MusicEmojis.favorite}</Text>
           {favoritos.length > 0 && (
             <View style={styles.badgeContador}>
               <Text style={styles.badgeContadorTexto}>
@@ -335,16 +339,16 @@ export default function BuscaScreen(): React.JSX.Element {
 
       {/* Campo de busca e filtros */}
       <View style={styles.campoBuscaContainer}>
-        <View style={[styles.campoBusca, focoInput && styles.campoBuscaFocado]}>
-          <Text style={styles.iconeBusca}>🔍</Text>
+        <View style={[styles.campoBusca, { backgroundColor: colors.input }, focoInput && styles.campoBuscaFocado]}>
+          <Text style={styles.iconeBusca}>{MusicEmojis.search}</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, { color: colors.text }]}
             value={termo}
             onChangeText={aoMudarTermo}
             onFocus={() => setFocoInput(true)}
             onBlur={() => setTimeout(() => setFocoInput(false), 200)}
             placeholder="Artista, música ou álbum..."
-            placeholderTextColor="#555580"
+            placeholderTextColor={colors.textSecondary}
             returnKeyType="search"
             autoCapitalize="none"
             autoCorrect={false}

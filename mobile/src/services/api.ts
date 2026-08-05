@@ -36,7 +36,7 @@ function resolverBaseUrl(): string {
   return 'http://localhost:3001';
 }
 
-const BASE_URL    = resolverBaseUrl();
+export const BASE_URL    = resolverBaseUrl();
 const TIMEOUT_MS  = 15000;
 
 // Exportar a URL base para ser usada por outros módulos
