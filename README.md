@@ -88,6 +88,10 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - Nenhum áudio sintético, mock ou de teste no fluxo de reprodução
 - Ordem natural respeitada: streaming, preview e download, quando disponíveis
 - Progresso de download com caminho local persistido no gerenciador de arquivos do Expo
+- Pipeline de download: yt-dlp → arquivo temporário → FFmpeg → validação de formato → cliente
+- Formatos suportados: FLAC (codec flac, 44100 Hz, stereo, 24 bit) e MP3 (codec libmp3lame, 320k, 44100 Hz, stereo)
+- Validação de assinatura de arquivo antes de enviar ao cliente (FLAC: fLaC, MP3: ID3 ou sync bytes)
+- Limpeza automática de arquivos temporários após download ou erro
 
 ### Ingestão de Dados Externos
 - Orquestrador de ingestão consulta MusicBrainz, Cover Art Archive e Discogs

@@ -12,6 +12,10 @@ import { YoutubeAdapter } from '../services/audio/youtubeAdapter';
 import { transcoder, QualidadeAudio } from '../services/audio/audioTranscoder';
 import { youtubeDl } from 'youtube-dl-exec';
 import ffmpegPath from 'ffmpeg-static';
+import ffmpeg from 'fluent-ffmpeg';
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
 
 const youtube = new YoutubeAdapter();
 
@@ -190,6 +194,7 @@ export async function streamAudio(req: Request, res: Response): Promise<void> {
 
 // GET /api/releases/:id/download
 // Entrega o áudio completo como download com nome de arquivo formatado.
+// Pipeline: yt-dlp → arquivo temporário → FFmpeg → arquivo final → validação → cliente
 export async function downloadAudio(req: Request, res: Response): Promise<void> {
   const releaseId = parseInt(req.params['id'] ?? '0', 10);
 
@@ -213,27 +218,120 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
     return;
   }
 
+  // Arquivos temporários
+  const tempDir = path.join(__dirname, '../../temp/audio');
+  const timestamp = Date.now();
+  const sourceFile = path.join(tempDir, `source_${timestamp}.m4a`);
+  const outputFile = path.join(tempDir, `output_${timestamp}`);
+  
+  let arquivoFinal = '';
+  let arquivoParaRemover: string[] = [sourceFile];
+
   try {
+    // Garante que o diretório temporário existe
+    await fs.mkdir(tempDir, { recursive: true });
+
     const queryFormat = req.query['format'] as string | undefined;
-    let qualidade: QualidadeAudio = 'original';
+    let formatoAudio = 'mp3';
     let extensao = 'mp3';
+    let mimeType = 'audio/mpeg';
     
     if (queryFormat === 'flac') {
-      qualidade = 'flac';
+      formatoAudio = 'flac';
       extensao = 'flac';
-    } else if (queryFormat === 'mp3') {
-      qualidade = 'mp3_320';
-      extensao = 'mp3';
+      mimeType = 'audio/flac';
     }
+
+    arquivoFinal = `${outputFile}.${extensao}`;
+    arquivoParaRemover.push(arquivoFinal);
 
     const nomeArquivo = `${release.artist_name} - ${release.work_title} - ${release.version_name}`
       .replace(/[<>:"/\\|?*]/g, '')
       .trim()
       .substring(0, 200);
 
-    let mimeType = 'audio/mpeg';
-    if (extensao === 'flac') mimeType = 'audio/flac';
+    console.log(`[AudioController] Download - Iniciando pipeline para videoId: ${videoId}, formato: ${extensao}`);
 
+    // Passo 1: Baixar áudio fonte com yt-dlp
+    const url = `https://www.youtube.com/watch?v=${videoId}`;
+    console.log(`[AudioController] Download - Baixando áudio fonte com yt-dlp`);
+    
+    await youtubeDl(url, {
+      format: 'bestaudio[ext=m4a]/bestaudio/best',
+      noPlaylist: true,
+      ffmpegLocation: ffmpegPath || undefined,
+      output: sourceFile,
+    });
+
+    console.log(`[AudioController] Download - Áudio fonte baixado: ${sourceFile}`);
+
+    // Passo 2: Converter com FFmpeg
+    console.log(`[AudioController] Download - Convertendo para ${extensao} com FFmpeg`);
+    
+    await new Promise<void>((resolve, reject) => {
+      const ffmpegCommand = ffmpeg(sourceFile)
+        .setFfmpegPath(ffmpegPath || 'ffmpeg')
+        .output(arquivoFinal);
+
+      if (extensao === 'flac') {
+        ffmpegCommand
+          .audioCodec('flac')
+          .audioFrequency(44100)
+          .audioChannels(2);
+      } else {
+        ffmpegCommand
+          .audioCodec('libmp3lame')
+          .audioBitrate('320k')
+          .audioFrequency(44100)
+          .audioChannels(2);
+      }
+
+      ffmpegCommand
+        .on('end', () => {
+          console.log(`[AudioController] Download - Conversão concluída: ${arquivoFinal}`);
+          resolve();
+        })
+        .on('error', (err) => {
+          console.error('[AudioController] Download - Erro na conversão FFmpeg:', err);
+          reject(err);
+        })
+        .run();
+    });
+
+    // Passo 3: Validar arquivo final
+    console.log(`[AudioController] Download - Validando arquivo ${extensao}`);
+    
+    if (extensao === 'flac') {
+      // Validar assinatura FLAC (fLaC = 66 4C 61 43)
+      const buffer = await fs.readFile(arquivoFinal);
+      const signature = buffer.subarray(0, 4).toString('ascii');
+      
+      if (signature !== 'fLaC') {
+        console.error(`[AudioController] Download - Arquivo não é FLAC válido. Assinatura: ${signature}`);
+        throw new Error('Arquivo gerado não é um FLAC válido');
+      }
+      console.log(`[AudioController] Download - Assinatura FLAC validada: ${signature}`);
+    } else {
+      // Validar MP3 verificando bytes iniciais (ID3 tag ou sync bytes)
+      const buffer = await fs.readFile(arquivoFinal);
+      const firstBytes = buffer.subarray(0, 3);
+      
+      // MP3 pode começar com ID3v2 tag (49 44 33 = "ID3")
+      // ou com sync bytes (FF FB ou FF FA)
+      const isID3 = firstBytes[0] === 0x49 && firstBytes[1] === 0x44 && firstBytes[2] === 0x33;
+      const isSync = firstBytes[0] === 0xFF && (firstBytes[1] === 0xFB || firstBytes[1] === 0xFA);
+      
+      if (!isID3 && !isSync) {
+        console.error(`[AudioController] Download - Arquivo não é MP3 válido. Bytes: ${firstBytes.toString('hex')}`);
+        throw new Error('Arquivo gerado não é um MP3 válido');
+      }
+      
+      console.log(`[AudioController] Download - Assinatura MP3 validada: ${isID3 ? 'ID3' : 'Sync bytes'}`);
+    }
+
+    // Passo 4: Enviar arquivo para o cliente
+    console.log(`[AudioController] Download - Enviando arquivo para o cliente`);
+    
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(nomeArquivo)}.${extensao}"`);
     res.setHeader('Cache-Control', 'no-cache, no-store');
@@ -241,30 +339,25 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
-    // Usa yt-dlp para download (ytdl-core está falhando com 403)
-    console.log(`[AudioController] Download - Usando yt-dlp para videoId: ${videoId}, formato: ${extensao}`);
-    const url = `https://www.youtube.com/watch?v=${videoId}`;
-    
-    const result = await youtubeDl(url, {
-      format: 'bestaudio[ext=m4a]/bestaudio',
-      extractAudio: true,
-      audioFormat: extensao === 'flac' ? 'flac' : 'mp3',
-      audioQuality: 0,
-      noPlaylist: true,
-      ffmpegLocation: ffmpegPath || undefined,
-      output: '-',
-    });
+    const fileStream = await fs.readFile(arquivoFinal);
+    res.send(fileStream);
 
-    console.log(`[AudioController] Download - yt-dlp iniciado com sucesso`);
-    
-    // youtube-dl-exec retorna um buffer/string para output '-'
-    // Precisamos converter para stream para enviar ao cliente
-    const buffer = Buffer.from(result as string);
-    res.send(buffer);
   } catch (err) {
-    console.error('[AudioController] Download - Erro ao iniciar yt-dlp:', err);
+    console.error('[AudioController] Download - Erro no pipeline:', err);
     if (!res.headersSent) {
       res.status(503).json({ success: false, error: 'Falha ao baixar áudio' });
+    }
+  } finally {
+    // Passo 5: Limpeza de arquivos temporários
+    console.log(`[AudioController] Download - Limpando arquivos temporários`);
+    
+    for (const arquivo of arquivoParaRemover) {
+      try {
+        await fs.unlink(arquivo);
+        console.log(`[AudioController] Download - Removido: ${arquivo}`);
+      } catch (err) {
+        console.warn(`[AudioController] Download - Não foi possível remover ${arquivo}:`, err);
+      }
     }
   }
 }
