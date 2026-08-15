@@ -6,7 +6,8 @@ export class ItunesAdapter {
   readonly nomeFonte = 'iTunes';
 
   async buscarPreviewAudio(artista: string, titulo: string): Promise<string | null> {
-    const termo = `${artista} ${titulo}`;
+    const tituloLimpo = titulo.replace(/\(.*?\)/g, '').trim();
+    const termo = `${artista} ${tituloLimpo || titulo}`;
     const url = `https://itunes.apple.com/search?term=${encodeURIComponent(termo)}&entity=song&limit=1`;
 
     try {

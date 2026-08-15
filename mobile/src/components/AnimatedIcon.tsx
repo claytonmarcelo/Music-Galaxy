@@ -185,6 +185,10 @@ export const MusicEmojis = {
   sun: '☀️',
   moon: '🌙',
   auto: '🌓',
+
+  // Extra / Mídia
+  cd: '💿',
+  spotify: '🎧',
 };
 
 const styles = StyleSheet.create({

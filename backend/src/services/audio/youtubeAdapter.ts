@@ -49,12 +49,12 @@ export class YoutubeAdapter {
   obterStreamAudio(videoId: string): ReturnType<typeof ytdl> {
     const url = `https://www.youtube.com/watch?v=${videoId}`;
     return ytdl(url, {
-      filter: 'audioonly',
-      quality: 'highestaudio',
+      filter: (format: any) => Boolean(format.hasAudio),
+      highWaterMark: 1 << 25,
       requestOptions: {
         headers: {
-          // Cabeçalho necessário para simular um navegador e evitar bloqueios
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
         },
       },
     });

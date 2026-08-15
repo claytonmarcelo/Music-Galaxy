@@ -100,13 +100,18 @@ class PlayerAudio {
     try {
       if (this.isWeb) {
         // Implementação Web com HTML5 Audio
-        if (!this.audioWeb) {
-          // Cria elemento de áudio nativo do HTML5
-          if (typeof document !== 'undefined') {
-            this.audioWeb = document.createElement('audio');
-          } else {
+        // Recria elemento sempre que a URL muda para evitar estado corrompido
+        if (!this.audioWeb || this.estado.urlAtual !== url) {
+          if (this.audioWeb) {
+            this.audioWeb.pause();
+            this.audioWeb.src = '';
+          }
+          if (typeof document === 'undefined') {
             throw new Error('HTML5 Audio não disponível neste navegador');
           }
+          this.audioWeb = document.createElement('audio');
+          this.audioWeb.crossOrigin = 'anonymous';
+          this.audioWeb.preload = 'auto';
 
           this.audioWeb.addEventListener('timeupdate', () => {
             this.estado.tempo = (this.audioWeb?.currentTime ?? 0) * 1000;
@@ -123,26 +128,15 @@ class PlayerAudio {
             this.pararIntervaloAtualizacao();
             this.notificarListeners();
           });
-          this.audioWeb.addEventListener('error', (e) => {
-            console.error('Erro ao carregar áudio web:', e);
-            throw new Error(`Não foi possível carregar o áudio: ${url}`);
-          });
-        }
 
-        if (this.estado.urlAtual !== url) {
           this.audioWeb.src = url;
-          this.audioWeb.load();
           this.estado.urlAtual = url;
         }
 
-        this.audioWeb.play().catch((err: any) => {
-          console.error('Erro ao reproduzir áudio web:', err);
-          throw new Error('Não foi possível reproduzir o áudio');
-        });
+        await this.audioWeb.play();
 
         this.estado.tocando = true;
         this.estado.pausado = false;
-        this.estado.tempo = 0;
         this.iniciarIntervaloAtualizacao();
         this.notificarListeners();
       } else {

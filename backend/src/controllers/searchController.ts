@@ -39,7 +39,8 @@ function montarWhereBusca(palavras: string[]): { clausula: string; params: strin
 async function buscarReleasesLocal(
   termo: string,
   limit: number,
-  offset: number
+  offset: number,
+  baseUrl: string = 'http://localhost:3001'
 ): Promise<{ releases: ReleaseCompleto[]; total: number }> {
   // Divide o termo em palavras individuais (mínimo 2 caracteres cada)
   // para suportar buscas como "Daft Punk One More Time"
@@ -95,28 +96,31 @@ async function buscarReleasesLocal(
 
   const total = (countRows[0]?.['total'] as number) ?? 0;
 
-  const releases: ReleaseCompleto[] = (rows as any[]).map(row => ({
-    id:                   row['id'],
-    work_id:              row['work_id'],
-    version_name:         row['version_name'],
-    album_name:           row['album_name'],
-    release_year:         row['release_year'],
-    label:                row['label'],
-    country:              row['country'],
-    quality:              row['quality'],
-    cover_url:            row['cover_url'],      // null = sem capa oficial (Regra 1)
-    source_reference_url: row['source_reference_url'],
-    audio_preview_url:     row['audio_preview_url'],
-    streaming_url:        row['streaming_url'],
-    download_url:         row['download_url'],
-    release_type:         row['release_type'],
-    release_type_category: row['release_type_category'],
-    metadata_source:      row['metadata_source'],
-    work_title:           row['work_title'],
-    artist_name:          row['artist_name'],
-    artist_country:       row['artist_country'],
-    original_release_year: row['original_release_year'],
-  }));
+  const releases: ReleaseCompleto[] = (rows as any[]).map(row => {
+    const id = row['id'];
+    return {
+      id:                   id,
+      work_id:              row['work_id'],
+      version_name:         row['version_name'],
+      album_name:           row['album_name'],
+      release_year:         row['release_year'],
+      label:                row['label'],
+      country:              row['country'],
+      quality:              row['quality'],
+      cover_url:            row['cover_url'],      // null = sem capa oficial (Regra 1)
+      source_reference_url: row['source_reference_url'],
+      audio_preview_url:    row['audio_preview_url'],
+      streaming_url:        row['streaming_url'] || `${baseUrl}/api/releases/${id}/stream`,
+      download_url:         row['download_url']  || `${baseUrl}/api/releases/${id}/download`,
+      release_type:         row['release_type'],
+      release_type_category: row['release_type_category'],
+      metadata_source:      row['metadata_source'],
+      work_title:           row['work_title'],
+      artist_name:          row['artist_name'],
+      artist_country:       row['artist_country'],
+      original_release_year: row['original_release_year'],
+    };
+  });
 
   return { releases, total };
 }
@@ -133,8 +137,12 @@ export async function buscarMusicas(
     const offset = Math.max(parseInt(req.query['offset'] as string || '0',  10), 0);
     const page   = Math.floor(offset / limit) + 1;
 
+    const host = req.get('host') || 'localhost:3001';
+    const protocol = req.protocol || 'http';
+    const baseUrl = `${protocol}://${host}`;
+
     // Tenta busca local primeiro
-    const local = await buscarReleasesLocal(termo, limit, offset);
+    const local = await buscarReleasesLocal(termo, limit, offset, baseUrl);
 
     // Se há dados locais suficientes, responde direto (do banco local = "cache" natural)
     if (local.total >= MIN_RELEASES_LOCAL) {

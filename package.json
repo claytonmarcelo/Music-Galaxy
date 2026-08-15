@@ -12,20 +12,12 @@
     "web": "npm --workspace mobile run web",
     "android": "npm --workspace mobile run android",
     "ios": "npm --workspace mobile run ios",
-    "install:all": "npm install && cd mobile && npm install && cd ../backend && npm install",
+    "install:all": "npm install && cd mobile && npm install && cd ../backend && composer install",
     "dev:mobile": "npm --workspace mobile run start",
-    "dev:backend": "cd backend && npm run dev",
+    "dev:backend": "cd backend && php artisan serve",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:mobile\"",
     "build:mobile": "npm --workspace mobile run build",
     "build:backend": "cd backend && npm run build"
-  },
-  "dependencies": {
-    "expo": "~57.0.5",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
-    "react-native": "0.74.5",
-    "react-native-web": "0.19.13",
-    "expo-status-bar": "~57.0.1"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

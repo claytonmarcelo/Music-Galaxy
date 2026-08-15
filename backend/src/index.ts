@@ -25,8 +25,9 @@ const PORT = parseInt(process.env['PORT'] || '3001', 10);
 // Helmet — define cabeçalhos HTTP de segurança
 // Em desenvolvimento, desabilita CSP para não bloquear o Expo web
 app.use(helmet({
-  contentSecurityPolicy: process.env['NODE_ENV'] === 'production',
+  contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
 // CORS — permite requisições do app mobile (Expo) e do browser local

@@ -1,13 +1,21 @@
-// Componente MusicPlayer.
-// Usa somente a URL de mídia original disponível na release escolhida.
+// Componente MusicPlayer — Controles de reprodução e download.
+// Player universal: tenta stream completo, cai para preview iTunes/Deezer automaticamente.
+// Download in-page com barra de progresso real (sem abrir nova janela).
 
-import React, { useState, useCallback, memo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Modal, Pressable } from 'react-native';
+import React, { useState, useCallback, useRef, memo } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  Modal,
+  Pressable,
+  Platform,
+} from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { MusicEmojis } from './AnimatedIcon';
 import { Release } from '../types';
-import { playerAudio } from '../services/playerAudio';
-import { downloadManager } from '../services/downloadManager';
 import { BASE_URL } from '../services/api';
 import { SpotifyLoginScreen } from '../screens/SpotifyLoginScreen';
 
@@ -15,79 +23,212 @@ interface MusicPlayerProps {
   release: Release;
 }
 
+// Cache de áudios que já tocaram com sucesso — evita tentar URL com falha novamente
+const urlsSucesso = new Map<number, string>();
+
 function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element {
   const { colors } = useTheme();
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
-  
-  // Estado do modal de qualidade de download
   const [qualityModalVisible, setQualityModalVisible] = useState(false);
-  
-  // Estado do login do Spotify
   const [spotifyLoginVisible, setSpotifyLoginVisible] = useState(false);
-  const [spotifyToken, setSpotifyToken] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const audioUrl = `${BASE_URL}/api/releases/${release.id}/stream`;
-  // As opções de download recebem ?format=
-  const downloadUrlMp3 = `${BASE_URL}/api/releases/${release.id}/download?format=mp3`;
-  const downloadUrlFlac = `${BASE_URL}/api/releases/${release.id}/download?format=flac`;
+  // URL base de stream do backend
+  const streamUrl   = `${BASE_URL}/api/releases/${release.id}/stream`;
+  const downloadUrl = `${BASE_URL}/api/releases/${release.id}/download`;
+
+  // URLs de fallback que já vêm do banco
+  const previewUrl  = release.audio_preview_url ?? release.streaming_url ?? null;
+
+  // ──────────────────────────────────────────────
+  // PLAYER — tenta stream; fallback para preview
+  // ──────────────────────────────────────────────
+  const tocarWeb = useCallback(async (url: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
+      const audio = document.createElement('audio');
+      audio.crossOrigin = 'anonymous';
+      audio.preload = 'auto';
+
+      const cleanup = () => {
+        audio.removeEventListener('canplaythrough', onOk);
+        audio.removeEventListener('error', onErr);
+      };
+
+      const onOk = () => {
+        cleanup();
+        audioRef.current = audio;
+        audio.play()
+          .then(() => resolve(true))
+          .catch(() => resolve(false));
+      };
+
+      const onErr = () => {
+        cleanup();
+        resolve(false);
+      };
+
+      audio.addEventListener('canplaythrough', onOk, { once: true });
+      audio.addEventListener('error', onErr, { once: true });
+      audio.src = url;
+      audio.load();
+    });
+  }, []);
 
   const togglePlayback = useCallback(async () => {
+    // Pausar se já está tocando
+    if (isPlaying) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      setIsPlaying(false);
+      return;
+    }
+
+    setIsLoading(true);
     try {
-      if (!release.id) {
-        Alert.alert('Áudio indisponível', 'ID da release não encontrado.');
+      // 1. Tentativa com URL em cache (já funcionou antes)
+      const urlCache = urlsSucesso.get(release.id);
+      if (urlCache) {
+        const ok = await tocarWeb(urlCache);
+        if (ok) {
+          setIsPlaying(true);
+          setIsLoading(false);
+
+          audioRef.current?.addEventListener('ended', () => setIsPlaying(false), { once: true });
+          audioRef.current?.addEventListener('error', () => setIsPlaying(false), { once: true });
+          return;
+        }
+        urlsSucesso.delete(release.id);
+      }
+
+      // 2. Stream completo via backend
+      let ok = await tocarWeb(streamUrl);
+      if (ok) {
+        urlsSucesso.set(release.id, streamUrl);
+        setIsPlaying(true);
+        audioRef.current?.addEventListener('ended', () => setIsPlaying(false), { once: true });
+        audioRef.current?.addEventListener('error', () => setIsPlaying(false), { once: true });
+        setIsLoading(false);
         return;
       }
 
-      if (isPlaying) {
-        await playerAudio.pausar();
-        setIsPlaying(false);
-      } else {
-        // Se usuário logou no Spotify e quer ouvir completo, faríamos o link com o SDK aqui.
-        // Como o Proxy atende plenamente e é gratuito, vamos manter como principal,
-        // mas o visual agradará ao usuário.
-        await playerAudio.tocar(audioUrl);
-        setIsPlaying(true);
+      // 3. Fallback: preview do banco (iTunes/Deezer)
+      if (previewUrl) {
+        ok = await tocarWeb(previewUrl);
+        if (ok) {
+          urlsSucesso.set(release.id, previewUrl);
+          setIsPlaying(true);
+          audioRef.current?.addEventListener('ended', () => setIsPlaying(false), { once: true });
+          audioRef.current?.addEventListener('error', () => setIsPlaying(false), { once: true });
+          setIsLoading(false);
+          return;
+        }
       }
-    } catch (error) {
-      console.error('Erro ao controlar reprodução:', error);
-      Alert.alert('Erro', 'Não foi possível reproduzir a mídia selecionada.');
-    }
-  }, [audioUrl, isPlaying, release.id, spotifyToken]);
 
+      // 4. Sem áudio disponível
+      Alert.alert('Sem áudio', 'Nenhuma fonte de áudio disponível para esta versão.');
+    } catch (err) {
+      console.error('Erro no player:', err);
+      Alert.alert('Erro', 'Não foi possível reproduzir a música.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isPlaying, release.id, streamUrl, previewUrl, tocarWeb]);
+
+  // ──────────────────────────────────────────────
+  // DOWNLOAD IN-PAGE — sem abrir nova janela
+  // ──────────────────────────────────────────────
   const iniciarDownload = useCallback(async (formato: 'mp3' | 'flac') => {
+    setQualityModalVisible(false);
+    if (isDownloading) return;
+
+    setIsDownloading(true);
+    setDownloadProgress(0);
+
+    const url = `${downloadUrl}?format=${formato}`;
+    const nomeArquivo = `${release.artist_name} - ${release.version_name}.${formato}`
+      .replace(/[\\/:*?"<>|]/g, '_');
+
     try {
-      setQualityModalVisible(false);
-      setIsDownloading(true);
+      if (Platform.OS === 'web') {
+        // Web: fetch com progresso real via ReadableStream
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        const contentLength = resp.headers.get('Content-Length');
+        const total = contentLength ? parseInt(contentLength, 10) : 0;
+        const reader = resp.body?.getReader();
+        if (!reader) throw new Error('Stream não disponível');
+
+        const chunks: Uint8Array[] = [];
+        let baixado = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            chunks.push(value);
+            baixado += value.length;
+            if (total > 0) {
+              setDownloadProgress(Math.round((baixado / total) * 100));
+            } else {
+              // Sem Content-Length: progresso indeterminado
+              setDownloadProgress(prev => Math.min(prev + 5, 90));
+            }
+          }
+        }
+
+        setDownloadProgress(100);
+
+        // Monta Blob e dispara download via URL temporária
+        const mimeType = formato === 'flac' ? 'audio/flac' : 'audio/mpeg';
+        const blob = new Blob(chunks, { type: mimeType });
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = nomeArquivo;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(objectUrl);
+
+        Alert.alert('Download concluído', `${nomeArquivo} salvo!`);
+      } else {
+        // React Native: usa expo-file-system/legacy
+        const FileSystem = require('expo-file-system/legacy');
+        const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? '';
+        const destino  = `${cacheDir}${nomeArquivo}`;
+
+        const task = FileSystem.createDownloadResumable(
+          url,
+          destino,
+          {},
+          (prog: { totalBytesWritten: number; totalBytesExpectedToWrite: number }) => {
+            const pct = prog.totalBytesExpectedToWrite > 0
+              ? Math.round((prog.totalBytesWritten / prog.totalBytesExpectedToWrite) * 100)
+              : 0;
+            setDownloadProgress(pct);
+          }
+        );
+        await task.downloadAsync();
+        setDownloadProgress(100);
+        Alert.alert('Download concluído', `${nomeArquivo} salvo!`);
+      }
+    } catch (err) {
+      console.error('Erro no download:', err);
+      Alert.alert('Erro no download', 'Não foi possível baixar o arquivo. Tente novamente.');
+    } finally {
+      setIsDownloading(false);
       setDownloadProgress(0);
-      
-      const urlAlvo = formato === 'mp3' ? downloadUrlMp3 : downloadUrlFlac;
-      await downloadManager.baixar(urlAlvo, release.version_name);
-      
-      setDownloadProgress(100);
-      setIsDownloading(false);
-      Alert.alert('Download concluído', `Arquivo ${formato.toUpperCase()} salvo com sucesso!`);
-    } catch (error) {
-      console.error('Erro ao baixar áudio:', error);
-      setIsDownloading(false);
-      Alert.alert('Erro', 'Não foi possível baixar a música.');
     }
-  }, [downloadUrlMp3, downloadUrlFlac, release.version_name]);
-
-  const openQualityModal = () => {
-    if (!release.id) {
-      Alert.alert('Download indisponível', 'ID da release não encontrado.');
-      return;
-    }
-    setQualityModalVisible(true);
-  };
-
-  const handleSpotifyLogin = (token: string) => {
-    setSpotifyToken(token);
-    setSpotifyLoginVisible(false);
-    Alert.alert('Spotify Conectado', 'Sua conta Premium foi vinculada com sucesso.');
-  };
+  }, [isDownloading, downloadUrl, release.artist_name, release.version_name]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.card }]}>
@@ -97,7 +238,7 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
           {release.work_title}
         </Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={1}>
-          {release.artist_name} - {release.version_name}
+          {release.artist_name} — {release.version_name}
         </Text>
         {release.quality && (
           <Text style={[styles.quality, { color: colors.success }]}>
@@ -106,43 +247,46 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
         )}
       </View>
 
-      {/* Controles do player */}
+      {/* Controles: Play | Download */}
       <View style={styles.controls}>
-        {/* Botão Conectar Spotify */}
-        <TouchableOpacity
-          style={[styles.spotifyBtn, { backgroundColor: spotifyToken ? colors.success : '#1DB954' }]}
-          onPress={() => spotifyToken ? Alert.alert('Aviso', 'Spotify já está conectado.') : setSpotifyLoginVisible(true)}
-        >
-          <Text style={styles.spotifyBtnText}>
-            {spotifyToken ? 'Spotify ✓' : 'Login Spotify'}
-          </Text>
-        </TouchableOpacity>
-
         {/* Botão Play/Pause */}
         <TouchableOpacity
           style={[styles.controlButton, { backgroundColor: colors.button }]}
           onPress={togglePlayback}
           activeOpacity={0.8}
+          disabled={isLoading}
         >
           <Text style={styles.controlButtonText}>
-            {isPlaying ? MusicEmojis.pause : MusicEmojis.play}
+            {isLoading
+              ? MusicEmojis.loading
+              : isPlaying
+                ? MusicEmojis.pause
+                : MusicEmojis.play}
           </Text>
         </TouchableOpacity>
 
         {/* Botão Download */}
         <TouchableOpacity
           style={[styles.controlButton, { backgroundColor: colors.secondary }]}
-          onPress={openQualityModal}
+          onPress={() => setQualityModalVisible(true)}
           disabled={isDownloading}
           activeOpacity={0.8}
         >
           <Text style={[styles.controlButtonText, { color: colors.text }]}>
-            {isDownloading ? `${Math.round(downloadProgress)}%` : MusicEmojis.download}
+            {isDownloading ? `${downloadProgress}%` : MusicEmojis.download}
           </Text>
+        </TouchableOpacity>
+
+        {/* Botão Spotify — opcional */}
+        <TouchableOpacity
+          style={[styles.spotifyBtn, { backgroundColor: '#1DB954' }]}
+          onPress={() => setSpotifyLoginVisible(true)}
+        >
+          <Text style={styles.spotifyBtnText}>Spotify</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Progresso do download */}
+      {/* Barra de progresso do download */}
       {isDownloading && (
         <View style={styles.progressContainer}>
           <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
@@ -154,15 +298,15 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
             />
           </View>
           <Text style={[styles.progressText, { color: colors.textSecondary }]}>
-            Baixando Alta Qualidade... {Math.round(downloadProgress)}%
+            Baixando... {downloadProgress}%
           </Text>
         </View>
       )}
 
-      {/* Modal de Seleção de Qualidade de Download */}
+      {/* Modal de qualidade */}
       <Modal
         visible={qualityModalVisible}
-        transparent={true}
+        transparent
         animationType="fade"
         onRequestClose={() => setQualityModalVisible(false)}
       >
@@ -171,8 +315,7 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               Qualidade do Download
             </Text>
-            
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.qualityOption, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}
               onPress={() => iniciarDownload('mp3')}
             >
@@ -183,8 +326,7 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
                 Excelente qualidade, menor tamanho.
               </Text>
             </TouchableOpacity>
-
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.qualityOption}
               onPress={() => iniciarDownload('flac')}
             >
@@ -199,17 +341,16 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
         </Pressable>
       </Modal>
 
-      {/* Modal de Login do Spotify */}
-      <SpotifyLoginScreen 
-        visible={spotifyLoginVisible} 
+      {/* Modal Spotify */}
+      <SpotifyLoginScreen
+        visible={spotifyLoginVisible}
         onClose={() => setSpotifyLoginVisible(false)}
-        onLoginSuccess={handleSpotifyLogin}
+        onLoginSuccess={() => setSpotifyLoginVisible(false)}
       />
     </View>
   );
 }
 
-// Memoizar o componente
 export default memo(MusicPlayerComponent);
 
 const styles = StyleSheet.create({
@@ -218,27 +359,10 @@ const styles = StyleSheet.create({
     padding: 16,
     marginVertical: 8,
   },
-  infoContainer: {
-    marginBottom: 12,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  quality: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  testIndicator: {
-    fontSize: 10,
-    fontWeight: '500',
-    marginTop: 2,
-  },
+  infoContainer: { marginBottom: 12 },
+  title: { fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  subtitle: { fontSize: 14, marginBottom: 4 },
+  quality: { fontSize: 12, fontWeight: '500' },
   controls: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -251,25 +375,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  controlButtonText: {
-    fontSize: 24,
-  },
-  progressContainer: {
-    marginTop: 12,
-  },
-  progressBar: {
-    height: 4,
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginBottom: 4,
-  },
-  progressFill: {
-    height: '100%',
-  },
-  progressText: {
-    fontSize: 12,
-    textAlign: 'center',
-  },
+  controlButtonText: { fontSize: 24 },
+  progressContainer: { marginTop: 12 },
+  progressBar: { height: 4, borderRadius: 2, overflow: 'hidden', marginBottom: 4 },
+  progressFill: { height: '100%' },
+  progressText: { fontSize: 12, textAlign: 'center' },
   spotifyBtn: {
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -277,38 +387,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  spotifyBtnText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
+  spotifyBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalContent: {
-    width: '80%',
-    borderRadius: 12,
-    padding: 20,
-    elevation: 5,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  qualityOption: {
-    paddingVertical: 16,
-  },
-  qualityText: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  qualitySub: {
-    fontSize: 12,
-  },
+  modalContent: { width: '80%', borderRadius: 12, padding: 20, elevation: 5 },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
+  qualityOption: { paddingVertical: 16 },
+  qualityText: { fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  qualitySub: { fontSize: 12 },
 });

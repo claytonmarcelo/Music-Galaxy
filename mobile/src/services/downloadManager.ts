@@ -3,7 +3,8 @@
 // compatível com os componentes de UI do projeto.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import { Platform } from 'react-native';
 import { Release } from '../types';
 
 export interface DownloadItem {
@@ -134,6 +135,36 @@ class DownloadManager {
     estado.baixando = true;
     this.estadosByUrl.set(url, estado);
     this.notificar(url, estado);
+
+    // Tratamento para Web
+    if (Platform.OS === 'web' || typeof window !== 'undefined' && typeof document !== 'undefined') {
+      try {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${titulo || 'download'}.mp3`;
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        const estadoFinal: EstadoDownload = {
+          baixando: false,
+          concluido: true,
+          erro: null,
+          progresso: 1,
+          caminhoLocal: url,
+          tamanhoAtual: 0,
+          tamanhoTotal: 0,
+        };
+        this.estadosByUrl.set(url, estadoFinal);
+        this.notificar(url, estadoFinal);
+        return url;
+      } catch (err) {
+        console.error('Erro ao baixar no navegador:', err);
+        window.open(url, '_blank');
+        return url;
+      }
+    }
 
     const fileName = `${titulo || 'download'}.mp3`;
     const cacheDirectory = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? '';

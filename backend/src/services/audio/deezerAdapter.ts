@@ -5,7 +5,8 @@ export class DeezerAdapter {
   readonly nomeFonte = 'Deezer';
 
   async buscarPreviewAudio(artista: string, titulo: string): Promise<string | null> {
-    const query = `artist:"${artista}" track:"${titulo}"`;
+    const tituloLimpo = titulo.replace(/\(.*?\)/g, '').trim();
+    const query = `artist:"${artista}" track:"${tituloLimpo || titulo}"`;
     const url = `https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=1`;
 
     try {

@@ -153,11 +153,9 @@ export function PlayerProvider({ children }: PlayerProviderProps): React.JSX.Ele
         sound.current = null;
       }
 
-      const audioUrl = release.streaming_url || release.audio_preview_url;
-      if (!audioUrl) {
-        console.warn('URL de áudio não disponível para:', release.version_name);
-        setPlayerState(prev => ({ ...prev, isLoading: false }));
-        return;
+      let audioUrl = release.streaming_url || release.audio_preview_url || `http://localhost:3001/api/releases/${release.id}/stream`;
+      if (audioUrl.startsWith('/')) {
+        audioUrl = `http://localhost:3001${audioUrl}`;
       }
 
       const cacheKey = `audio_${release.id}`;
