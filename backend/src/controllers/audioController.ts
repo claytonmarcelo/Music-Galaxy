@@ -19,6 +19,26 @@ import os from 'os';
 
 const youtube = new YoutubeAdapter();
 
+// Tipos de erro para classificação
+enum DownloadErrorType {
+  SOURCE_UNAVAILABLE = 'SOURCE_UNAVAILABLE',
+  FORMAT_UNAVAILABLE = 'FORMAT_UNAVAILABLE',
+  SOURCE_TIMEOUT = 'SOURCE_TIMEOUT',
+  EXTRACTION_FAILED = 'EXTRACTION_FAILED',
+  CONVERSION_FAILED = 'CONVERSION_FAILED',
+  VALIDATION_FAILED = 'VALIDATION_FAILED',
+  TEMPORARY_NETWORK_ERROR = 'TEMPORARY_NETWORK_ERROR',
+  INTERNAL_ERROR = 'INTERNAL_ERROR',
+}
+
+// Estrutura de erro detalhado
+interface DownloadError {
+  type: DownloadErrorType;
+  message: string;
+  details?: string;
+  retryable: boolean;
+}
+
 // Dados mínimos da release necessários para o streaming
 interface ReleaseAudioRow extends RowDataPacket {
   id: number;
@@ -27,6 +47,85 @@ interface ReleaseAudioRow extends RowDataPacket {
   artist_name: string;
   work_title: string;
   version_name: string;
+}
+
+// Estratégias de formato para yt-dlp (em ordem de preferência)
+const FORMAT_STRATEGIES = [
+  'bestaudio[ext=m4a]/bestaudio/best',
+  'bestaudio[ext=mp3]/bestaudio/best',
+  'bestaudio[ext=webm]/bestaudio/best',
+  'bestaudio[ext=opus]/bestaudio/best',
+  'bestaudio/best',
+];
+
+// Função de delay para retry
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Função para classificar erro do yt-dlp
+function classifyYtDlpError(error: any): DownloadError {
+  const errorMessage = error.message || '';
+  const stderr = error.stderr || '';
+
+  if (errorMessage.includes('HTTP Error 403') || stderr.includes('HTTP Error 403')) {
+    return {
+      type: DownloadErrorType.SOURCE_UNAVAILABLE,
+      message: 'Acesso negado pela fonte (HTTP 403)',
+      details: 'A fonte bloqueou o download deste conteúdo',
+      retryable: false,
+    };
+  }
+
+  if (errorMessage.includes('HTTP Error 429') || stderr.includes('HTTP Error 429')) {
+    return {
+      type: DownloadErrorType.TEMPORARY_NETWORK_ERROR,
+      message: 'Limite de taxa da fonte excedido (HTTP 429)',
+      details: 'A fonte limitou o número de requisições',
+      retryable: true,
+    };
+  }
+
+  if (errorMessage.includes('HTTP Error 5') || stderr.includes('HTTP Error 5')) {
+    return {
+      type: DownloadErrorType.TEMPORARY_NETWORK_ERROR,
+      message: 'Erro temporário da fonte (HTTP 5xx)',
+      details: 'A fonte está temporariamente indisponível',
+      retryable: true,
+    };
+  }
+
+  if (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT')) {
+    return {
+      type: DownloadErrorType.SOURCE_TIMEOUT,
+      message: 'Timeout ao acessar a fonte',
+      details: 'A fonte não respondeu dentro do tempo esperado',
+      retryable: true,
+    };
+  }
+
+  if (errorMessage.includes('Video unavailable') || stderr.includes('Video unavailable')) {
+    return {
+      type: DownloadErrorType.SOURCE_UNAVAILABLE,
+      message: 'Vídeo indisponível na fonte',
+      details: 'O conteúdo não está mais disponível',
+      retryable: false,
+    };
+  }
+
+  if (errorMessage.includes('no suitable format') || stderr.includes('no suitable format')) {
+    return {
+      type: DownloadErrorType.FORMAT_UNAVAILABLE,
+      message: 'Formato de áudio não disponível',
+      details: 'A fonte não fornece áudio no formato solicitado',
+      retryable: true,
+    };
+  }
+
+  return {
+    type: DownloadErrorType.EXTRACTION_FAILED,
+    message: 'Falha ao extrair áudio da fonte',
+    details: errorMessage,
+    retryable: true,
+  };
 }
 
 // Busca os dados de áudio da release, incluindo o youtube_video_id e audio_preview_url
@@ -194,9 +293,12 @@ export async function streamAudio(req: Request, res: Response): Promise<void> {
 
 // GET /api/releases/:id/download
 // Entrega o áudio completo como download com nome de arquivo formatado.
-// Pipeline: yt-dlp → arquivo temporário → FFmpeg → arquivo final → validação → cliente
+// Pipeline: yt-dlp (com retry e múltiplas estratégias) → arquivo temporário → FFmpeg → arquivo final → validação → cliente
 export async function downloadAudio(req: Request, res: Response): Promise<void> {
   const releaseId = parseInt(req.params['id'] ?? '0', 10);
+  const startTime = Date.now();
+
+  console.log(`[AudioDownload] releaseId=${releaseId} status=starting`);
 
   if (!releaseId) {
     res.status(400).json({ success: false, error: 'ID de release inválido' });
@@ -250,23 +352,84 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
       .trim()
       .substring(0, 200);
 
-    console.log(`[AudioController] Download - Iniciando pipeline para videoId: ${videoId}, formato: ${extensao}`);
+    console.log(`[AudioDownload] releaseId=${releaseId} videoId=${videoId} format=${extensao} status=yt-dlp-start`);
 
-    // Passo 1: Baixar áudio fonte com yt-dlp
+    // Passo 1: Baixar áudio fonte com yt-dlp (com retry e múltiplas estratégias)
     const url = `https://www.youtube.com/watch?v=${videoId}`;
-    console.log(`[AudioController] Download - Baixando áudio fonte com yt-dlp`);
+    let downloadSuccess = false;
+    let lastError: DownloadError | null = null;
     
-    await youtubeDl(url, {
-      format: 'bestaudio[ext=m4a]/bestaudio/best',
-      noPlaylist: true,
-      ffmpegLocation: ffmpegPath || undefined,
-      output: sourceFile,
-    });
+    // Tentar cada estratégia de formato
+    for (let strategyIndex = 0; strategyIndex < FORMAT_STRATEGIES.length; strategyIndex++) {
+      const formatStrategy = FORMAT_STRATEGIES[strategyIndex];
+      
+      // Para cada estratégia, tentar com retry
+      const maxRetries = 3;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} attempt=${attempt} format=${formatStrategy} status=downloading`);
+          
+          const ytDlpStart = Date.now();
+          
+          await youtubeDl(url, {
+            format: formatStrategy,
+            noPlaylist: true,
+            ffmpegLocation: ffmpegPath || undefined,
+            output: sourceFile,
+          });
+          
+          const ytDlpDuration = (Date.now() - ytDlpStart) / 1000;
+          console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} attempt=${attempt} stage=yt-dlp duration=${ytDlpDuration}s status=success`);
+          
+          downloadSuccess = true;
+          break; // Sucesso - sair do loop de retry
+        } catch (err: any) {
+          const classifiedError = classifyYtDlpError(err);
+          lastError = classifiedError;
+          
+          console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} attempt=${attempt} type=${classifiedError.type} retryable=${classifiedError.retryable} status=failed`);
+          
+          // Se não for retryable, tentar próxima estratégia imediatamente
+          if (!classifiedError.retryable) {
+            break;
+          }
+          
+          // Se ainda há tentativas, fazer exponential backoff
+          if (attempt < maxRetries) {
+            const backoffDelay = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
+            console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} attempt=${attempt} backoff=${backoffDelay}ms status=waiting`);
+            await delay(backoffDelay);
+          }
+        }
+      }
+      
+      if (downloadSuccess) {
+        break; // Sucesso - sair do loop de estratégias
+      }
+      
+      // Se falhou todas as tentativas desta estratégia, tentar próxima
+      console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} status=strategy-failed trying-next`);
+    }
 
-    console.log(`[AudioController] Download - Áudio fonte baixado: ${sourceFile}`);
+    if (!downloadSuccess) {
+      // Todas as estratégias falharam
+      console.log(`[AudioDownload] releaseId=${releaseId} status=all-strategies-failed error=${lastError?.type}`);
+      
+      if (!res.headersSent) {
+        res.status(503).json({ 
+          success: false, 
+          error: lastError?.message || 'Falha ao baixar áudio',
+          errorType: lastError?.type,
+        });
+      }
+      return;
+    }
+
+    console.log(`[AudioDownload] releaseId=${releaseId} status=yt-dlp-complete sourceFile=${sourceFile}`);
 
     // Passo 2: Converter com FFmpeg
-    console.log(`[AudioController] Download - Convertendo para ${extensao} com FFmpeg`);
+    console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=converting`);
+    const ffmpegStart = Date.now();
     
     await new Promise<void>((resolve, reject) => {
       const ffmpegCommand = ffmpeg(sourceFile)
@@ -288,18 +451,20 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
 
       ffmpegCommand
         .on('end', () => {
-          console.log(`[AudioController] Download - Conversão concluída: ${arquivoFinal}`);
+          const ffmpegDuration = (Date.now() - ffmpegStart) / 1000;
+          console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg duration=${ffmpegDuration}s status=success`);
           resolve();
         })
         .on('error', (err) => {
-          console.error('[AudioController] Download - Erro na conversão FFmpeg:', err);
+          console.error(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=failed error=${err.message}`);
           reject(err);
         })
         .run();
     });
 
     // Passo 3: Validar arquivo final
-    console.log(`[AudioController] Download - Validando arquivo ${extensao}`);
+    console.log(`[AudioDownload] releaseId=${releaseId} stage=validation status=validating`);
+    const validationStart = Date.now();
     
     if (extensao === 'flac') {
       // Validar assinatura FLAC (fLaC = 66 4C 61 43)
@@ -307,10 +472,10 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
       const signature = buffer.subarray(0, 4).toString('ascii');
       
       if (signature !== 'fLaC') {
-        console.error(`[AudioController] Download - Arquivo não é FLAC válido. Assinatura: ${signature}`);
+        console.error(`[AudioDownload] releaseId=${releaseId} stage=validation status=failed signature=${signature}`);
         throw new Error('Arquivo gerado não é um FLAC válido');
       }
-      console.log(`[AudioController] Download - Assinatura FLAC validada: ${signature}`);
+      console.log(`[AudioDownload] releaseId=${releaseId} stage=validation signature=fLaC status=success`);
     } else {
       // Validar MP3 verificando bytes iniciais (ID3 tag ou sync bytes)
       const buffer = await fs.readFile(arquivoFinal);
@@ -322,15 +487,18 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
       const isSync = firstBytes[0] === 0xFF && (firstBytes[1] === 0xFB || firstBytes[1] === 0xFA);
       
       if (!isID3 && !isSync) {
-        console.error(`[AudioController] Download - Arquivo não é MP3 válido. Bytes: ${firstBytes.toString('hex')}`);
+        console.error(`[AudioDownload] releaseId=${releaseId} stage=validation status=failed bytes=${firstBytes.toString('hex')}`);
         throw new Error('Arquivo gerado não é um MP3 válido');
       }
       
-      console.log(`[AudioController] Download - Assinatura MP3 validada: ${isID3 ? 'ID3' : 'Sync bytes'}`);
+      console.log(`[AudioDownload] releaseId=${releaseId} stage=validation signature=${isID3 ? 'ID3' : 'Sync'} status=success`);
     }
 
+    const validationDuration = (Date.now() - validationStart) / 1000;
+    console.log(`[AudioDownload] releaseId=${releaseId} stage=validation duration=${validationDuration}s status=complete`);
+
     // Passo 4: Enviar arquivo para o cliente
-    console.log(`[AudioController] Download - Enviando arquivo para o cliente`);
+    console.log(`[AudioDownload] releaseId=${releaseId} stage=send status=sending`);
     
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(nomeArquivo)}.${extensao}"`);
@@ -342,22 +510,33 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
     const fileStream = await fs.readFile(arquivoFinal);
     res.send(fileStream);
 
+    const totalDuration = (Date.now() - startTime) / 1000;
+    console.log(`[AudioDownload] releaseId=${releaseId} status=completed total=${totalDuration}s`);
+
   } catch (err) {
-    console.error('[AudioController] Download - Erro no pipeline:', err);
+    const totalDuration = (Date.now() - startTime) / 1000;
+    console.error(`[AudioDownload] releaseId=${releaseId} status=failed duration=${totalDuration}s error=`, err);
+    
     if (!res.headersSent) {
-      res.status(503).json({ success: false, error: 'Falha ao baixar áudio' });
+      res.status(503).json({ 
+        success: false, 
+        error: 'Falha ao baixar áudio',
+        errorType: DownloadErrorType.INTERNAL_ERROR,
+      });
     }
   } finally {
     // Passo 5: Limpeza de arquivos temporários
-    console.log(`[AudioController] Download - Limpando arquivos temporários`);
+    console.log(`[AudioDownload] releaseId=${releaseId} stage=cleanup status=starting`);
     
     for (const arquivo of arquivoParaRemover) {
       try {
         await fs.unlink(arquivo);
-        console.log(`[AudioController] Download - Removido: ${arquivo}`);
+        console.log(`[AudioDownload] releaseId=${releaseId} stage=cleanup file=${arquivo} status=removed`);
       } catch (err) {
-        console.warn(`[AudioController] Download - Não foi possível remover ${arquivo}:`, err);
+        console.warn(`[AudioDownload] releaseId=${releaseId} stage=cleanup file=${arquivo} status=skipped reason=not-exists`);
       }
     }
+    
+    console.log(`[AudioDownload] releaseId=${releaseId} stage=cleanup status=complete`);
   }
 }

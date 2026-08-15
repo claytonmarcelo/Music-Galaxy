@@ -88,7 +88,7 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - Nenhum áudio sintético, mock ou de teste no fluxo de reprodução
 - Ordem natural respeitada: streaming, preview e download, quando disponíveis
 - Progresso de download com caminho local persistido no gerenciador de arquivos do Expo
-- Pipeline de download: yt-dlp → arquivo temporário → FFmpeg → validação de formato → cliente
+- Pipeline de download: yt-dlp (com retry e múltiplas estratégias) → arquivo temporário → FFmpeg → validação → cliente
 - Formatos suportados: FLAC (codec flac, 44100 Hz, stereo, 24 bit) e MP3 (codec libmp3lame, 320k, 44100 Hz, stereo)
 - Validação de assinatura de arquivo antes de enviar ao cliente (FLAC: fLaC, MP3: ID3 ou sync bytes)
 - Validação de decodificação completa via FFmpeg antes de enviar ao cliente
@@ -96,6 +96,10 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - MIME types corretos: audio/flac para FLAC, audio/mpeg para MP3
 - Extensões corretas: .flac para FLAC, .mp3 para MP3
 - Download no frontend com rastreamento de progresso em tempo real (Web: fetch com stream reader)
+- Retry inteligente com exponential backoff (1s, 2s, 4s) para falhas transitórias
+- Múltiplas estratégias de formato yt-dlp (m4a, mp3, webm, opus, bestaudio) para maximizar compatibilidade
+- Classificação de erros (SOURCE_UNAVAILABLE, FORMAT_UNAVAILABLE, TIMEOUT, etc) para diagnóstico preciso
+- Logs estruturados com medição de tempo por etapa (yt-dlp, FFmpeg, validação) para observabilidade
 
 ### Ingestão de Dados Externos
 - Orquestrador de ingestão consulta MusicBrainz, Cover Art Archive e Discogs
