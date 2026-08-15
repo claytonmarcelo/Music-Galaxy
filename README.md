@@ -91,7 +91,10 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - Pipeline de download: yt-dlp → arquivo temporário → FFmpeg → validação de formato → cliente
 - Formatos suportados: FLAC (codec flac, 44100 Hz, stereo, 24 bit) e MP3 (codec libmp3lame, 320k, 44100 Hz, stereo)
 - Validação de assinatura de arquivo antes de enviar ao cliente (FLAC: fLaC, MP3: ID3 ou sync bytes)
+- Validação de decodificação completa via FFmpeg antes de enviar ao cliente
 - Limpeza automática de arquivos temporários após download ou erro
+- MIME types corretos: audio/flac para FLAC, audio/mpeg para MP3
+- Extensões corretas: .flac para FLAC, .mp3 para MP3
 
 ### Ingestão de Dados Externos
 - Orquestrador de ingestão consulta MusicBrainz, Cover Art Archive e Discogs
