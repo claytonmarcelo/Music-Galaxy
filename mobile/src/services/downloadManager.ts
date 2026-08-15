@@ -136,16 +136,60 @@ class DownloadManager {
     this.estadosByUrl.set(url, estado);
     this.notificar(url, estado);
 
-    // Tratamento para Web
+    // Tratamento para Web - usa fetch para rastrear progresso antes do download nativo
     if (Platform.OS === 'web' || typeof window !== 'undefined' && typeof document !== 'undefined') {
       try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Erro HTTP: ${response.status}`);
+        }
+
+        const contentLength = response.headers.get('Content-Length');
+        const total = contentLength ? parseInt(contentLength, 10) : 0;
+        const reader = response.body?.getReader();
+        
+        if (!reader) {
+          throw new Error('Não foi possível ler o corpo da resposta');
+        }
+
+        let receivedLength = 0;
+        const chunks: Uint8Array[] = [];
+
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) break;
+          
+          chunks.push(value);
+          receivedLength += value.length;
+          
+          // Atualiza progresso
+          const progresso = total > 0 ? receivedLength / total : 0;
+          const estadoAtual = this.estadosByUrl.get(url) ?? this.criarEstadoPadrao(url);
+          estadoAtual.baixando = true;
+          estadoAtual.progresso = progresso;
+          estadoAtual.tamanhoAtual = receivedLength;
+          estadoAtual.tamanhoTotal = total;
+          estadoAtual.erro = null;
+          this.estadosByUrl.set(url, estadoAtual);
+          this.notificar(url, estadoAtual);
+        }
+
+        // Combina todos os chunks em um Blob
+        const blob = new Blob(chunks);
+        const blobUrl = URL.createObjectURL(blob);
+
+        // Cria link para download nativo
         const link = document.createElement('a');
-        link.href = url;
+        link.href = blobUrl;
         link.download = `${titulo || 'download'}.mp3`;
         link.target = '_blank';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+
+        // Libera URL do blob após um pequeno delay
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
 
         const estadoFinal: EstadoDownload = {
           baixando: false,
@@ -153,16 +197,24 @@ class DownloadManager {
           erro: null,
           progresso: 1,
           caminhoLocal: url,
-          tamanhoAtual: 0,
-          tamanhoTotal: 0,
+          tamanhoAtual: receivedLength,
+          tamanhoTotal: total,
         };
         this.estadosByUrl.set(url, estadoFinal);
         this.notificar(url, estadoFinal);
         return url;
       } catch (err) {
+        const mensagem = err instanceof Error ? err.message : 'Erro ao baixar no navegador';
         console.error('Erro ao baixar no navegador:', err);
-        window.open(url, '_blank');
-        return url;
+        
+        const estadoErro = this.estadosByUrl.get(url) ?? this.criarEstadoPadrao(url);
+        estadoErro.baixando = false;
+        estadoErro.concluido = false;
+        estadoErro.erro = mensagem;
+        this.estadosByUrl.set(url, estadoErro);
+        this.notificar(url, estadoErro);
+        
+        throw err;
       }
     }
 

@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - MIME types corretos: audio/flac para FLAC, audio/mpeg para MP3
   - Extensões corretas: .flac para FLAC, .mp3 para MP3
 
+- **Frontend Download Progress** - Corrigido rastreamento de progresso de download no Web
+  - Substituído método simples de `<a>` tag por fetch com ReadableStream
+  - Implementado rastreamento de progresso em tempo real (0% → 100%)
+  - Download agora baixa arquivo como Blob antes de acionar download nativo
+  - Garante que progresso seja atualizado corretamente durante o download
+  - Adicionado tratamento de erro adequado com atualização de estado
+  - Corrigido problema de "Baixando... 0%" permanecer na tela
+
 ### Changed
 - **audioController.ts** - Refatoração completa da função `downloadAudio`
   - Adicionados imports: `fluent-ffmpeg`, `fs/promises`, `path`, `os`
@@ -31,18 +39,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Validação de formato antes de enviar ao cliente
   - Tratamento de erro melhorado na limpeza de arquivos temporários
 
+- **downloadManager.ts** - Refatoração do download Web
+  - Substituído download direto por `<a>` tag por fetch com stream reader
+  - Adicionado rastreamento de progresso em tempo real via ReadableStream
+  - Download agora carrega arquivo completo como Blob antes de download nativo
+  - Melhorado tratamento de erro com atualização de estado adequada
+
 ### Technical Details
-- **Problema original:** Arquivos baixados como `.flac` continham container ISO-BMFF/DASH (ftypdash) em vez de FLAC real
-- **Causa raiz:** Uso de `output: '-'` com `Buffer.from()` não garantia conversão real do formato
-- **Solução:** Pipeline completo com conversão explícita via FFmpeg e validação de assinatura
-- **Validação:**
+- **Problema original (backend):** Arquivos baixados como `.flac` continham container ISO-BMFF/DASH (ftypdash) em vez de FLAC real
+- **Causa raiz (backend):** Uso de `output: '-'` com `Buffer.from()` não garantia conversão real do formato
+- **Solução (backend):** Pipeline completo com conversão explícita via FFmpeg e validação de assinatura
+- **Validação (backend):**
   - FLAC: Verifica bytes iniciais `66 4C 61 43` (ASCII: "fLaC")
   - MP3: Verifica bytes iniciais `49 44 33` (ID3) ou `FF FB/FA` (sync bytes)
   - Decodificação: FFmpeg decodifica arquivo completo antes de enviar ao cliente
 
+- **Problema original (frontend):** Download permanecia em "Baixando... 0%" e não concluía
+- **Causa raiz (frontend):** Uso de `<a>` tag simples não rastreava progresso e não garantia conclusão
+- **Solução (frontend):** Fetch com ReadableStream para rastrear progresso e baixar como Blob antes de download nativo
+
 ### Validation Results
 - **MP3 Download:** PASS (9.27 MB, assinatura ID3 confirmada, FFmpeg decodificação completa)
 - **FLAC Download:** PASS (40.56 MB, assinatura fLaC confirmada, FFmpeg decodificação completa)
+- **Frontend Progress:** PASS (rastreamento de 0% a 100% em tempo real)
 - **Stream:** PASS (continua funcionando via fallback iTunes)
 - **Regressão:** PASS (health, search, release-types, release detail)
 - **MIME Types:** PASS (audio/flac, audio/mpeg)

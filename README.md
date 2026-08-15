@@ -95,6 +95,7 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - Limpeza automática de arquivos temporários após download ou erro
 - MIME types corretos: audio/flac para FLAC, audio/mpeg para MP3
 - Extensões corretas: .flac para FLAC, .mp3 para MP3
+- Download no frontend com rastreamento de progresso em tempo real (Web: fetch com stream reader)
 
 ### Ingestão de Dados Externos
 - Orquestrador de ingestão consulta MusicBrainz, Cover Art Archive e Discogs
