@@ -1,121 +1,358 @@
-# Music Galaxy
+<h1 align="center">Music Galaxy</h1>
 
-Aplicativo de busca musical focado em precisão de dados e completude de resultados. O diferencial do aplicativo é nunca inventar informações: capas de música e versões de lançamento devem refletir exatamente o que existe nas fontes de dados consultadas.
+<p align="center">
+  <strong>Aplicativo de Busca Musical com Precisão de Dados</strong><br>
+  Localize todas as versões existentes de uma obra musical — remixes, edições, formatos de lançamento, instrumentais, playback e muito mais — sem informações inventadas.
+</p>
 
-## Visão Geral
+<p align="center">
+  <img src="https://img.shields.io/badge/licença-propriet%C3%A1ria-lightgrey" alt="Licença Proprietária">
+  <img src="https://img.shields.io/badge/version-1.0.0-blue" alt="Versão">
+  <img src="https://img.shields.io/badge/typescript-5.x-3178C6?logo=typescript" alt="TypeScript">
+  <img src="https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js" alt="Node.js">
+  <img src="https://img.shields.io/badge/expo-SDK%2057-000020?logo=expo" alt="Expo">
+  <img src="https://img.shields.io/badge/express-4.x-000000?logo=express" alt="Express">
+  <img src="https://img.shields.io/badge/mariadb-10.x-003545?logo=mariadb" alt="MariaDB">
+  <img src="https://img.shields.io/badge/react%20native-0.76-61DAFB?logo=react" alt="React Native">
+</p>
 
-Music Galaxy é destinado a DJs, colecionadores, produtores musicais e pesquisadores que precisam localizar versões específicas de uma mesma obra (remixes, edições, formatos de lançamento, instrumentais, playback, entre outros).
+---
 
-## Stack Tecnológica
+## Sobre o Projeto
 
-- **Frontend**: React Native + TypeScript + Expo SDK 57
-- **Backend**: Node.js + TypeScript + Express
-- **Banco de Dados**: MariaDB (porta 3307 via WampServer64)
+O **Music Galaxy** é um aplicativo de busca musical desenvolvido para DJs, colecionadores, produtores musicais e pesquisadores que precisam localizar versões específicas de uma mesma obra.
+
+### Problema que resolve
+
+Encontrar a versão exata de uma música — um remix específico, uma edição de rádio, uma instrumental, um formato de lançamento raro — costuma exigir consultar várias plataformas diferentes, correndo o risco de encontrar capas incorretas, metadados incompletos ou informações geradas artificialmente.
+
+O Music Galaxy centraliza a busca em fontes de dados confiáveis (MusicBrainz, Cover Art Archive e Discogs), aplicando regras rígidas para garantir que nenhuma capa ou versão seja inventada, aproximada ou substituída.
+
+### Público-alvo
+
+- DJs e produtores musicais
+- Colecionadores de vinil, CD e formatos físicos
+- Pesquisadores e catalogadores musicais
+- Rádios e casas de show que precisam de versões específicas (radio edit, extended mix, instrumental, playback)
+
+### Benefícios
+
+- **Precisão**: Capas e dados sempre fiéis à fonte original
+- **Completude**: Todas as versões de uma obra em um único lugar
+- **Confiabilidade**: Integração direta com bancos de dados musicais abertos e reconhecidos
+- **Performance**: Cache local em MariaDB reduz chamadas repetidas às APIs externas
+
+---
 
 ## Regras de Negócio
 
 ### Regra 1 — Capa Oficial da Música
-O Music Galaxy deve exibir exclusivamente a capa oficial correspondente ao resultado da pesquisa, quando essa capa estiver disponível na fonte consultada.
+
+O Music Galaxy exibe exclusivamente a capa oficial correspondente ao resultado da pesquisa, quando disponível na fonte consultada.
 
 - Nunca gerar capas por inteligência artificial
 - Nunca criar capas fictícias
 - Nunca utilizar capas de outra música, álbum ou artista
 - Nunca modificar a arte oficial
 - Nunca substituir a capa correta por uma imagem semelhante
-- Se a fonte não disponibilizar a capa oficial, o aplicativo não deve inventar uma
+- Se a fonte não disponibilizar a capa oficial, o aplicativo não inventa uma
 
 ### Regra 2 — Pesquisa Musical Completa
-O mecanismo de pesquisa deve localizar e apresentar todas as versões existentes de uma mesma obra musical, independentemente do formato de lançamento.
+
+O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma mesma obra musical, independentemente do formato de lançamento.
 
 **Formatos suportados**: Álbum, Single, EP, Maxi Single, CD Single, Promo, White Label, Coletâneas, Box Set, Deluxe Edition, Remastered, Reissue, Soundtrack, Bootleg (legal), Demo, Live Album, e muitos mais.
 
 **Versões suportadas**: Instrumental, Acapella, Karaoke, Radio Edit, Extended Mix, Club Mix, Remix, Dub Mix, VIP Mix, Rework, Mashup, DJ Version, e muito mais.
 
-## Estrutura do Projeto
+---
 
-```
+## Funcionalidades
+
+### Busca Musical
+- Endpoint único de busca (`/api/search`) com resposta local ou ingestão automática de fontes externas
+- Paginação com limite e offset configuráveis
+- Filtro por categoria (formato de lançamento, mix/edição, instrumental, playback)
+
+### Obras e Versões (Works & Releases)
+- Cada obra é cadastrada de forma conceitual, independente de suas versões
+- Cada release é um registro independente — nenhuma versão substitui outra
+- Catálogo fixo com mais de 60 tipos de release
+
+### Capas Oficiais
+- Exibição de capa oficial via Cover Art Archive, vinculada ao MusicBrainz
+- Nenhuma capa sintética, aproximada ou de placeholder
+
+### Player e Download
+- Reprodução e download utilizam exclusivamente a URL original da versão selecionada
+- Nenhum áudio sintético, mock ou de teste no fluxo de reprodução
+- Ordem natural respeitada: streaming, preview e download, quando disponíveis
+- Progresso de download com caminho local persistido no gerenciador de arquivos do Expo
+
+### Ingestão de Dados Externos
+- Orquestrador de ingestão consulta MusicBrainz, Cover Art Archive e Discogs
+- Cache das respostas em MariaDB, com TTL configurável
+- Respeito aos limites de taxa de cada API (1 req/seg MusicBrainz, 60 req/min Discogs autenticado)
+- Log de auditoria de todas as operações de ingestão
+
+### Favoritos e Histórico
+- Persistência de favoritos via AsyncStorage
+- Rastreamento de histórico de visualizações
+
+### Interface Premium
+- Modais personalizados com animações (sucesso, erro, aviso, informação, confirmação)
+- Sistema de notificações (toast) com fechamento automático e barra de progresso
+- Componentes reutilizáveis: BottomSheet, controles de player, progresso de download, tela de carregamento, alternância de tema
+- Animações globais com timings e curvas de easing padronizados
+- Tema com acento verde (#1DB954)
+
+---
+
+## Módulos Implementados
+
+| Módulo                            | Status |
+|-------------------------------------|--------|
+| Busca musical                       | ✅      |
+| Obras e versões (works/releases)    | ✅      |
+| Capa oficial (Regra 1)              | ✅      |
+| Busca completa (Regra 2)            | ✅      |
+| Player e download                   | ✅      |
+| Ingestão de dados externos          | ✅      |
+| Cache em MariaDB                     | ✅      |
+| Favoritos                           | ✅      |
+| Histórico de buscas                 | ✅      |
+| Interface premium com animações     | ✅      |
+
+---
+
+## Tecnologias
+
+### Frontend (Mobile)
+| Tecnologia    | Finalidade                       |
+|---------------|-----------------------------------|
+| React Native  | Framework mobile                  |
+| Expo SDK 57   | Ferramentas e build mobile        |
+| TypeScript    | Tipagem estática                  |
+| AsyncStorage  | Persistência local (favoritos)    |
+
+### Backend
+| Tecnologia    | Finalidade                       |
+|---------------|-----------------------------------|
+| Node.js       | Runtime JavaScript                 |
+| Express       | Framework HTTP                     |
+| TypeScript    | Tipagem estática                   |
+| Helmet        | Cabeçalhos de segurança HTTP       |
+| CORS          | Controle de origens permitidas     |
+| Rate Limiting | Controle de requisições            |
+
+### Banco de Dados
+| Tecnologia   | Finalidade                        |
+|--------------|------------------------------------|
+| MariaDB      | Banco relacional (porta 3307)      |
+| WampServer64 | Ambiente local de banco de dados   |
+
+### Fontes de Dados Externas
+| Fonte             | Finalidade                                     |
+|--------------------|-------------------------------------------------|
+| MusicBrainz        | Metadados musicais abertos                       |
+| Cover Art Archive   | Capas oficiais vinculadas ao MusicBrainz         |
+| Discogs            | Formatos físicos e variações de lançamento       |
+
+---
+
+## Estrutura de Pastas
+
+```text
 musicgalaxy/
-├── mobile/                    # Aplicativo React Native
+├── mobile/                    → Aplicativo React Native
 │   ├── src/
-│   │   ├── components/       # Componentes reutilizáveis
-│   │   ├── screens/           # Telas do aplicativo
-│   │   ├── services/          # Serviços de API
-│   │   ├── types/             # Definições TypeScript
-│   │   ├── navigation/        # Configuração de navegação
-│   │   └── styles/            # Estilos globais
+│   │   ├── components/       → Componentes reutilizáveis
+│   │   ├── screens/          → Telas do aplicativo
+│   │   ├── services/         → Serviços de API
+│   │   ├── types/            → Definições TypeScript
+│   │   ├── navigation/       → Configuração de navegação
+│   │   └── styles/           → Estilos globais
 │   ├── App.tsx
 │   ├── package.json
 │   └── index.ts
 │
-├── backend/                   # API Backend
+├── backend/                   → API Backend
 │   ├── src/
-│   │   ├── config/            # Configurações (banco de dados)
-│   │   ├── controllers/       # Controladores da API
-│   │   ├── models/            # Modelos TypeScript
-│   │   ├── routes/            # Rotas Express
-│   │   ├── services/          # Serviços de negócio
-│   │   ├── types/             # Tipos TypeScript
-│   │   ├── middleware/        # Middleware Express
-│   │   └── index.ts           # Ponto de entrada
+│   │   ├── config/            → Configurações (banco de dados)
+│   │   ├── controllers/       → Controladores da API
+│   │   ├── models/             → Modelos TypeScript
+│   │   ├── routes/             → Rotas Express
+│   │   ├── services/           → Serviços de negócio
+│   │   ├── types/               → Tipos TypeScript
+│   │   ├── middleware/          → Middleware Express
+│   │   └── index.ts             → Ponto de entrada
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── .env.example
 │
-├── database/                  # Scripts do banco de dados
-│   ├── schema.sql             # Schema completo
-│   ├── seeds/                 # Dados iniciais
+├── database/                  → Scripts do banco de dados
+│   ├── schema.sql             → Schema completo
+│   ├── seeds/                  → Dados iniciais
 │   └── README.md
 │
-├── AGENTS.md                  # Instruções para agentes de IA
+├── AGENTS.md                   → Instruções para agentes de IA
 └── README.md
 ```
 
-## Configuração Inicial
+---
 
-### 1. Configurar Banco de Dados MariaDB
+## Arquitetura
 
-Certifique-se de que o WampServer64 está rodando e acesse o phpMyAdmin em `http://localhost/phpmyadmin`.
+```text
+┌──────────────────────┐
+│  Frontend Mobile     │
+│  React Native + Expo │
+└──────────┬───────────┘
+           │ HTTP
+           ▼
+┌──────────────────────┐
+│  API REST            │
+│  Express + Node.js   │
+│  TypeScript          │
+└──────────┬───────────┘
+           │
+           ▼
+┌──────────────────────┐
+│  Orquestrador de     │
+│  Ingestão            │
+│  MusicBrainz         │
+│  Cover Art Archive   │
+│  Discogs             │
+└──────────┬───────────┘
+           │
+           ▼
+┌──────────────────────┐
+│  MariaDB             │
+│  Cache (TTL)         │
+│  Auditoria           │
+└──────────────────────┘
+```
 
-Execute o script do banco de dados (inclui schema e seeds):
+### Segurança
+
+- Helmet (cabeçalhos HTTP)
+- CORS com controle de origens
+- Rate limiting por API externa
+- Log de auditoria de ingestão
+
+### Escalabilidade
+
+- Separação entre obra (work) e versão (release)
+- Catálogo fixo e extensível de tipos de release
+- Cache local para reduzir dependência de APIs externas
+- Arquitetura modular preparada para novas fontes de dados
+
+---
+
+## Banco de Dados
+
+O projeto utiliza **MariaDB** (porta 3307, via WampServer64) como banco de dados relacional.
+
+### Schema
+
+O schema é normalizado, com as seguintes tabelas principais:
+
+- **artists** — Artistas/bandas
+- **works** — Obras musicais (conceituais, independentes de versões)
+- **releases** — Cada versão/lançamento específico de uma obra
+- **release_types** — Catálogo fixo de tipos (60+ tipos)
+- **metadata_sources** — Fontes de metadados (Discogs, MusicBrainz, etc.)
+- **external_api_cache** — Cache de respostas de APIs externas
+- **ingestion_log** — Auditoria de ingestão de dados externos
+
+Cada release é um registro independente, seguindo a Regra 2: nenhuma versão substitui outra.
+
+### Configuração e seeds
 
 ```bash
-# Via phpMyAdmin ou linha de comando:
 mysql -u root -p -P 3307 musicgalaxy < database/schema.sql
 ```
 
-### 2. Configurar Backend
+O script já inclui schema e seeds iniciais.
+
+---
+
+## Instalação
+
+### Pré-requisitos
+
+- Node.js >= 18
+- WampServer64 com MariaDB rodando na porta 3307
+- Expo Go (para testar no dispositivo) ou emulador Android/iOS
+- Git
+- npm (incluído com Node.js)
+
+### Passo a passo
 
 ```bash
+# 1. Clone o repositório
+git clone https://github.com/claytonmarcelo/Music-Galaxy.git
+cd musicgalaxy
+
+# 2. Configure o banco de dados MariaDB
+# Certifique-se de que o WampServer64 está rodando e acesse
+# o phpMyAdmin em http://localhost/phpmyadmin
+mysql -u root -p -P 3307 musicgalaxy < database/schema.sql
+
+# 3. Instale e inicie o backend
 cd backend
 npm install
-cp .env.example .env  # Configurar porta do MariaDB (3307)
+cp .env.example .env
+# Edite o arquivo .env com suas credenciais e chaves de API
+
 npm run dev
-```
 
-O backend estará disponível em `http://localhost:3001`
-
-### 3. Configurar Frontend React Native
-
-```bash
+# 4. Em outro terminal, instale e inicie o frontend mobile
 cd mobile
 npm install
 npm start
 ```
 
-Use o Expo Go no seu dispositivo ou emulador para testar.
+O backend estará disponível em `http://localhost:3001` e o app pode ser aberto no Expo Go ou emulador.
+
+---
+
+## Configuração
+
+Crie um arquivo `.env` na pasta `backend/` baseado no `.env.example`:
+
+```env
+PORT=3001
+NODE_ENV=development
+
+DB_HOST=localhost
+DB_PORT=3307
+DB_NAME=musicgalaxy
+DB_USER=root
+DB_PASSWORD=
+
+MUSICBRAINZ_USER_AGENT=MusicGalaxy/1.0 (contato: seu-email@exemplo.com)
+DISCOGS_TOKEN=seu_token_pessoal_discogs
+DISCOGS_USER_AGENT=MusicGalaxy/1.0
+```
+
+> **Atenção**: `MUSICBRAINZ_USER_AGENT` precisa conter um e-mail de contato real — o MusicBrainz bloqueia User-Agents genéricos. `DISCOGS_TOKEN` precisa ser um token pessoal real gerado na conta Discogs do projeto; sem ele, o adapter opera no limite de 25 req/min (não autenticado) em vez de 60 req/min, e algumas rotas podem responder 401.
+
+---
 
 ## API Endpoints
 
 ### Busca Musical
 
 #### `GET /api/search?q={termo}`
-**único endpoint que o aplicativo mobile chama para busca.** Internamente, consulta primeiro o banco local; se não houver resultado local, ou os dados existentes estiverem além do TTL de `external_api_cache`, o próprio endpoint dispara a ingestão das fontes externas através do orquestrador antes de responder.
 
-**Query Params:**
-- `q` (obrigatório) - Termo de busca
-- `limit` (opcional) - Limite de resultados (padrão: 50, máximo: 100)
-- `offset` (opcional) - Offset para paginação (padrão: 0)
-- `category` (opcional) - Filtrar por categoria (release_format, mix_edit, instrumental, playback)
+Único endpoint que o aplicativo mobile chama para busca. Internamente, consulta primeiro o banco local; se não houver resultado ou os dados estiverem além do TTL do cache, o próprio endpoint dispara a ingestão das fontes externas antes de responder.
+
+**Parâmetros de busca:**
+- `q` (obrigatório) — Termo de busca
+- `limit` (opcional) — Limite de resultados (padrão: 50, máximo: 100)
+- `offset` (opcional) — Offset para paginação (padrão: 0)
+- `category` (opcional) — Filtrar por categoria (release_format, mix_edit, instrumental, playback)
 
 **Resposta:**
 ```json
@@ -137,9 +374,10 @@ curl "http://localhost:3001/api/search?q=daft%20punk&limit=10"
 ```
 
 #### `POST /api/search/ingest`
-Endpoint administrativo/interno, fora do fluxo normal do app. Serve apenas para forçar resincronização manual de um termo (script de manutenção, painel administrativo futuro). Documentado como "uso interno apenas" até existir camada de autenticação.
 
-**Body:**
+Endpoint administrativo/interno, fora do fluxo normal do app. Serve apenas para forçar resincronização manual de um termo. Uso interno apenas, até existir camada de autenticação.
+
+**Corpo da requisição:**
 ```json
 {
   "q": "termo de busca"
@@ -158,51 +396,19 @@ Detalhes de uma versão/release específica.
 #### `GET /api/release-types`
 Lista o catálogo de tipos de versão disponíveis.
 
+#### `GET /api/artists`
+Lista e busca artistas cadastrados.
+
 ### Sistema
 
 #### `GET /health`
 Health check da API.
 
-## Schema do Banco de Dados
-
-O schema usa uma estrutura normalizada com tabelas principais:
-
-- **artists** - Artistas/bandas
-- **works** - Obras musicais (conceituais, independentes de versões)
-- **releases** - Cada versão/lançamento específico de uma obra
-- **release_types** - Catálogo fixo de tipos (60+ tipos)
-- **metadata_sources** - Fontes de metadados (Discogs, MusicBrainz, etc)
-- **external_api_cache** - Cache de respostas de APIs externas em MariaDB
-- **ingestion_log** - Auditoria de ingestão de dados externos
-
-Cada release é um registro independente, seguindo a Regra 2: nenhuma versão substitui outra.
-
-## Integração com Fontes Externas
-
-O Music Galaxy integra com APIs externas para buscar metadados musicais:
-
-### Fontes de Dados
-- **MusicBrainz** - Banco de dados aberto de metadados musicais
-- **Cover Art Archive** - Capas oficiais associadas ao MusicBrainz
-- **Discogs** - Catálogo com detalhes de formatos físicos e variações
-
-### Sistema de Ingestão
-- **POST /api/search/ingest** - Busca e ingere dados de fontes externas
-- **Cache em MariaDB** - Reduz chamadas repetidas e respeita limites de taxa
-- **Rate Limiting** - Respeita limites de cada API (1 req/seg MusicBrainz, 60 req/min Discogs)
-- **Auditoria** - Log de todas as operações de ingestão para rastreabilidade
-
-### Configuração
-Adicione ao `backend/.env`:
-```env
-MUSICBRAINZ_USER_AGENT=MusicGalaxy/1.0 (contato: seu-email@exemplo.com)
-DISCOGS_TOKEN=seu_token_pessoal_discogs
-DISCOGS_USER_AGENT=MusicGalaxy/1.0
-```
+---
 
 ## Validação da Integração
 
-TypeScript compilar sem erro não comprova que a lógica funciona. Antes de considerar a integração concluída, rodar e confirmar:
+TypeScript compilar sem erro não comprova que a lógica funciona. Antes de considerar a integração concluída, é preciso rodar e confirmar:
 
 ```bash
 # 1. Busca real de ponta a ponta — deve popular works, releases,
@@ -222,9 +428,7 @@ mysql -u root -p -P 3307 musicgalaxy -e \
   "SELECT metadata_source_id, request_type, status, works_created, releases_created FROM ingestion_log ORDER BY created_at DESC LIMIT 10;"
 ```
 
-Configuração não opcional:
-- `MUSICBRAINZ_USER_AGENT` no `.env` real precisa ter um e-mail de contato válido (nunca o placeholder `seu-email@exemplo.com`) — o MusicBrainz bloqueia User-Agents genéricos.
-- `DISCOGS_TOKEN` precisa ser um token pessoal real gerado na conta Discogs do projeto; sem ele, o adapter opera no limite de 25 req/min (não autenticado) em vez de 60 req/min, e algumas rotas podem responder 401.
+---
 
 ## Desenvolvimento
 
@@ -245,114 +449,64 @@ npm run build      # Build para produção
 npm start          # Inicia servidor em produção
 ```
 
-## Funcionalidades Implementadas
+---
 
-### ✅ Banco de Dados
-- Schema normalizado com artists, works, releases
-- Catálogo completo de release_types (60+ tipos)
-- Sistema de metadados com rastreamento de fonte
-- Suporte a todas as categorias: release_format, mix_edit, instrumental, playback
+## Histórico de Versões
 
-### ✅ Backend API
-- API RESTful com Express e TypeScript
-- Conexão com MariaDB (porta 3307)
-- Endpoints conforme especificação: /api/search, /api/works, /api/releases, /api/artists
-- Implementação das Regras 1 e 2 (capa oficial + busca completa)
+### v1.0.0 — 4 de agosto de 2026
 
-### ✅ Fluxo de Player e Download
-- O player e o download usam a URL original da release selecionada pelo usuário
-- Não há áudio sintético, mock ou URL de teste no fluxo de reprodução
-- A seleção de mídia respeita a ordem natural da release: streaming, preview e download quando disponíveis
-- O download mantém o controle de progresso e o caminho local persistido no gerenciador de arquivos do Expo
+#### 🎨 Design Premium
+- Componentes com bordas arredondadas (16–24px) e sombras específicas por plataforma
+- Sistema de animações com timings (rápida/normal/lenta) e curvas de easing (suave/com efeito de mola)
+- Substituição de 100% dos `Alert.alert()` nativos por modais personalizados
+- Notificações do tipo toast com fechamento automático e barra de progresso
+- Componentes reutilizáveis: BottomSheet, controles de player, progresso de download, tela de carregamento, alternância de tema
 
-### ✅ Verificação do Web Expo
-- O bundler web foi validado com exportação estável do Metro
-- O app web responde em `http://localhost:8082` após a correção do entrypoint do workspace
-- A API de busca foi validada diretamente via `curl` com retorno real de resultados de release
-- Middleware de segurança (Helmet, CORS, Rate Limiting)
-- Sistema de ingestão de dados de MusicBrainz e Discogs
-- Cache em MariaDB com TTL
-
-### ✅ Frontend React Native
-- Tela de busca musical com animações suaves
-- Cards de release com capa oficial (Regra 1)
-- Busca retorna todas as versões (Regra 2)
-- Paginação infinita
-- Loading states e tratamento de erros
-
-### ✨ **Design Premium com Animações (v1.0)**
-- **Modais Personalizados**: ModalPersonalizado.tsx com spring animations e 5 tipos (sucesso/erro/aviso/info/confirmacao)
-- **Sistema de Notificações**: ToastNotificacao.tsx com auto-close e barra de progresso
-- **Componentes Premium**:
-  - BottomSheet.tsx (slide-up para filtros e menus)
-  - PlayerControls.tsx (reprodução com pulse animation)
-  - DownloadProgress.tsx (progresso com checkmark animado)
-  - LoadingScreen.tsx (spinner customizado com breathing animation)
-  - TemaToggle.tsx (troca de tema com scale + rotação 180deg)
-- **Animações Globais**: Sistema centralizado com timings (rápida/normal/lenta) e easing (bouncy/suave)
-- **Telas Aprimoradas**:
-  - BuscaScreen: Fade/scale animations
-  - DetalheReleaseScreen: Staggered animations com parallax
-  - DetalheWorkScreen: Scroll parallax na capa
-  - 6 telas adicionais com design premium
-- **Contextos Globais**: 
-  - ModalContext.tsx (substitui 100% dos Alert nativos)
-  - TemaContext.tsx (transições animadas entre temas)
-  - FavoritosContext.tsx (persistência em AsyncStorage)
-  - HistoricoContext.tsx (rastreamento de visualizações)
-- **TypeScript**: 0 erros (mobile + backend)
-
-## Próximos Passos
-
-1. **Integração com APIs Externas**
-   - Implementar integração com Discogs API
-   - Implementar integração com MusicBrainz API
-   - Sistema de sincronização de dados
-
-2. **Funcionalidades Adicionais**
-   - Tela de detalhes de obra/release
-   - Sistema de favoritos
-   - Histórico de buscas
-   - Filtros avançados
-
-3. **Melhorias de UI/UX**
-   - Animações e transições
-   - Tema escuro
-   - Acessibilidade
-
-## Changelog
-
-### [v1.0.0] - 4 de Agosto de 2026
-
-#### 🎨 Implementação Premium Completa
-- **Design Gourmet**: Componentes premium com borderRadius 16-24px, shadows platform-specific
-- **Sistema de Animações**: Timings (rápida/normal/lenta), Easing (bouncy/suave), 8 funções reutilizáveis
-- **Modais Personalizados**: Substituição 100% de Alert.alert() nativo por ModalPersonalizado.tsx
-- **Notificações Elegantes**: ToastNotificacao.tsx com auto-close e barra de progresso
-- **Componentes Reutilizáveis**: BottomSheet, PlayerControls, DownloadProgress, LoadingScreen, TemaToggle
-
-#### 🎬 Telas Aprimoradas com Animações
-- BuscaScreen: Animações de entrada, scale header, campo de busca com shadow
-- DetalheReleaseScreen: Staggered animations, cards com borderLeft verde
-- DetalheWorkScreen: Parallax scroll na capa, slide animations
-- DetalheArtistaScreen, TelaBiblioteca, TelaExplorar, FavoritosScreen, SettingsScreen, TelaAdminIngestao
+#### 🎬 Telas Aprimoradas
+- Tela de busca com animações de entrada e campo com sombra
+- Tela de detalhe de release com animações escalonadas e cartões destacados
+- Tela de detalhe de obra com efeito parallax na capa
+- Telas adicionais: detalhe de artista, biblioteca, explorar, favoritos, configurações, administração de ingestão
 
 #### 🎛️ Infraestrutura Global
-- ModalContext.tsx com métodos: abrirSucesso/Erro/Aviso/Info/Confirmacao
-- useModalGlobal.ts hook customizado
-- ModalGlobalContainer.tsx renderizador global
-- TemaContext.tsx com transições animadas
-- Acento verde Spotify (#1DB954)
+- Contexto de modais com métodos para sucesso, erro, aviso, informação e confirmação
+- Contexto de tema com transições animadas
+- Contexto de favoritos com persistência via AsyncStorage
+- Contexto de histórico de visualizações
+- Acento visual verde (#1DB954)
 
-#### 🔧 Backend Aprimorado
-- artistsController.ts: Endpoints de artistas
-- searchOrchestrator.ts: Orquestrador de ingestão
-- Todos os 11 endpoints obrigatórios implementados
+#### 🔧 Backend
+- Controlador de artistas
+- Orquestrador de busca e ingestão de dados externos
+- Todos os endpoints obrigatórios implementados
 
 #### ✅ Verificação
-- TypeScript: 0 erros (mobile + backend)
-- Stack confirmada: React Native + TypeScript + Expo SDK 57 + Node.js + MariaDB 3307
-- Commit hash: 9cc6ef6 (54 arquivos modificados, +15.447 linhas)
+- TypeScript sem erros (mobile e backend)
+- Stack confirmada: React Native + TypeScript + Expo SDK 57 + Node.js + MariaDB (porta 3307)
+- Bundler web validado com exportação estável do Metro
+- API de busca validada diretamente via `curl`, com retorno real de resultados de release
+
+---
+
+## Roadmap
+
+### Concluído
+- [x] Schema normalizado (artists, works, releases)
+- [x] Catálogo completo de tipos de release (60+ tipos)
+- [x] API REST com Express e TypeScript
+- [x] Implementação das Regras 1 e 2 (capa oficial + busca completa)
+- [x] Integração com MusicBrainz, Cover Art Archive e Discogs
+- [x] Cache em MariaDB com TTL
+- [x] Player e download com URL original da release
+- [x] Interface mobile com design premium e animações
+- [x] Sistema de favoritos e histórico de buscas
+
+### Futuro
+- Tela de detalhes de obra/release com mais informações contextuais
+- Filtros avançados de busca
+- Tema escuro
+- Melhorias de acessibilidade
+- Painel administrativo para gestão de ingestão
 
 ---
 
@@ -373,6 +527,8 @@ npm start          # Inicia servidor em produção
 - Tente `expo start --clear`
 - Verifique seu firewall/antivírus
 
+---
+
 ## Licença
 
 Este projeto é propriedade exclusiva de seus desenvolvedores.
@@ -380,3 +536,11 @@ Este projeto é propriedade exclusiva de seus desenvolvedores.
 ## Suporte
 
 Para dúvidas ou problemas, consulte a documentação técnica em `AGENTS.md`.
+
+---
+
+<p align="center">
+  <em>Desenvolvido por <strong>C. Marcelo Dev. Brasil</strong>.</em>
+  <br>
+  <a href="https://github.com/claytonmarcelo/Music-Galaxy">🔗 GitHub</a>
+</p>
