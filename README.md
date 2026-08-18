@@ -88,7 +88,7 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - Nenhum áudio sintético, mock ou de teste no fluxo de reprodução
 - Ordem natural respeitada: streaming, preview e download, quando disponíveis
 - Progresso de download com caminho local persistido no gerenciador de arquivos do Expo
-- Pipeline de download: yt-dlp (com retry e múltiplas estratégias) → arquivo temporário → FFmpeg → validação → cliente
+- Pipeline de download otimizado: cache → deduplicação → yt-dlp (com retry e múltiplas estratégias) → arquivo temporário → FFmpeg (otimizado) → validação → cache → cliente
 - Formatos suportados: FLAC (codec flac, 44100 Hz, stereo, 24 bit) e MP3 (codec libmp3lame, 320k, 44100 Hz, stereo)
 - Validação de assinatura de arquivo antes de enviar ao cliente (FLAC: fLaC, MP3: ID3 ou sync bytes)
 - Validação de decodificação completa via FFmpeg antes de enviar ao cliente
@@ -96,10 +96,15 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - MIME types corretos: audio/flac para FLAC, audio/mpeg para MP3
 - Extensões corretas: .flac para FLAC, .mp3 para MP3
 - Download no frontend com rastreamento de progresso em tempo real (Web: fetch com stream reader)
-- Retry inteligente com exponential backoff (1s, 2s, 4s) para falhas transitórias
+- Retry inteligente com exponential backoff (1s, 2s) para falhas transitórias
 - Múltiplas estratégias de formato yt-dlp (m4a, mp3, webm, opus, bestaudio) para maximizar compatibilidade
 - Classificação de erros (SOURCE_UNAVAILABLE, FORMAT_UNAVAILABLE, TIMEOUT, etc) para diagnóstico preciso
 - Logs estruturados com medição de tempo por etapa (yt-dlp, FFmpeg, validação) para observabilidade
+- **Cache de downloads**: Arquivos processados são armazenados em cache por 24 horas, evitando processamento repetido
+- **Deduplicação de downloads simultâneos**: Múltiplas requisições da mesma música compartilham o mesmo processo
+- **Timeouts configuráveis**: 5 minutos para yt-dlp, 10 minutos para FFmpeg, 30 segundos para validação
+- **Otimização do FFmpeg**: Detecta formato da fonte e evita conversão desnecessária (MP3→MP3, FLAC→FLAC)
+- **Headers de cache**: Respostas incluem X-Cache (HIT/MISS) para rastreamento de eficiência
 
 ### Ingestão de Dados Externos
 - Orquestrador de ingestão consulta MusicBrainz, Cover Art Archive e Discogs

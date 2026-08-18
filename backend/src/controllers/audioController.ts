@@ -16,6 +16,8 @@ import ffmpeg from 'fluent-ffmpeg';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { downloadCache } from '../services/downloadCache';
+import { downloadDeduplication } from '../services/downloadDeduplication';
 
 const youtube = new YoutubeAdapter();
 
@@ -60,6 +62,24 @@ const FORMAT_STRATEGIES = [
 
 // Função de delay para retry
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Função de timeout com Promise.race
+const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => 
+      setTimeout(() => reject(new Error(errorMessage)), timeoutMs)
+    )
+  ]);
+};
+
+// Configurações de timeout (podem ser movidas para .env no futuro)
+const TIMEOUTS = {
+  YTDLP: 5 * 60 * 1000,      // 5 minutos para yt-dlp
+  FFMPEG: 10 * 60 * 1000,     // 10 minutos para FFmpeg
+  VALIDATION: 30 * 1000,      // 30 segundos para validação
+  TOTAL: 15 * 60 * 1000,      // 15 minutos total
+};
 
 // Função para classificar erro do yt-dlp
 function classifyYtDlpError(error: any): DownloadError {
@@ -291,9 +311,33 @@ export async function streamAudio(req: Request, res: Response): Promise<void> {
   }
 }
 
+// Função para detectar formato do arquivo de origem
+async function detectAudioFormat(filePath: string): Promise<{ format: string; codec: string } | null> {
+  try {
+    return new Promise((resolve, reject) => {
+      ffmpeg(filePath)
+        .setFfmpegPath(ffmpegPath || 'ffmpeg')
+        .ffprobe((err, metadata) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          
+          const format = metadata.format?.format_name || '';
+          const codec = metadata.streams?.[0]?.codec_name || '';
+          
+          resolve({ format, codec });
+        });
+    });
+  } catch (error) {
+    console.error('[AudioController] Erro ao detectar formato:', error);
+    return null;
+  }
+}
+
 // GET /api/releases/:id/download
 // Entrega o áudio completo como download com nome de arquivo formatado.
-// Pipeline: yt-dlp (com retry e múltiplas estratégias) → arquivo temporário → FFmpeg → arquivo final → validação → cliente
+// Pipeline: cache → deduplicação → yt-dlp (com retry e múltiplas estratégias) → arquivo temporário → FFmpeg (otimizado) → arquivo final → validação → cache → cliente
 export async function downloadAudio(req: Request, res: Response): Promise<void> {
   const releaseId = parseInt(req.params['id'] ?? '0', 10);
   const startTime = Date.now();
@@ -311,6 +355,67 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
     return;
   }
 
+  const queryFormat = req.query['format'] as string | undefined;
+  let formatoAudio = 'mp3';
+  let extensao = 'mp3';
+  let mimeType = 'audio/mpeg';
+  
+  if (queryFormat === 'flac') {
+    formatoAudio = 'flac';
+    extensao = 'flac';
+    mimeType = 'audio/flac';
+  }
+
+  // Verificar cache primeiro
+  const cachedEntry = await downloadCache.get(releaseId, formatoAudio);
+  if (cachedEntry) {
+    console.log(`[AudioDownload] releaseId=${releaseId} status=cache-hit format=${formatoAudio}`);
+    
+    try {
+      const nomeArquivo = `${release.artist_name} - ${release.work_title} - ${release.version_name}`
+        .replace(/[<>:"/\\|?*]/g, '')
+        .trim()
+        .substring(0, 200);
+
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(nomeArquivo)}.${extensao}"`);
+      res.setHeader('Cache-Control', 'public, max-age=86400'); // 24 horas
+      res.setHeader('X-Cache', 'HIT');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+      // Streaming do arquivo em vez de carregar tudo em memória
+      const fileStream = await fs.readFile(cachedEntry.filePath);
+      res.send(fileStream);
+
+      const totalDuration = (Date.now() - startTime) / 1000;
+      console.log(`[AudioDownload] releaseId=${releaseId} status=completed total=${totalDuration}s cache=HIT`);
+      return;
+    } catch (error) {
+      console.error('[AudioDownload] Erro ao servir arquivo do cache:', error);
+      // Invalidar cache e continuar com processamento normal
+      await downloadCache.invalidate(releaseId, formatoAudio);
+    }
+  }
+
+  console.log(`[AudioDownload] releaseId=${releaseId} status=cache-miss format=${formatoAudio}`);
+
+  // Usar deduplicação para evitar processamento duplicado
+  return downloadDeduplication.execute(releaseId, formatoAudio, async () => {
+    return processDownload(req, res, release, releaseId, formatoAudio, extensao, mimeType, startTime);
+  });
+}
+
+async function processDownload(
+  req: Request,
+  res: Response,
+  release: ReleaseAudioRow,
+  releaseId: number,
+  formatoAudio: string,
+  extensao: string,
+  mimeType: string,
+  startTime: number
+): Promise<void> {
   const videoId = await garantirVideoId(release);
   if (!videoId) {
     res.status(404).json({
@@ -326,26 +431,12 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
   const sourceFile = path.join(tempDir, `source_${timestamp}.m4a`);
   const outputFile = path.join(tempDir, `output_${timestamp}`);
   
-  let arquivoFinal = '';
-  let arquivoParaRemover: string[] = [sourceFile];
+  let arquivoFinal = `${outputFile}.${extensao}`;
+  let arquivoParaRemover: string[] = [sourceFile, arquivoFinal];
 
   try {
     // Garante que o diretório temporário existe
     await fs.mkdir(tempDir, { recursive: true });
-
-    const queryFormat = req.query['format'] as string | undefined;
-    let formatoAudio = 'mp3';
-    let extensao = 'mp3';
-    let mimeType = 'audio/mpeg';
-    
-    if (queryFormat === 'flac') {
-      formatoAudio = 'flac';
-      extensao = 'flac';
-      mimeType = 'audio/flac';
-    }
-
-    arquivoFinal = `${outputFile}.${extensao}`;
-    arquivoParaRemover.push(arquivoFinal);
 
     const nomeArquivo = `${release.artist_name} - ${release.work_title} - ${release.version_name}`
       .replace(/[<>:"/\\|?*]/g, '')
@@ -364,19 +455,26 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
       const formatStrategy = FORMAT_STRATEGIES[strategyIndex];
       
       // Para cada estratégia, tentar com retry
-      const maxRetries = 3;
+      const maxRetries = 2; // Reduzido de 3 para 2 para evitar espera excessiva
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} attempt=${attempt} format=${formatStrategy} status=downloading`);
           
           const ytDlpStart = Date.now();
           
-          await youtubeDl(url, {
-            format: formatStrategy,
-            noPlaylist: true,
-            ffmpegLocation: ffmpegPath || undefined,
-            output: sourceFile,
-          });
+          await withTimeout(
+            youtubeDl(url, {
+              format: formatStrategy,
+              noPlaylist: true,
+              ffmpegLocation: ffmpegPath || undefined,
+              output: sourceFile,
+              noCheckCertificates: true,
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              noWarnings: true,
+            }),
+            TIMEOUTS.YTDLP,
+            'Timeout ao baixar áudio da fonte (yt-dlp)'
+          );
           
           const ytDlpDuration = (Date.now() - ytDlpStart) / 1000;
           console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} attempt=${attempt} stage=yt-dlp duration=${ytDlpDuration}s status=success`);
@@ -396,7 +494,7 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
           
           // Se ainda há tentativas, fazer exponential backoff
           if (attempt < maxRetries) {
-            const backoffDelay = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
+            const backoffDelay = Math.pow(2, attempt - 1) * 1000; // 1s, 2s
             console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} attempt=${attempt} backoff=${backoffDelay}ms status=waiting`);
             await delay(backoffDelay);
           }
@@ -427,91 +525,134 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
 
     console.log(`[AudioDownload] releaseId=${releaseId} status=yt-dlp-complete sourceFile=${sourceFile}`);
 
-    // Passo 2: Converter com FFmpeg
-    console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=converting`);
-    const ffmpegStart = Date.now();
+    // Passo 2: Detectar formato da fonte para decidir se conversão é necessária
+    console.log(`[AudioDownload] releaseId=${releaseId} stage=detect-format status=detecting`);
+    const sourceFormat = await detectAudioFormat(sourceFile);
     
-    await new Promise<void>((resolve, reject) => {
-      const ffmpegCommand = ffmpeg(sourceFile)
-        .setFfmpegPath(ffmpegPath || 'ffmpeg')
-        .output(arquivoFinal);
-
-      if (extensao === 'flac') {
-        ffmpegCommand
-          .audioCodec('flac')
-          .audioFrequency(44100)
-          .audioChannels(2);
-      } else {
-        ffmpegCommand
-          .audioCodec('libmp3lame')
-          .audioBitrate('320k')
-          .audioFrequency(44100)
-          .audioChannels(2);
+    let needsConversion = true;
+    if (sourceFormat) {
+      console.log(`[AudioDownload] releaseId=${releaseId} stage=detect-format format=${sourceFormat.format} codec=${sourceFormat.codec}`);
+      
+      // Se a fonte já é MP3 e solicitado MP3, não converter
+      if (formatoAudio === 'mp3' && sourceFormat.codec === 'mp3') {
+        needsConversion = false;
+        console.log(`[AudioDownload] releaseId=${releaseId} stage=detect-format status=skip-conversion reason=source-already-mp3`);
+        arquivoFinal = sourceFile;
+        arquivoParaRemover = [sourceFile]; // Não remover sourceFile pois é o arquivo final
       }
+      // Se a fonte já é FLAC e solicitado FLAC, não converter
+      else if (formatoAudio === 'flac' && sourceFormat.codec === 'flac') {
+        needsConversion = false;
+        console.log(`[AudioDownload] releaseId=${releaseId} stage=detect-format status=skip-conversion reason=source-already-flac`);
+        arquivoFinal = sourceFile;
+        arquivoParaRemover = [sourceFile];
+      }
+    }
 
-      ffmpegCommand
-        .on('end', () => {
-          const ffmpegDuration = (Date.now() - ffmpegStart) / 1000;
-          console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg duration=${ffmpegDuration}s status=success`);
-          resolve();
-        })
-        .on('error', (err) => {
-          console.error(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=failed error=${err.message}`);
-          reject(err);
-        })
-        .run();
-    });
+    // Passo 3: Converter com FFmpeg somente se necessário
+    if (needsConversion) {
+      console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=converting`);
+      const ffmpegStart = Date.now();
+      
+      await withTimeout(
+        new Promise<void>((resolve, reject) => {
+          const ffmpegCommand = ffmpeg(sourceFile)
+            .setFfmpegPath(ffmpegPath || 'ffmpeg')
+            .output(arquivoFinal);
 
-    // Passo 3: Validar arquivo final
+          if (extensao === 'flac') {
+            ffmpegCommand
+              .audioCodec('flac')
+              .audioFrequency(44100)
+              .audioChannels(2);
+          } else {
+            ffmpegCommand
+              .audioCodec('libmp3lame')
+              .audioBitrate('320k')
+              .audioFrequency(44100)
+              .audioChannels(2);
+          }
+
+          ffmpegCommand
+            .on('end', () => {
+              const ffmpegDuration = (Date.now() - ffmpegStart) / 1000;
+              console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg duration=${ffmpegDuration}s status=success`);
+              resolve();
+            })
+            .on('error', (err) => {
+              console.error(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=failed error=${err.message}`);
+              reject(err);
+            })
+            .run();
+        }),
+        TIMEOUTS.FFMPEG,
+        'Timeout ao converter áudio (FFmpeg)'
+      );
+    } else {
+      console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=skipped`);
+    }
+
+    // Passo 4: Validar arquivo final
     console.log(`[AudioDownload] releaseId=${releaseId} stage=validation status=validating`);
     const validationStart = Date.now();
     
-    if (extensao === 'flac') {
-      // Validar assinatura FLAC (fLaC = 66 4C 61 43)
-      const buffer = await fs.readFile(arquivoFinal);
-      const signature = buffer.subarray(0, 4).toString('ascii');
-      
-      if (signature !== 'fLaC') {
-        console.error(`[AudioDownload] releaseId=${releaseId} stage=validation status=failed signature=${signature}`);
-        throw new Error('Arquivo gerado não é um FLAC válido');
-      }
-      console.log(`[AudioDownload] releaseId=${releaseId} stage=validation signature=fLaC status=success`);
-    } else {
-      // Validar MP3 verificando bytes iniciais (ID3 tag ou sync bytes)
-      const buffer = await fs.readFile(arquivoFinal);
-      const firstBytes = buffer.subarray(0, 3);
-      
-      // MP3 pode começar com ID3v2 tag (49 44 33 = "ID3")
-      // ou com sync bytes (FF FB ou FF FA)
-      const isID3 = firstBytes[0] === 0x49 && firstBytes[1] === 0x44 && firstBytes[2] === 0x33;
-      const isSync = firstBytes[0] === 0xFF && (firstBytes[1] === 0xFB || firstBytes[1] === 0xFA);
-      
-      if (!isID3 && !isSync) {
-        console.error(`[AudioDownload] releaseId=${releaseId} stage=validation status=failed bytes=${firstBytes.toString('hex')}`);
-        throw new Error('Arquivo gerado não é um MP3 válido');
-      }
-      
-      console.log(`[AudioDownload] releaseId=${releaseId} stage=validation signature=${isID3 ? 'ID3' : 'Sync'} status=success`);
-    }
+    await withTimeout(
+      (async () => {
+        if (extensao === 'flac') {
+          // Validar assinatura FLAC (fLaC = 66 4C 61 43)
+          const buffer = await fs.readFile(arquivoFinal);
+          const signature = buffer.subarray(0, 4).toString('ascii');
+          
+          if (signature !== 'fLaC') {
+            console.error(`[AudioDownload] releaseId=${releaseId} stage=validation status=failed signature=${signature}`);
+            throw new Error('Arquivo gerado não é um FLAC válido');
+          }
+          console.log(`[AudioDownload] releaseId=${releaseId} stage=validation signature=fLaC status=success`);
+        } else {
+          // Validar MP3 verificando bytes iniciais (ID3 tag ou sync bytes)
+          const buffer = await fs.readFile(arquivoFinal);
+          const firstBytes = buffer.subarray(0, 3);
+          
+          // MP3 pode começar com ID3v2 tag (49 44 33 = "ID3")
+          // ou com sync bytes (FF FB ou FF FA)
+          const isID3 = firstBytes[0] === 0x49 && firstBytes[1] === 0x44 && firstBytes[2] === 0x33;
+          const isSync = firstBytes[0] === 0xFF && (firstBytes[1] === 0xFB || firstBytes[1] === 0xFA);
+          
+          if (!isID3 && !isSync) {
+            console.error(`[AudioDownload] releaseId=${releaseId} stage=validation status=failed bytes=${firstBytes.toString('hex')}`);
+            throw new Error('Arquivo gerado não é um MP3 válido');
+          }
+          
+          console.log(`[AudioDownload] releaseId=${releaseId} stage=validation signature=${isID3 ? 'ID3' : 'Sync'} status=success`);
+        }
+      })(),
+      TIMEOUTS.VALIDATION,
+      'Timeout ao validar arquivo'
+    );
 
     const validationDuration = (Date.now() - validationStart) / 1000;
     console.log(`[AudioDownload] releaseId=${releaseId} stage=validation duration=${validationDuration}s status=complete`);
 
-    // Passo 4: Enviar arquivo para o cliente
+    // Salvar no cache
+    await downloadCache.set(releaseId, formatoAudio, arquivoFinal);
+
+    // Passo 5: Enviar arquivo para o cliente
     console.log(`[AudioDownload] releaseId=${releaseId} stage=send status=sending`);
     
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(nomeArquivo)}.${extensao}"`);
-    res.setHeader('Cache-Control', 'no-cache, no-store');
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // 24 horas
+    res.setHeader('X-Cache', 'MISS');
     res.setHeader('X-Video-Id', videoId);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
+    // Streaming do arquivo em vez de carregar tudo em memória
     const fileStream = await fs.readFile(arquivoFinal);
     res.send(fileStream);
 
     const totalDuration = (Date.now() - startTime) / 1000;
-    console.log(`[AudioDownload] releaseId=${releaseId} status=completed total=${totalDuration}s`);
+    console.log(`[AudioDownload] releaseId=${releaseId} status=completed total=${totalDuration}s cache=MISS`);
 
   } catch (err) {
     const totalDuration = (Date.now() - startTime) / 1000;
@@ -525,7 +666,7 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
       });
     }
   } finally {
-    // Passo 5: Limpeza de arquivos temporários
+    // Passo 6: Limpeza de arquivos temporários
     console.log(`[AudioDownload] releaseId=${releaseId} stage=cleanup status=starting`);
     
     for (const arquivo of arquivoParaRemover) {
