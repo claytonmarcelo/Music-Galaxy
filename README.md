@@ -225,7 +225,9 @@ musicgalaxy/
 │   │   │   │   ├── sourceOrchestrator.ts → Orquestrador de múltiplos providers
 │   │   │   │   ├── audioValidator.ts → Validação rigorosa de arquivos
 │   │   │   │   └── providers/  → Implementações concretas
-│   │   │   │       └── youtubeProvider.ts → Provider para YouTube
+│   │   │   │       ├── youtubeProvider.ts → Provider para YouTube
+│   │   │   │       ├── directLinkProvider.ts → Provider para URLs diretas de áudio
+│   │   │   │       └── genericWebProvider.ts → Provider para crawling de sites/blogs
 │   │   │   ├── audio/           → Serviços de áudio (YouTubeAdapter, etc)
 │   │   │   ├── downloadCache.ts → Cache de downloads processados
 │   │   │   └── downloadDeduplication.ts → Deduplicação de downloads simultâneos

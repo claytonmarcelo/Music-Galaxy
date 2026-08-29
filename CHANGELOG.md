@@ -22,6 +22,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Classificação de Erros Expandida**: EXACT_MATCH_NOT_CONFIRMED, NO_SUITABLE_SOURCE, ALL_PROVIDERS_FAILED, INVALID_AUDIO, CORRUPTED_AUDIO
   - **Integração Preservada**: Sistema integrado no audioController com fallback para método tradicional (YouTubeAdapter)
   - **Flag de Habilitação**: `ENABLE_SOURCE_ORCHESTRATOR` para ativar/desativar o novo sistema
+  - **Fallback no Download**: Quando download falha com SOURCE_UNAVAILABLE, usa Source Orchestrator para buscar novo videoId
+
+- **DirectLinkProvider** - Provider para URLs diretas de áudio
+  - Aceita URLs diretas de áudio (MP3, FLAC, WAV, M4A, AAC, OGG, WMA, Opus, WebM)
+  - Valida disponibilidade via HEAD request
+  - Extrai metadados (content-type, content-length)
+  - Suporta redirecionamentos (até 5 hops)
+  - Timeouts: metadata (10s), download (10min)
+
+- **GenericWebProvider** - Provider para crawling de sites/blogs
+  - Busca links de áudio em páginas HTML usando cheerio
+  - Extrai links de tags <a>, <audio> e <source>
+  - Resolve URLs relativas para absolutas
+  - Filtra links suspeitos (tracking, affiliate)
+  - Suporta múltiplos formatos de áudio
+  - Timeouts: search (15s), metadata (10s), download (5min)
+  - **Nota**: Web scraping de motores de busca não implementado por questões de ToS
 
 - **audioSource/types.ts** - Tipos para o sistema de AudioSourceProvider
   - AudioIdentity: Identidade musical para busca (artist, title, album, version, duration, isrc, catalogNumber)
@@ -72,6 +89,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - checkAvailability: Verifica disponibilidade de um vídeo
   - getRealDuration: Obtém duração real usando ffprobe (baixa primeiros 30s)
 
+- **audioSource/providers/directLinkProvider.ts** - Provider para URLs diretas de áudio
+  - Implementação completa de IAudioSourceProvider para URLs diretas
+  - searchInUrl: Processa URL direta e valida disponibilidade
+  - isValidAudioUrl: Valida se URL tem extensão de áudio válida
+  - getMetadata: Obtém metadados via HEAD request (content-type, content-length)
+  - getDownloadInfo: Retorna URL e formato para download
+  - checkAvailability: Verifica disponibilidade via HEAD request
+  - extractFormatFromType: Extrai formato do MIME type
+  - extractFormatFromUrl: Extrai formato da URL
+  - extractFileName: Extrai nome do arquivo da URL
+  - formatBytes: Formata bytes para legível
+
+- **audioSource/providers/genericWebProvider.ts** - Provider para crawling de sites/blogs
+  - Implementação completa de IAudioSourceProvider para crawling HTML
+  - searchInUrl: Busca links de áudio em página HTML usando cheerio
+  - Extrai links de tags <a>, <audio> e <source>
+  - resolveUrl: Resolve URLs relativas para absolutas
+  - isValidAudioUrl: Valida e filtra links suspeitos
+  - generateSourceId: Gera ID único a partir da URL
+  - extractFormatFromType: Extrai formato do MIME type
+  - extractFormatFromUrl: Extrai formato da URL
+  - getMetadata: Obtém metadados via HEAD request
+  - getDownloadInfo: Retorna URL e formato para download
+  - checkAvailability: Verifica disponibilidade via HEAD request
+  - formatBytes: Formata bytes para legível
+
 - **audioSource/sourceOrchestrator.ts** - Orquestrador de múltiplos providers
   - Configuração: enableParallelSearch, maxConcurrentProviders, requireExactMatch, enableFallback
   - registerProvider: Registra um provider no orquestrador
@@ -94,19 +137,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **audioController.ts** - Integração do Source Orchestrator
-  - Adicionados imports de SourceOrchestrator, YouTubeProvider, AudioIdentity
+  - Adicionados imports de SourceOrchestrator, YouTubeProvider, DirectLinkProvider, GenericWebProvider, AudioIdentity
   - Inicialização do orquestrador com configurações (parallel search, max 3 providers, require exact match, enable fallback)
-  - Registro do YouTubeProvider no orquestrador
+  - Registro de 3 providers: YouTubeProvider, DirectLinkProvider, GenericWebProvider
   - Flag ENABLE_SOURCE_ORCHESTRATOR para habilitar/desabilitar o novo sistema
   - Expansão do enum DownloadErrorType com novos tipos: EXACT_MATCH_NOT_CONFIRMED, NO_SUITABLE_SOURCE, ALL_PROVIDERS_FAILED, INVALID_AUDIO, CORRUPTED_AUDIO
   - Refatoração da função garantirVideoId para usar Source Orchestrator quando habilitado
   - Fallback para método tradicional (YouTubeAdapter) se orquestrador falhar
+  - Fallback no download: quando SOURCE_UNAVAILABLE, usa Source Orchestrator para buscar novo videoId
   - Logs estruturados com requestId, providerId, operation
 
 - **README.md** - Atualizado com arquitetura de descoberta global
   - Adicionada seção "Descoberta Global de Fontes de Áudio (Exact Match)"
   - Adicionados novos módulos na tabela: Descoberta global de fontes (Exact Match), Validação de qualidade de áudio
-  - Atualizada estrutura de pastas com detalhes do sistema audioSource
+  - Atualizada estrutura de pastas com detalhes do sistema audioSource (incluindo novos providers)
+
+- **backend/package.json** - Adicionadas dependências para crawling web
+  - cheerio: Parsing HTML para extrair links de áudio
+  - axios: Requisições HTTP para crawling e metadados
+  - @types/cheerio: Tipos TypeScript para cheerio
 
 ### Fixed
 - **Audio Download Pipeline** - Implementado sistema robusto de download com cache, deduplicação e otimização

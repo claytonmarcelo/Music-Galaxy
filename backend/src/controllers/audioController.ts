@@ -21,6 +21,8 @@ import { downloadCache } from '../services/downloadCache';
 import { downloadDeduplication } from '../services/downloadDeduplication';
 import { SourceOrchestrator } from '../services/audioSource/sourceOrchestrator';
 import { YouTubeProvider } from '../services/audioSource/providers/youtubeProvider';
+import { DirectLinkProvider } from '../services/audioSource/providers/directLinkProvider';
+import { GenericWebProvider } from '../services/audioSource/providers/genericWebProvider';
 import { AudioIdentity } from '../services/audioSource/types';
 
 const youtube = new YoutubeAdapter();
@@ -35,7 +37,12 @@ const sourceOrchestrator = new SourceOrchestrator({
 
 // Registrar providers disponíveis
 const youtubeProvider = new YouTubeProvider();
+const directLinkProvider = new DirectLinkProvider();
+const genericWebProvider = new GenericWebProvider();
+
 sourceOrchestrator.registerProvider(youtubeProvider);
+sourceOrchestrator.registerProvider(directLinkProvider);
+sourceOrchestrator.registerProvider(genericWebProvider);
 
 // Flag para habilitar/desabilitar o novo sistema (pode ser movida para .env)
 const ENABLE_SOURCE_ORCHESTRATOR = true;
@@ -577,8 +584,59 @@ async function processDownload(
     }
 
     if (!downloadSuccess) {
-      // Todas as estratégias falharam
+      // Todas as estratégias falharam - tentar buscar novo videoId com Source Orchestrator
       console.log(`[AudioDownload] releaseId=${releaseId} status=all-strategies-failed error=${lastError?.type}`);
+      
+      // Se o erro for SOURCE_UNAVAILABLE e o Source Orchestrator estiver habilitado, tentar buscar novo videoId
+      if (ENABLE_SOURCE_ORCHESTRATOR && lastError?.type === DownloadErrorType.SOURCE_UNAVAILABLE) {
+        console.log(`[AudioDownload] releaseId=${releaseId} tentando buscar novo videoId com Source Orchestrator`);
+        
+        try {
+          // Invalidar videoId atual no banco
+          await pool.execute(
+            `UPDATE releases SET youtube_video_id = NULL WHERE id = ?`,
+            [releaseId]
+          );
+          
+          // Buscar novo videoId usando Source Orchestrator
+          const identity: AudioIdentity = {
+            artist: release.artist_name,
+            title: release.work_title,
+            album: undefined,
+            version: release.version_name,
+            duration: undefined,
+          };
+
+          const discoveryResult = await sourceOrchestrator.discover(identity);
+          
+          if (discoveryResult.bestCandidate && discoveryResult.bestCandidate.candidate.sourceId) {
+            const novoVideoId = discoveryResult.bestCandidate.candidate.sourceId;
+            console.log(
+              `[AudioDownload] Source Orchestrator encontrou novo candidato: ` +
+              `provider=${discoveryResult.bestCandidate.candidate.providerId} ` +
+              `sourceId=${novoVideoId} ` +
+              `score=${discoveryResult.bestCandidate.score.toFixed(1)} ` +
+              `classification=${discoveryResult.bestCandidate.classification}`
+            );
+
+            // Salvar novo videoId no banco
+            await pool.execute(
+              `UPDATE releases SET youtube_video_id = ? WHERE id = ?`,
+              [novoVideoId, releaseId]
+            );
+
+            // Tentar download novamente com o novo videoId
+            console.log(`[AudioDownload] releaseId=${releaseId} tentando download com novo videoId=${novoVideoId}`);
+            
+            // Atualizar videoId e tentar download novamente (recursão limitada)
+            return processDownload(req, res, release, releaseId, formatoAudio, extensao, mimeType, startTime);
+          } else {
+            console.warn(`[AudioDownload] Source Orchestrator não encontrou candidato adequado`);
+          }
+        } catch (error) {
+          console.error(`[AudioDownload] Erro ao usar Source Orchestrator como fallback:`, error);
+        }
+      }
       
       if (!res.headersSent) {
         res.status(503).json({ 
