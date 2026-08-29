@@ -7,6 +7,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Global Audio Source Discovery (Exact Match)** - Sistema completo de descoberta e validação de fontes de áudio
+  - **Arquitetura de Providers**: Abstração `IAudioSourceProvider` para múltiplas fontes de áudio
+  - **Exact Match Engine**: Sistema de pontuação (0-100) e classificação (EXACT_MATCH, PROBABLE_MATCH, REJECTED)
+  - **Regras de Rejeição Rigorosas**: Cover, remix, live, instrumental, duração incompatível, conteúdo truncado
+  - **Source Ranking**: Classificação de fontes por qualidade (codec, bitrate, sample rate), formato e disponibilidade
+  - **Busca Paralela**: Múltiplos providers consultados simultaneamente com timeout individual (30s por provider)
+  - **Fallback Automático**: Se um provider falha, outro assume sem interromper o fluxo
+  - **Validação de Qualidade**: Detecção de FLAC real vs fake (upsampled de MP3), verificação de bitrate adequado
+  - **Validação de Integridade**: Assinatura de arquivo, codec, decodificação FFmpeg completa
+  - **Detecção de Vinheta**: Heurística para identificar conteúdo extra ou ruído de vinil
+  - **Logs Estruturados**: requestId, providerId, operation para rastreamento completo
+  - **Classificação de Erros Expandida**: EXACT_MATCH_NOT_CONFIRMED, NO_SUITABLE_SOURCE, ALL_PROVIDERS_FAILED, INVALID_AUDIO, CORRUPTED_AUDIO
+  - **Integração Preservada**: Sistema integrado no audioController com fallback para método tradicional (YouTubeAdapter)
+  - **Flag de Habilitação**: `ENABLE_SOURCE_ORCHESTRATOR` para ativar/desativar o novo sistema
+
+- **audioSource/types.ts** - Tipos para o sistema de AudioSourceProvider
+  - AudioIdentity: Identidade musical para busca (artist, title, album, version, duration, isrc, catalogNumber)
+  - AudioCandidate: Candidato encontrado por um provider com metadados completos
+  - SearchResult: Resultado da busca de um provider com status e duração
+  - MatchClassification: Enum de classificação (EXACT_MATCH, PROBABLE_MATCH, REJECTED)
+  - CandidateScore: Pontuação de um candidato com classificação e razões
+  - ProviderTimeouts: Configuração de timeout por operação (search, metadata, download)
+  - IAudioSourceProvider: Interface abstrata para providers de áudio
+  - ProviderError: Erro classificado do provider com tipo e retryable
+
+- **audioSource/baseProvider.ts** - Classe base abstrata para providers
+  - normalizeString: Normalização de strings para comparação (remove acentos, lowercase)
+  - normalizeIdentity: Normalização de identidade musical para busca
+  - isSimilar: Verificação de similaridade entre strings com threshold configurável
+  - levenshteinDistance: Distância de Levenshtein para comparação fuzzy
+  - isDurationCompatible: Comparação de durações com margem de tolerância
+  - withTimeout: Wrapper com timeout para operações assíncronas
+
+- **audioSource/exactMatchEngine.ts** - Engine de pontuação e classificação
+  - Pontuação mínima para EXACT_MATCH: 90 pontos
+  - Pontuação mínima para PROBABLE_MATCH: 60 pontos
+  - Pesos dos critérios: artista (35), título (30), duração (15), versão (10), álbum (10)
+  - Algoritmo de similaridade baseado em distância de Levenshtein
+  - Regras de rejeição: artista diferente, título muito diferente, versão incompatível, duração incompatível, indicadores de preview/sample
+  - scoreCandidate: Calcula pontuação completa de um candidato
+  - scoreCandidates: Pontua múltiplos candidatos
+  - filterExactMatches: Filtra apenas EXACT_MATCH
+  - filterAcceptableMatches: Filtra EXACT_MATCH e PROBABLE_MATCH
+  - sortByScore: Ordena por pontuação (maior primeiro)
+
+- **audioSource/sourceRanker.ts** - Ranking de fontes por qualidade
+  - Preferência de formatos: FLAC (100), WAV (90), ALAC (85), M4A (70), MP3 (65), WebM (50), Opus (45), AAC (40), OGG (35)
+  - Cálculo de qualidade baseado em: codec/formato, bitrate, sample rate, bit depth, canais, qualidade declarada
+  - RankingCriteria: exactMatch, qualityScore, formatPreference, availability, speed
+  - Pontuação final ponderada: exactMatch (50%), qualidade (30%), formato (15%), disponibilidade (5%), velocidade (5%)
+  - rankCandidates: Rankeia candidatos pontuados
+  - selectBestCandidate: Seleciona o melhor candidato (EXACT_MATCH ou PROBABLE_MATCH com pontuação >= 75)
+
+- **audioSource/providers/youtubeProvider.ts** - Provider concreto para YouTube
+  - Implementação completa de IAudioSourceProvider para YouTube
+  - Timeouts: search (30s), metadata (15s), download (5min)
+  - search: Busca vídeos no YouTube usando yt-dlp (ytsearch10)
+  - parseVideoToCandidate: Converte resultado do yt-dlp para AudioCandidate
+  - extractVersionFromTitle: Extrai versão do título (Remix, Live, Instrumental, etc)
+  - getMetadata: Obtém metadados detalhados de um vídeo
+  - getDownloadInfo: Obtém informações de download
+  - checkAvailability: Verifica disponibilidade de um vídeo
+  - getRealDuration: Obtém duração real usando ffprobe (baixa primeiros 30s)
+
+- **audioSource/sourceOrchestrator.ts** - Orquestrador de múltiplos providers
+  - Configuração: enableParallelSearch, maxConcurrentProviders, requireExactMatch, enableFallback
+  - registerProvider: Registra um provider no orquestrador
+  - unregisterProvider: Remove um provider do orquestrador
+  - parallelSearch: Executa busca paralela em múltiplos providers
+  - sequentialSearch: Executa busca sequencial em múltiplos providers
+  - discover: Descobre melhor fonte para uma identidade musical
+  - Cache de descoberta (implementação simplificada, pode ser expandida para Redis)
+  - Estatísticas: providersCount, config
+
+- **audioSource/audioValidator.ts** - Validação rigorosa de arquivos de áudio
+  - checkFileSignature: Verifica assinatura de arquivo (FLAC: fLaC, MP3: ID3/sync, WAV: RIFF, M4A: ftyp)
+  - getMetadata: Obtém metadados completos usando ffprobe
+  - checkDuration: Verifica compatibilidade de duração com tolerância (10% ou 5s)
+  - detectVinylOrExtraContent: Detecção heurística de vinheta e conteúdo extra
+  - validateFlacQuality: Valida se é FLAC real (não upsampled de MP3)
+  - validateMp3Quality: Valida se é MP3 de qualidade adequada (>= 128kbps, >= 44.1kHz)
+  - validateFile: Validação completa de arquivo (assinatura, metadados, duração, qualidade, vinheta)
+  - decodeFile: Decodifica arquivo completo para verificar integridade
+
+### Changed
+- **audioController.ts** - Integração do Source Orchestrator
+  - Adicionados imports de SourceOrchestrator, YouTubeProvider, AudioIdentity
+  - Inicialização do orquestrador com configurações (parallel search, max 3 providers, require exact match, enable fallback)
+  - Registro do YouTubeProvider no orquestrador
+  - Flag ENABLE_SOURCE_ORCHESTRATOR para habilitar/desabilitar o novo sistema
+  - Expansão do enum DownloadErrorType com novos tipos: EXACT_MATCH_NOT_CONFIRMED, NO_SUITABLE_SOURCE, ALL_PROVIDERS_FAILED, INVALID_AUDIO, CORRUPTED_AUDIO
+  - Refatoração da função garantirVideoId para usar Source Orchestrator quando habilitado
+  - Fallback para método tradicional (YouTubeAdapter) se orquestrador falhar
+  - Logs estruturados com requestId, providerId, operation
+
+- **README.md** - Atualizado com arquitetura de descoberta global
+  - Adicionada seção "Descoberta Global de Fontes de Áudio (Exact Match)"
+  - Adicionados novos módulos na tabela: Descoberta global de fontes (Exact Match), Validação de qualidade de áudio
+  - Atualizada estrutura de pastas com detalhes do sistema audioSource
+
 ### Fixed
 - **Audio Download Pipeline** - Implementado sistema robusto de download com cache, deduplicação e otimização
   - Adicionado cache de downloads (24 horas) para evitar processamento repetido

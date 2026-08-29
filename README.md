@@ -106,6 +106,21 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - **Otimização do FFmpeg**: Detecta formato da fonte e evita conversão desnecessária (MP3→MP3, FLAC→FLAC)
 - **Headers de cache**: Respostas incluem X-Cache (HIT/MISS) para rastreamento de eficiência
 
+### Descoberta Global de Fontes de Áudio (Exact Match)
+- **Arquitetura de Providers**: Abstração `IAudioSourceProvider` para múltiplas fontes de áudio (YouTube, futuras integrações)
+- **Exact Match Engine**: Sistema de pontuação (0-100) e classificação (EXACT_MATCH, PROBABLE_MATCH, REJECTED)
+- **Regras de Rejeição Rigorosas**: Cover, remix, live, instrumental, duração incompatível, conteúdo truncado
+- **Source Ranking**: Classificação de fontes por qualidade (codec, bitrate, sample rate), formato e disponibilidade
+- **Busca Paralela**: Múltiplos providers consultados simultaneamente com timeout individual (30s por provider)
+- **Fallback Automático**: Se um provider falha, outro assume sem interromper o fluxo
+- **Validação de Qualidade**: Detecção de FLAC real vs fake (upsampled de MP3), verificação de bitrate adequado
+- **Validação de Integridade**: Assinatura de arquivo, codec, decodificação FFmpeg completa
+- **Detecção de Vinheta**: Heurística para identificar conteúdo extra ou ruído de vinil
+- **Logs Estruturados**: requestId, providerId, operation para rastreamento completo
+- **Classificação de Erros Expandida**: EXACT_MATCH_NOT_CONFIRMED, NO_SUITABLE_SOURCE, ALL_PROVIDERS_FAILED, INVALID_AUDIO, CORRUPTED_AUDIO
+- **Integração Preservada**: Sistema integrado no audioController com fallback para método tradicional (YouTubeAdapter)
+- **Flag de Habilitação**: `ENABLE_SOURCE_ORCHESTRATOR` para ativar/desativar o novo sistema
+
 ### Ingestão de Dados Externos
 - Orquestrador de ingestão consulta MusicBrainz, Cover Art Archive e Discogs
 - Cache das respostas em MariaDB, com TTL configurável
@@ -139,6 +154,8 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 | Favoritos                           | ✅      |
 | Histórico de buscas                 | ✅      |
 | Interface premium com animações     | ✅      |
+| Descoberta global de fontes (Exact Match) | ✅      |
+| Validação de qualidade de áudio    | ✅      |
 
 ---
 
@@ -200,6 +217,18 @@ musicgalaxy/
 │   │   ├── models/             → Modelos TypeScript
 │   │   ├── routes/             → Rotas Express
 │   │   ├── services/           → Serviços de negócio
+│   │   │   ├── audioSource/    → Sistema de descoberta global de fontes
+│   │   │   │   ├── types.ts    → Tipos (AudioIdentity, AudioCandidate, etc)
+│   │   │   │   ├── baseProvider.ts → Classe base abstrata para providers
+│   │   │   │   ├── exactMatchEngine.ts → Engine de pontuação e classificação
+│   │   │   │   ├── sourceRanker.ts → Ranking de fontes por qualidade
+│   │   │   │   ├── sourceOrchestrator.ts → Orquestrador de múltiplos providers
+│   │   │   │   ├── audioValidator.ts → Validação rigorosa de arquivos
+│   │   │   │   └── providers/  → Implementações concretas
+│   │   │   │       └── youtubeProvider.ts → Provider para YouTube
+│   │   │   ├── audio/           → Serviços de áudio (YouTubeAdapter, etc)
+│   │   │   ├── downloadCache.ts → Cache de downloads processados
+│   │   │   └── downloadDeduplication.ts → Deduplicação de downloads simultâneos
 │   │   ├── types/               → Tipos TypeScript
 │   │   ├── middleware/          → Middleware Express
 │   │   └── index.ts             → Ponto de entrada

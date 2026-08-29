@@ -4,6 +4,7 @@
 //   GET /api/releases/:id/download → entrega o arquivo de áudio completo para download
 //
 // A URL de stream do YouTube é resolvida sob demanda (evita links expirados no banco).
+// Sistema aprimorado com Source Orchestrator para descoberta global de fontes com exact match.
 
 import { Request, Response } from 'express';
 import { RowDataPacket } from 'mysql2';
@@ -18,8 +19,26 @@ import path from 'path';
 import os from 'os';
 import { downloadCache } from '../services/downloadCache';
 import { downloadDeduplication } from '../services/downloadDeduplication';
+import { SourceOrchestrator } from '../services/audioSource/sourceOrchestrator';
+import { YouTubeProvider } from '../services/audioSource/providers/youtubeProvider';
+import { AudioIdentity } from '../services/audioSource/types';
 
 const youtube = new YoutubeAdapter();
+
+// Inicializar orquestrador de fontes (sistema novo de descoberta global)
+const sourceOrchestrator = new SourceOrchestrator({
+  enableParallelSearch: true,
+  maxConcurrentProviders: 3,
+  requireExactMatch: true,
+  enableFallback: true,
+});
+
+// Registrar providers disponíveis
+const youtubeProvider = new YouTubeProvider();
+sourceOrchestrator.registerProvider(youtubeProvider);
+
+// Flag para habilitar/desabilitar o novo sistema (pode ser movida para .env)
+const ENABLE_SOURCE_ORCHESTRATOR = true;
 
 // Tipos de erro para classificação
 enum DownloadErrorType {
@@ -31,6 +50,12 @@ enum DownloadErrorType {
   VALIDATION_FAILED = 'VALIDATION_FAILED',
   TEMPORARY_NETWORK_ERROR = 'TEMPORARY_NETWORK_ERROR',
   INTERNAL_ERROR = 'INTERNAL_ERROR',
+  // Novos tipos para o sistema de descoberta global
+  EXACT_MATCH_NOT_CONFIRMED = 'EXACT_MATCH_NOT_CONFIRMED',
+  NO_SUITABLE_SOURCE = 'NO_SUITABLE_SOURCE',
+  ALL_PROVIDERS_FAILED = 'ALL_PROVIDERS_FAILED',
+  INVALID_AUDIO = 'INVALID_AUDIO',
+  CORRUPTED_AUDIO = 'CORRUPTED_AUDIO',
 }
 
 // Estrutura de erro detalhado
@@ -170,6 +195,7 @@ async function buscarRelease(releaseId: number): Promise<ReleaseAudioRow | null>
 
 // Garante que a release tem um youtube_video_id.
 // Se ainda não tiver, tenta buscar agora e salva no banco.
+// Sistema aprimorado: usa Source Orchestrator para descoberta global quando habilitado.
 async function garantirVideoId(release: ReleaseAudioRow): Promise<string | null> {
   if (release.youtube_video_id) {
     // Verifica se o vídeo ainda está disponível
@@ -180,6 +206,47 @@ async function garantirVideoId(release: ReleaseAudioRow): Promise<string | null>
     console.warn(`[AudioController] Vídeo ${release.youtube_video_id} indisponível — buscando substituto`);
   }
 
+  // Se o novo sistema de descoberta global estiver habilitado, usa o orquestrador
+  if (ENABLE_SOURCE_ORCHESTRATOR) {
+    console.log(`[AudioController] Usando Source Orchestrator para descoberta global`);
+    
+    try {
+      const identity: AudioIdentity = {
+        artist: release.artist_name,
+        title: release.work_title,
+        album: undefined, // Pode ser expandido para incluir album do banco
+        version: release.version_name,
+        duration: undefined, // Pode ser expandido para incluir duration do banco
+      };
+
+      const discoveryResult = await sourceOrchestrator.discover(identity);
+      
+      if (discoveryResult.bestCandidate && discoveryResult.bestCandidate.candidate.sourceId) {
+        const novoVideoId = discoveryResult.bestCandidate.candidate.sourceId;
+        console.log(
+          `[AudioController] Source Orchestrator encontrou candidato: ` +
+          `provider=${discoveryResult.bestCandidate.candidate.providerId} ` +
+          `sourceId=${novoVideoId} ` +
+          `score=${discoveryResult.bestCandidate.score.toFixed(1)} ` +
+          `classification=${discoveryResult.bestCandidate.classification}`
+        );
+
+        // Salva o novo videoId no banco para futuras requisições
+        await pool.execute(
+          `UPDATE releases SET youtube_video_id = ? WHERE id = ?`,
+          [novoVideoId, release.id]
+        );
+
+        return novoVideoId;
+      } else {
+        console.warn(`[AudioController] Source Orchestrator não encontrou candidato adequado, fallback para método tradicional`);
+      }
+    } catch (error) {
+      console.error(`[AudioController] Source Orchestrator falhou, fallback para método tradicional:`, error);
+    }
+  }
+
+  // Fallback para método tradicional (YouTubeAdapter)
   const novoVideoId = await youtube.buscarVideoId(release.artist_name, release.work_title);
 
   if (novoVideoId) {
