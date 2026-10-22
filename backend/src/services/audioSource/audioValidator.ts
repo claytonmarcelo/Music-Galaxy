@@ -3,6 +3,7 @@
 
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegPath from 'ffmpeg-static';
+import { path as ffprobePath } from 'ffprobe-static';
 import fs from 'fs/promises';
 
 export interface ValidationResult {
@@ -72,6 +73,8 @@ export class AudioValidator {
     return new Promise((resolve) => {
       ffmpeg(filePath)
         .setFfmpegPath(ffmpegPath || 'ffmpeg')
+        // binário ffprobe embutido — sem isso a chamada falha fora do PATH
+        .setFfprobePath(ffprobePath || 'ffprobe')
         .ffprobe((err, metadata) => {
           if (err) {
             console.error('[AudioValidator] Error getting metadata:', err);

@@ -9,7 +9,7 @@ import { detalharWork, listarReleasesDeWork, listarWorksPorDecada } from '../con
 import { detalharRelease, listarReleasesPorData } from '../controllers/releasesController';
 import { listarReleaseTypes } from '../controllers/releaseTypesController';
 import { detalharArtista, listarObrasArtista } from '../controllers/artistsController';
-import { streamAudio, downloadAudio } from '../controllers/audioController';
+import { streamAudio, downloadAudio, definirFonteAudio } from '../controllers/audioController';
 
 const router = Router();
 
@@ -116,11 +116,13 @@ router.get(
 );
 
 // ============================================================
-// Áudio (Streaming e Download completo via YouTube)
+// Áudio (Streaming e Download via sites abertos — Regra 3)
+// Proibido: YouTube, Spotify, Deezer, iTunes e qualquer plataforma de música.
+// Fontes permitidas: blogs, fóruns, homepages e links diretos do mundo inteiro.
 // ============================================================
 
 // GET /api/releases/:id/stream
-// Faz pipe do áudio completo do YouTube diretamente ao player do app
+// Proxy de streaming da URL direta descoberta em site aberto (com suporte a Range)
 router.get(
   '/releases/:id/stream',
   validarParamId,
@@ -128,11 +130,20 @@ router.get(
 );
 
 // GET /api/releases/:id/download
-// Entrega o áudio completo como arquivo .mp3 para download
+// Entrega o áudio completo como arquivo .mp3/.flac (cache permanente + dedup)
 router.get(
   '/releases/:id/download',
   validarParamId,
   asyncHandler(downloadAudio)
+);
+
+// POST /api/releases/:id/audio-source  { url }
+// Registra uma fonte de áudio em site aberto fornecida pelo usuário/painel.
+// A URL é validada contra o guard anti-SSRF e a lista negra de plataformas.
+router.post(
+  '/releases/:id/audio-source',
+  validarParamId,
+  asyncHandler(definirFonteAudio)
 );
 
 export default router;

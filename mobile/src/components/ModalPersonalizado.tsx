@@ -1,5 +1,6 @@
-// Modal Personalizado Premium - Substitui todos os Alerts nativos
-// Design gourmet com animações suaves, botões estilizados e icones coerentes
+// Modal Personalizado — substitui todos os Alert.alert nativos do app.
+// Visual de vidro fosco alinhado à identidade Aurora, com animação suave
+// de entrada, ícone por tipo de situação e botões estilizados.
 
 import React, { useEffect, useRef } from 'react';
 import {
@@ -8,10 +9,9 @@ import {
   Modal,
   TouchableOpacity,
   StyleSheet,
-  Platform,
   Animated,
-  Dimensions,
 } from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
 
 export type TipoModal = 'sucesso' | 'erro' | 'aviso' | 'info' | 'confirmacao';
 
@@ -31,37 +31,24 @@ interface Props {
   icone?: string;
 }
 
-// Configuração de cores e ícones por tipo
-const CONFIGURACAO_TIPO: Record<TipoModal, {
-  cor: string;
-  icone: string;
-  corFundo: string;
-}> = {
-  sucesso: {
-    cor: '#1DB954',
-    icone: '✓',
-    corFundo: '#1DB95420',
-  },
-  erro: {
-    cor: '#FF6B35',
-    icone: '✕',
-    corFundo: '#FF6B3520',
-  },
-  aviso: {
-    cor: '#FFB627',
-    icone: '⚠',
-    corFundo: '#FFB62720',
-  },
-  info: {
-    cor: '#00D9FF',
-    icone: 'ℹ',
-    corFundo: '#00D9FF20',
-  },
-  confirmacao: {
-    cor: '#1DB954',
-    icone: '?',
-    corFundo: '#1DB95420',
-  },
+// Ícones por tipo de situação (as cores vêm do tema).
+const ICONE_TIPO: Record<TipoModal, string> = {
+  sucesso: '✓',
+  erro: '✕',
+  aviso: '⚠',
+  info: 'ℹ',
+  confirmacao: '?',
+};
+
+// Cada tipo aponta para um token de cor do tema.
+type ChaveCor = 'success' | 'error' | 'warning' | 'primary';
+
+const COR_TIPO: Record<TipoModal, ChaveCor> = {
+  sucesso: 'success',
+  erro: 'error',
+  aviso: 'warning',
+  info: 'primary',
+  confirmacao: 'primary',
 };
 
 export default function ModalPersonalizado({
@@ -73,7 +60,9 @@ export default function ModalPersonalizado({
   onFechar,
   icone,
 }: Props): React.JSX.Element {
-  // Animações
+  const { colors } = useTheme();
+
+  // Animações de entrada
   const scaleAnim = useRef(new Animated.Value(0.7)).current;
   const opacidadeAnim = useRef(new Animated.Value(0)).current;
   const translateYAnim = useRef(new Animated.Value(20)).current;
@@ -100,15 +89,15 @@ export default function ModalPersonalizado({
         }),
       ]).start();
     } else {
-      // Reset para próxima abertura
+      // Reset para a próxima abertura
       scaleAnim.setValue(0.7);
       opacidadeAnim.setValue(0);
       translateYAnim.setValue(20);
     }
   }, [visivel, scaleAnim, opacidadeAnim, translateYAnim]);
 
-  const config = CONFIGURACAO_TIPO[tipo];
-  const iconeExibicao = icone || config.icone;
+  const corDestaque = colors[COR_TIPO[tipo]];
+  const iconeExibicao = icone || ICONE_TIPO[tipo];
 
   return (
     <Modal
@@ -117,8 +106,8 @@ export default function ModalPersonalizado({
       animationType="fade"
       onRequestClose={onFechar}
     >
-      {/* Fundo escuro com blur effect */}
-      <View style={styles.overlay}>
+      {/* Véu escuro translúcido atrás do modal */}
+      <View style={[styles.overlay, { backgroundColor: colors.backdrop }]}>
         {/* Container do modal com animações */}
         <Animated.View
           style={[
@@ -132,28 +121,45 @@ export default function ModalPersonalizado({
             },
           ]}
         >
-          {/* Card principal */}
-          <View style={styles.card}>
-            {/* Ícone com animação de pulsação */}
-            <Animated.View
+          {/* Cartão de vidro principal */}
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: colors.glassCardForte,
+                borderColor: colors.glassBorder,
+                shadowColor: colors.glassShadow,
+              },
+            ]}
+          >
+            {/* Fio de luz na borda superior do vidro */}
+            <View
+              pointerEvents="none"
+              style={[styles.brilho, { backgroundColor: colors.glassHighlight }]}
+            />
+
+            {/* Ícone com fundo translúcido do tipo */}
+            <View
               style={[
                 styles.iconeContainer,
-                { backgroundColor: config.corFundo },
+                { backgroundColor: `${corDestaque}22`, borderColor: `${corDestaque}55` },
               ]}
             >
-              <Text style={[styles.icone, { color: config.cor }]}>
+              <Text style={[styles.icone, { color: corDestaque }]}>
                 {iconeExibicao}
               </Text>
-            </Animated.View>
+            </View>
 
             {/* Título */}
-            <Text style={styles.titulo}>{titulo}</Text>
+            <Text style={[styles.titulo, { color: colors.text }]}>{titulo}</Text>
 
             {/* Mensagem */}
-            <Text style={styles.mensagem}>{mensagem}</Text>
+            <Text style={[styles.mensagem, { color: colors.textSecondary }]}>
+              {mensagem}
+            </Text>
 
             {/* Divisor visual */}
-            <View style={styles.divisor} />
+            <View style={[styles.divisor, { backgroundColor: colors.glassBorder }]} />
 
             {/* Botões */}
             <View style={styles.containerBotoes}>
@@ -164,10 +170,22 @@ export default function ModalPersonalizado({
                     styles.botao,
                     botao.estilo === 'primario' && [
                       styles.botaoPrimario,
-                      { backgroundColor: config.cor },
+                      { backgroundColor: corDestaque },
                     ],
-                    botao.estilo === 'secundario' && styles.botaoSecundario,
-                    botao.estilo === 'destrutivo' && styles.botaoDestrutivo,
+                    botao.estilo === 'secundario' && [
+                      styles.botaoSecundario,
+                      {
+                        backgroundColor: colors.glassCard,
+                        borderColor: colors.glassBorder,
+                      },
+                    ],
+                    botao.estilo === 'destrutivo' && [
+                      styles.botaoDestrutivo,
+                      {
+                        backgroundColor: `${colors.error}22`,
+                        borderColor: colors.error,
+                      },
+                    ],
                     botoes.length > 1 && index === 0 && { marginRight: 8 },
                   ]}
                   onPress={() => {
@@ -178,10 +196,10 @@ export default function ModalPersonalizado({
                 >
                   <Text
                     style={[
-                      styles.textoBorao,
-                      botao.estilo === 'primario' && styles.textoBotaoPrimario,
-                      botao.estilo === 'destrutivo' &&
-                        styles.textoBotaoDestrutivo,
+                      styles.textoBotao,
+                      { color: colors.buttonText },
+                      botao.estilo === 'secundario' && { color: colors.text },
+                      botao.estilo === 'destrutivo' && { color: colors.error },
                     ]}
                   >
                     {botao.texto}
@@ -199,7 +217,6 @@ export default function ModalPersonalizado({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -210,27 +227,31 @@ const styles = StyleSheet.create({
   },
 
   card: {
-    backgroundColor: '#1A1A2E',
-    borderRadius: 20,
+    borderRadius: 24,
+    borderWidth: 1,
     padding: 24,
     overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.3,
-        shadowRadius: 20,
-      },
-      android: {
-        elevation: 12,
-      },
-    }),
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+
+  brilho: {
+    position: 'absolute',
+    top: 0,
+    left: 24,
+    right: 24,
+    height: 1.5,
+    borderRadius: 2,
+    opacity: 0.6,
   },
 
   iconeContainer: {
     width: 80,
     height: 80,
     borderRadius: 40,
+    borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
     alignSelf: 'center',
@@ -245,14 +266,12 @@ const styles = StyleSheet.create({
   titulo: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 8,
   },
 
   mensagem: {
     fontSize: 14,
-    color: '#AAAAAA',
     textAlign: 'center',
     lineHeight: 20,
     marginBottom: 16,
@@ -260,7 +279,6 @@ const styles = StyleSheet.create({
 
   divisor: {
     height: 1,
-    backgroundColor: '#2E2E4E',
     marginBottom: 16,
   },
 
@@ -273,40 +291,25 @@ const styles = StyleSheet.create({
   botao: {
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 10,
+    borderRadius: 12,
     minWidth: 100,
     justifyContent: 'center',
     alignItems: 'center',
     flex: 1,
   },
 
-  botaoPrimario: {
-    backgroundColor: '#1DB954',
-  },
+  botaoPrimario: {},
 
   botaoSecundario: {
-    backgroundColor: '#2E2E4E',
     borderWidth: 1,
-    borderColor: '#3E3E5E',
   },
 
   botaoDestrutivo: {
-    backgroundColor: '#FF6B3520',
     borderWidth: 1,
-    borderColor: '#FF6B35',
   },
 
-  textoBorao: {
+  textoBotao: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#FFFFFF',
-  },
-
-  textoBotaoPrimario: {
-    color: '#FFFFFF',
-  },
-
-  textoBotaoDestrutivo: {
-    color: '#FF6B35',
   },
 });

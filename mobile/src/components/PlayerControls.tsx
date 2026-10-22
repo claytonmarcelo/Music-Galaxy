@@ -1,6 +1,6 @@
 // Componente de controles de player de áudio.
 // Exibe botões play/pause, slider de progresso, tempo e duração.
-// Design premium com glassmorphism, animações e micro-interações.
+// Visual premium com vidro fosco, animações e micro-interações.
 
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -15,6 +15,7 @@ import {
 import SliderModule from '@react-native-community/slider';
 import { playerAudio, EstadoPlayer } from '../services/playerAudio';
 import { useModal } from '../contexts/ModalContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { TIMINGS, EASING } from '../utils/animacoes';
 
 interface Props {
@@ -29,6 +30,7 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
   const [estado, setEstado] = useState<EstadoPlayer>(playerAudio.obterEstado());
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const { colors } = useTheme();
   const { toastErro, toastInfo } = useModal();
 
   // Animações
@@ -84,7 +86,7 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
   const handlePlayPause = async () => {
     try {
       if (!url) {
-        const mensagem = 'Nenhuma URL de áudio original disponível para esta release.';
+        const mensagem = 'Nenhuma fonte de áudio disponível para esta versão.';
         setErro(mensagem);
         toastErro(mensagem);
         return;
@@ -165,15 +167,19 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
         styles.container,
         {
           opacity: fadeInAnim,
+          // Painel do player em vidro mais opaco, com contorno e sombra do tema
+          backgroundColor: colors.glassCardForte,
+          borderColor: colors.glassBorder,
+          shadowColor: colors.glassShadow,
         },
       ]}
     >
       {/* Info do áudio */}
       <View style={styles.info}>
-        <Text style={styles.titulo} numberOfLines={1}>
+        <Text style={[styles.titulo, { color: colors.text }]} numberOfLines={1}>
           ♫ {titulo}
         </Text>
-        <Text style={styles.artista} numberOfLines={1}>
+        <Text style={[styles.artista, { color: colors.textSecondary }]} numberOfLines={1}>
           {artista}
         </Text>
       </View>
@@ -186,16 +192,16 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
           maximumValue={1}
           value={progresso}
           onValueChange={handleSliderChange}
-          minimumTrackTintColor="#1DB954"
-          maximumTrackTintColor="#2A2A4A"
-          thumbTintColor="#1DB954"
+          minimumTrackTintColor={colors.primary}
+          maximumTrackTintColor={colors.border}
+          thumbTintColor={colors.primary}
           disabled={!estado.duracao}
         />
         <View style={styles.tempoContainer}>
-          <Text style={styles.tempoTexto}>
+          <Text style={[styles.tempoTexto, { color: colors.textSecondary }]}>
             {formatarTempo(estado.tempo)}
           </Text>
-          <Text style={styles.tempoTexto}>
+          <Text style={[styles.tempoTexto, { color: colors.textSecondary }]}>
             {formatarTempo(estado.duracao)}
           </Text>
         </View>
@@ -215,8 +221,8 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
           <TouchableOpacity
             style={[
               styles.botao,
-              styles.botaoPlay,
-              estado.tocando && styles.botaoPlayAtivo,
+              { backgroundColor: colors.primary },
+              estado.tocando && [styles.botaoPlayAtivo, { borderColor: colors.accent }],
             ]}
             onPress={handlePlayPause}
             disabled={carregando}
@@ -224,9 +230,9 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
             accessibilityLabel={estado.tocando ? 'Pausar reprodução' : 'Iniciar reprodução'}
           >
             {carregando ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={colors.buttonText} />
             ) : (
-              <Text style={styles.botaoTexto}>
+              <Text style={[styles.botaoTexto, { color: colors.buttonText }]}>
                 {estado.tocando ? '⏸' : '▶️'}
               </Text>
             )}
@@ -235,21 +241,25 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
 
         {/* Botão Stop */}
         <TouchableOpacity
-          style={[styles.botao, styles.botaoStop]}
+          style={[
+            styles.botao,
+            styles.botaoStop,
+            { backgroundColor: colors.glassCard, borderColor: colors.error },
+          ]}
           onPress={handleStop}
           disabled={carregando}
           activeOpacity={0.7}
           accessibilityLabel="Parar reprodução"
         >
-          <Text style={styles.botaoTexto}>⏹</Text>
+          <Text style={[styles.botaoTexto, { color: colors.error }]}>⏹</Text>
         </TouchableOpacity>
       </View>
 
       {/* Mensagem de erro */}
       {erro && (
-        <View style={styles.erroContainer}>
+        <View style={[styles.erroContainer, { backgroundColor: colors.glassCard, borderLeftColor: colors.error }]}>
           <Text style={styles.erroIcone}>⚠️</Text>
-          <Text style={styles.erroTexto}>{erro}</Text>
+          <Text style={[styles.erroTexto, { color: colors.error }]}>{erro}</Text>
         </View>
       )}
     </Animated.View>
@@ -258,22 +268,20 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#12121F',
     borderRadius: 16,
     padding: 20,
     marginHorizontal: 16,
     marginVertical: 12,
     borderWidth: 1,
-    borderColor: '#1DB95420',
+    // Contorno e sombra de vidro: as cores vêm do tema, aplicadas em linha
     ...Platform.select({
       ios: {
-        shadowColor: '#1DB954',
         shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.15,
+        shadowOpacity: 0.25,
         shadowRadius: 12,
       },
       android: {
-        elevation: 6,
+        elevation: 5,
       },
     }),
   },
@@ -285,14 +293,12 @@ const styles = StyleSheet.create({
   titulo: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#FFFFFF',
     marginBottom: 4,
     letterSpacing: 0.3,
   },
 
   artista: {
     fontSize: 13,
-    color: '#8080A0',
     fontWeight: '500',
   },
 
@@ -314,7 +320,6 @@ const styles = StyleSheet.create({
 
   tempoTexto: {
     fontSize: 11,
-    color: '#606080',
     fontWeight: '600',
   },
 
@@ -333,7 +338,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 8,
@@ -344,20 +348,12 @@ const styles = StyleSheet.create({
     }),
   },
 
-  botaoPlay: {
-    backgroundColor: '#1DB954',
-  },
-
   botaoPlayAtivo: {
-    backgroundColor: '#1DB954',
     borderWidth: 2,
-    borderColor: '#1DB95480',
   },
 
   botaoStop: {
-    backgroundColor: '#FF6B3520',
     borderWidth: 2,
-    borderColor: '#FF6B35',
   },
 
   botaoTexto: {
@@ -366,14 +362,12 @@ const styles = StyleSheet.create({
   },
 
   erroContainer: {
-    backgroundColor: '#FF6B3520',
     borderRadius: 10,
     padding: 12,
     marginTop: 12,
     flexDirection: 'row',
     alignItems: 'center',
     borderLeftWidth: 3,
-    borderLeftColor: '#FF6B35',
   },
 
   erroIcone: {
@@ -383,7 +377,6 @@ const styles = StyleSheet.create({
 
   erroTexto: {
     fontSize: 12,
-    color: '#FF6B35',
     fontWeight: '600',
     flex: 1,
   },

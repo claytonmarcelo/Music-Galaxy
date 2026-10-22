@@ -1,7 +1,7 @@
 // Ponto de entrada do servidor Music Galaxy Backend.
 // Inicializa o Express, registra todos os middlewares e rotas,
 // verifica a conexão com o banco e inicia o servidor na porta configurada.
-
+// Regra 3: áudio servido pela API vem apenas de sites abertos (blogs, fóruns, links diretos).
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';

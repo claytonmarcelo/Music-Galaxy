@@ -1,7 +1,7 @@
 // Tela de detalhes de uma obra musical (Work).
 // Exibe a obra conceitual com TODAS as versões/releases agrupadas por tipo.
 // Implementa Regra 2: nunca ocultar ou substituir versões.
-// Incluir animações parallax na capa e design premium.
+// Visual de vidro fosco: cabeçalho e seções translúcidas sobre o fundo decorativo.
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -14,15 +14,17 @@ import {
   TouchableOpacity,
   RefreshControl,
   Animated,
-  Platform,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RootStackParamList, Release, RespostaReleasesDeWork } from '../types';
 import { buscarReleasesDeWork } from '../services/api';
 import { useModal } from '../contexts/ModalContext';
+import { useTheme } from '../contexts/ThemeContext';
 import ReleaseCard from '../components/ReleaseCard';
-import { TIMINGS, EASING } from '../utils/animacoes';
+import AuroraBackground from '../components/AuroraBackground';
+import GlassCard from '../components/GlassCard';
+import { TIMINGS } from '../utils/animacoes';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DetalheWork'>;
 
@@ -35,6 +37,7 @@ interface GrupoReleases {
 export default function DetalheWorkScreen({ route, navigation }: Props): React.JSX.Element {
   const { workId } = route.params;
   const { toastErro } = useModal();
+  const { colors } = useTheme();
 
   // Estados
   const [carregando, setCarregando] = useState(true);
@@ -69,7 +72,7 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
         const resposta = await buscarReleasesDeWork(workId, { limit: LIMIT, offset });
 
         if (!resposta.success) {
-          throw new Error('Erro ao carregar releases');
+          throw new Error('Erro ao carregar versões');
         }
 
         const { results, total, work } = resposta.data;
@@ -147,26 +150,30 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
   // Renderers
   if (carregando) {
     return (
-      <View style={styles.containerCentrado}>
-        <ActivityIndicator size="large" color="#1DB954" />
-        <Text style={styles.textoCentrado}>Carregando obra...</Text>
-      </View>
+      <AuroraBackground>
+        <View style={styles.containerCentrado}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.textoCentrado, { color: colors.textSecondary }]}>Carregando obra...</Text>
+        </View>
+      </AuroraBackground>
     );
   }
 
   if (erro && releases.length === 0) {
     return (
-      <View style={styles.containerCentrado}>
-        <Text style={styles.textoErro}>⚠️ Erro ao carregar</Text>
-        <Text style={styles.textoErroMsg}>{erro}</Text>
-        <TouchableOpacity
-          style={styles.botaoTentar}
-          onPress={() => carregarReleases(0, false)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.textoButton}>Tentar Novamente</Text>
-        </TouchableOpacity>
-      </View>
+      <AuroraBackground>
+        <View style={styles.containerCentrado}>
+          <Text style={[styles.textoErro, { color: colors.error }]}>⚠️ Erro ao carregar</Text>
+          <Text style={[styles.textoErroMsg, { color: colors.textSecondary }]}>{erro}</Text>
+          <TouchableOpacity
+            style={[styles.botaoTentar, { backgroundColor: colors.button }]}
+            onPress={() => carregarReleases(0, false)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.textoButton, { color: colors.buttonText }]}>Tentar novamente</Text>
+          </TouchableOpacity>
+        </View>
+      </AuroraBackground>
     );
   }
 
@@ -174,62 +181,60 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
   const renderGrupo = (grupo: GrupoReleases, index: number): React.JSX.Element => (
     <Animated.View
       key={index}
-      style={[
-        styles.secaoGrupo,
-        {
-          opacity: fadeInAnim,
-          transform: [
-            {
-              translateY: scrollY.interpolate({
-                inputRange: [0, 200],
-                outputRange: [0, 20],
-                extrapolate: 'clamp',
-              }),
-            },
-          ],
-        },
-      ]}
+      style={{
+        opacity: fadeInAnim,
+        transform: [
+          {
+            translateY: scrollY.interpolate({
+              inputRange: [0, 200],
+              outputRange: [0, 20],
+              extrapolate: 'clamp',
+            }),
+          },
+        ],
+      }}
     >
-      <Text style={styles.tituloGrupo}>
-        {traduzirCategoria(grupo.categoria)} ({grupo.releases.length})
-      </Text>
-      <FlatList
-        scrollEnabled={false}
-        data={grupo.releases}
-        keyExtractor={rel => `rel-${rel.id}`}
-        renderItem={({ item }) => (
-          <ReleaseCard 
-            release={item}
-            onPress={handleSelecionarRelease}
-          />
-        )}
-      />
+      <GlassCard style={styles.secaoGrupo}>
+        <Text style={[styles.tituloGrupo, { color: colors.primary }]}>
+          {traduzirCategoria(grupo.categoria)} ({grupo.releases.length})
+        </Text>
+        <FlatList
+          scrollEnabled={false}
+          data={grupo.releases}
+          keyExtractor={rel => `rel-${rel.id}`}
+          renderItem={({ item }) => (
+            <ReleaseCard
+              release={item}
+              onPress={handleSelecionarRelease}
+            />
+          )}
+        />
+      </GlassCard>
     </Animated.View>
   );
 
-  // Renderiza o cabeçalho da obra com animação
+  // Renderiza o cabeçalho da obra em cartão de vidro
   const renderCabecalho = (): React.JSX.Element => (
     <Animated.View
-      style={[
-        styles.secaoCabecalho,
-        {
-          opacity: fadeInAnim,
-          transform: [
-            {
-              scale: scrollY.interpolate({
-                inputRange: [-100, 0],
-                outputRange: [1.1, 1],
-                extrapolate: 'clamp',
-              }),
-            },
-          ],
-        },
-      ]}
+      style={{
+        opacity: fadeInAnim,
+        transform: [
+          {
+            scale: scrollY.interpolate({
+              inputRange: [-100, 0],
+              outputRange: [1.1, 1],
+              extrapolate: 'clamp',
+            }),
+          },
+        ],
+      }}
     >
-      <Text style={styles.tituloObra}>{workInfo?.title || 'Obra'}</Text>
-      <Text style={styles.totalReleases}>
-        {releases.length} versão{releases.length !== 1 ? 'ões' : ''} encontrada{releases.length !== 1 ? 's' : ''}
-      </Text>
+      <GlassCard style={styles.secaoCabecalho}>
+        <Text style={[styles.tituloObra, { color: colors.text }]}>{workInfo?.title || 'Obra'}</Text>
+        <Text style={[styles.totalReleases, { color: colors.textSecondary }]}>
+          {releases.length} versão{releases.length !== 1 ? 'ões' : ''} encontrada{releases.length !== 1 ? 's' : ''}
+        </Text>
+      </GlassCard>
     </Animated.View>
   );
 
@@ -240,15 +245,18 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
     return (
       <View style={styles.containerCarregarMais}>
         <TouchableOpacity
-          style={styles.botaoCarregarMais}
+          style={[
+            styles.botaoCarregarMais,
+            { backgroundColor: colors.card, borderColor: colors.primary },
+          ]}
           onPress={carregarMais}
           disabled={atualizando}
           activeOpacity={0.7}
         >
           {atualizando ? (
-            <ActivityIndicator size="small" color="#1DB954" />
+            <ActivityIndicator size="small" color={colors.primary} />
           ) : (
-            <Text style={styles.textoCarregarMais}>Carregar Mais</Text>
+            <Text style={[styles.textoCarregarMais, { color: colors.primary }]}>Carregar mais</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -256,24 +264,23 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
   };
 
   return (
-    <View style={styles.container}>
-      {/* Cabeçalho */}
+    <AuroraBackground>
+      {/* Barra superior de vidro */}
       <Animated.View
-        style={[
-          styles.headerBox,
-          {
-            opacity: fadeInAnim,
-          },
-        ]}
+        style={{
+          opacity: fadeInAnim,
+        }}
       >
-        <TouchableOpacity
-          style={styles.botaoVoltar}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.textoVoltar}>← Voltar</Text>
-        </TouchableOpacity>
-        <Text style={styles.tituloHeader}>Obra Completa</Text>
+        <GlassCard forte style={styles.headerBox}>
+          <TouchableOpacity
+            style={styles.botaoVoltar}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.textoVoltar, { color: colors.primary }]}>← Voltar</Text>
+          </TouchableOpacity>
+          <Text style={[styles.tituloHeader, { color: colors.text }]}>Obra Completa</Text>
+        </GlassCard>
       </Animated.View>
 
       {/* Conteúdo */}
@@ -288,7 +295,7 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
           <RefreshControl
             refreshing={atualizando}
             onRefresh={handleAtualizacao}
-            tintColor="#1DB954"
+            tintColor={colors.primary}
           />
         }
       >
@@ -300,7 +307,7 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
         ) : (
           <View style={styles.containerSemDados}>
             <Text style={styles.icone}>🎵</Text>
-            <Text style={styles.textoSemDados}>Nenhuma versão encontrada</Text>
+            <Text style={[styles.textoSemDados, { color: colors.textSecondary }]}>Nenhuma versão encontrada</Text>
           </View>
         )}
 
@@ -309,7 +316,7 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
         {/* Espaço extra no final */}
         <View style={{ height: 20 }} />
       </Animated.ScrollView>
-    </View>
+    </AuroraBackground>
   );
 }
 
@@ -333,30 +340,14 @@ function traduzirCategoria(categoria: string): string {
 // ============================================================
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F0F1A',
-  },
-
   headerBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    marginHorizontal: 16,
+    marginTop: 8,
+    paddingHorizontal: 8,
     paddingVertical: 12,
-    backgroundColor: '#1A1A2E',
-    borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.15,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 3,
-      },
-    }),
+    borderRadius: 20,
   },
 
   botaoVoltar: {
@@ -364,7 +355,6 @@ const styles = StyleSheet.create({
   },
 
   textoVoltar: {
-    color: '#1DB954',
     fontSize: 14,
     fontWeight: 'bold',
   },
@@ -372,7 +362,6 @@ const styles = StyleSheet.create({
   tituloHeader: {
     flex: 1,
     textAlign: 'center',
-    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
     marginRight: 40,
@@ -386,13 +375,10 @@ const styles = StyleSheet.create({
 
   secaoCabecalho: {
     marginBottom: 24,
-    paddingBottom: 16,
-    borderBottomWidth: 2,
-    borderBottomColor: '#1DB954',
+    borderRadius: 16,
   },
 
   tituloObra: {
-    color: '#FFFFFF',
     fontSize: 26,
     fontWeight: '800',
     marginBottom: 8,
@@ -400,33 +386,16 @@ const styles = StyleSheet.create({
   },
 
   totalReleases: {
-    color: '#8080A0',
     fontSize: 14,
     fontWeight: '500',
   },
 
   secaoGrupo: {
     marginBottom: 24,
-    backgroundColor: '#12121F',
     borderRadius: 16,
-    padding: 16,
-    borderLeftWidth: 3,
-    borderLeftColor: '#1DB954',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
   },
 
   tituloGrupo: {
-    color: '#1DB954',
     fontSize: 14,
     fontWeight: 'bold',
     marginBottom: 12,
@@ -438,48 +407,31 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F0F1A',
   },
 
   textoCentrado: {
-    color: '#8080A0',
     fontSize: 14,
     marginTop: 12,
   },
 
   textoErro: {
-    color: '#FF6B35',
     fontSize: 32,
     marginBottom: 8,
   },
 
   textoErroMsg: {
-    color: '#8080A0',
     fontSize: 14,
     marginBottom: 20,
     textAlign: 'center',
   },
 
   botaoTentar: {
-    backgroundColor: '#1DB954',
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 8,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#1DB954',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
+    borderRadius: 12,
   },
 
   textoButton: {
-    color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 14,
   },
@@ -496,7 +448,6 @@ const styles = StyleSheet.create({
   },
 
   textoSemDados: {
-    color: '#8080A0',
     fontSize: 16,
   },
 
@@ -507,27 +458,13 @@ const styles = StyleSheet.create({
   },
 
   botaoCarregarMais: {
-    backgroundColor: '#1A1A2E',
     paddingHorizontal: 32,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#1DB954',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#1DB954',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
   },
 
   textoCarregarMais: {
-    color: '#1DB954',
     fontWeight: 'bold',
     fontSize: 14,
   },

@@ -1,6 +1,7 @@
 // Componente de progresso de download.
 // Exibe barra de progresso animada, percentual, tamanho e botões de controle.
-// Design premium com animações suaves e feedback visual.
+// Visual premium com vidro fosco, animações suaves e feedback visual,
+// sempre com as cores resolvidas pelos tokens do tema ativo.
 
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -14,6 +15,7 @@ import {
 } from 'react-native';
 import { downloadManager, EstadoDownload } from '../services/downloadManager';
 import { useModal } from '../contexts/ModalContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { TIMINGS, EASING } from '../utils/animacoes';
 
 interface Props {
@@ -33,6 +35,7 @@ export default function DownloadProgress({
     downloadManager.obterEstado(url)
   );
   const [iniciarDownload, setIniciarDownload] = useState(false);
+  const { colors } = useTheme();
   const { abrirConfirmacao, toastErro, toastSucesso } = useModal();
 
   // Animações
@@ -68,7 +71,7 @@ export default function DownloadProgress({
 
       // Notifica quando concluído
       if (novoEstado.concluido && novoEstado.caminhoLocal) {
-        toastSucesso('Download concluído!');
+        toastSucesso('Download concluído! O arquivo foi salvo.');
         
         // Anima checkmark
         Animated.spring(scaleCheckmarkAnim, {
@@ -112,15 +115,15 @@ export default function DownloadProgress({
 
   const handleDeletar = () => {
     abrirConfirmacao(
-      'Remover Download',
-      'Tem certeza que deseja remover este arquivo?',
+      'Remover download',
+      'Tem certeza de que deseja remover este arquivo?',
       async () => {
         try {
           await downloadManager.deletar(url);
           setEstado(null);
           toastSucesso('Arquivo removido');
         } catch (err) {
-          toastErro('Não foi possível deletar o arquivo');
+          toastErro('Não foi possível remover o arquivo.');
         }
       }
     );
@@ -144,23 +147,30 @@ export default function DownloadProgress({
           styles.container,
           {
             opacity: fadeInAnim,
+            // Painel em vidro mais opaco, com contorno e sombra do tema
+            backgroundColor: colors.glassCardForte,
+            borderColor: colors.glassBorder,
+            shadowColor: colors.glassShadow,
           },
         ]}
       >
         <View style={styles.infoDownload}>
-          <Text style={styles.titulo} numberOfLines={1}>
+          <Text style={[styles.titulo, { color: colors.text }]} numberOfLines={1}>
             💾 {titulo}
           </Text>
-          <Text style={styles.artista} numberOfLines={1}>
+          <Text style={[styles.artista, { color: colors.textSecondary }]} numberOfLines={1}>
             {artista}
           </Text>
         </View>
         <TouchableOpacity
-          style={styles.botaoBaixar}
+          style={[
+            styles.botaoBaixar,
+            { backgroundColor: colors.button, shadowColor: colors.glassShadow },
+          ]}
           onPress={handleIniciarDownload}
           activeOpacity={0.7}
         >
-          <Text style={styles.botaoTexto}>⬇️ Baixar</Text>
+          <Text style={[styles.botaoTexto, { color: colors.buttonText }]}>⬇️ Baixar</Text>
         </TouchableOpacity>
       </Animated.View>
     );
@@ -179,31 +189,35 @@ export default function DownloadProgress({
           styles.container,
           {
             opacity: fadeInAnim,
+            // Painel em vidro mais opaco, com contorno e sombra do tema
+            backgroundColor: colors.glassCardForte,
+            borderColor: colors.glassBorder,
+            shadowColor: colors.glassShadow,
           },
         ]}
       >
         <View style={styles.infoDownload}>
-          <Text style={styles.titulo} numberOfLines={1}>
+          <Text style={[styles.titulo, { color: colors.text }]} numberOfLines={1}>
             💾 {titulo}
           </Text>
-          <Text style={styles.artista} numberOfLines={1}>
+          <Text style={[styles.artista, { color: colors.textSecondary }]} numberOfLines={1}>
             {artista}
           </Text>
         </View>
 
         {/* Barra de progresso animada */}
         <View style={styles.progressoContainer}>
-          <View style={styles.barraFundo}>
+          <View style={[styles.barraFundo, { backgroundColor: colors.border }]}>
             <Animated.View
               style={[
                 styles.barraProgresso,
-                { width: progressWidth },
+                { width: progressWidth, backgroundColor: colors.primary },
               ]}
             />
           </View>
           <View style={styles.detalhesProgresso}>
-            <Text style={styles.percentual}>{percentual}%</Text>
-            <Text style={styles.tamanho}>
+            <Text style={[styles.percentual, { color: colors.primary }]}>{percentual}%</Text>
+            <Text style={[styles.tamanho, { color: colors.textSecondary }]}>
               {formatarTamanho(estado.tamanhoAtual)} / {formatarTamanho(estado.tamanhoTotal)}
             </Text>
           </View>
@@ -211,11 +225,14 @@ export default function DownloadProgress({
 
         {/* Botões de controle */}
         <TouchableOpacity
-          style={styles.botaoCancelar}
+          style={[
+            styles.botaoCancelar,
+            { backgroundColor: colors.glassCard, borderColor: colors.error },
+          ]}
           onPress={handleCancelar}
           activeOpacity={0.7}
         >
-          <Text style={styles.botaoCancelarTexto}>✕ Cancelar</Text>
+          <Text style={[styles.botaoCancelarTexto, { color: colors.error }]}>✕ Cancelar</Text>
         </TouchableOpacity>
       </Animated.View>
     );
@@ -229,41 +246,49 @@ export default function DownloadProgress({
           styles.container,
           {
             opacity: fadeInAnim,
+            // Painel em vidro mais opaco, com contorno e sombra do tema
+            backgroundColor: colors.glassCardForte,
+            borderColor: colors.glassBorder,
+            shadowColor: colors.glassShadow,
           },
         ]}
       >
         <View style={styles.infoDownload}>
-          <Text style={styles.titulo} numberOfLines={1}>
+          <Text style={[styles.titulo, { color: colors.text }]} numberOfLines={1}>
             💾 {titulo}
           </Text>
-          <Text style={styles.artista} numberOfLines={1}>
+          <Text style={[styles.artista, { color: colors.textSecondary }]} numberOfLines={1}>
             {artista}
           </Text>
         </View>
 
-        <View style={styles.concluido}>
+        <View style={[styles.concluido, { backgroundColor: colors.glassCard, borderColor: colors.success }]}>
           <Animated.View
             style={[
               styles.checkmarkContainer,
               {
+                backgroundColor: colors.success,
                 transform: [{ scale: scaleCheckmarkAnim }],
               },
             ]}
           >
-            <Text style={styles.checkmark}>✓</Text>
+            <Text style={[styles.checkmark, { color: colors.buttonText }]}>✓</Text>
           </Animated.View>
-          <Text style={styles.concluidoTexto}>Baixado</Text>
-          <Text style={styles.tamanhoFinal}>
+          <Text style={[styles.concluidoTexto, { color: colors.success }]}>Baixado</Text>
+          <Text style={[styles.tamanhoFinal, { color: colors.textSecondary }]}>
             {formatarTamanho(estado.tamanhoTotal)}
           </Text>
         </View>
 
         <TouchableOpacity
-          style={styles.botaoDeletar}
+          style={[
+            styles.botaoDeletar,
+            { backgroundColor: colors.secondary, borderColor: colors.border },
+          ]}
           onPress={handleDeletar}
           activeOpacity={0.7}
         >
-          <Text style={styles.botaoDeletarTexto}>🗑 Remover</Text>
+          <Text style={[styles.botaoDeletarTexto, { color: colors.textSecondary }]}>🗑 Remover</Text>
         </TouchableOpacity>
       </Animated.View>
     );
@@ -277,29 +302,36 @@ export default function DownloadProgress({
           styles.container,
           {
             opacity: fadeInAnim,
+            // Painel em vidro mais opaco, com contorno e sombra do tema
+            backgroundColor: colors.glassCardForte,
+            borderColor: colors.glassBorder,
+            shadowColor: colors.glassShadow,
           },
         ]}
       >
         <View style={styles.infoDownload}>
-          <Text style={styles.titulo} numberOfLines={1}>
+          <Text style={[styles.titulo, { color: colors.text }]} numberOfLines={1}>
             💾 {titulo}
           </Text>
-          <Text style={styles.artista} numberOfLines={1}>
+          <Text style={[styles.artista, { color: colors.textSecondary }]} numberOfLines={1}>
             {artista}
           </Text>
         </View>
 
-        <View style={styles.erroBox}>
+        <View style={[styles.erroBox, { backgroundColor: colors.glassCard, borderLeftColor: colors.error }]}>
           <Text style={styles.erroIcone}>⚠️</Text>
-          <Text style={styles.erroTexto}>{estado.erro}</Text>
+          <Text style={[styles.erroTexto, { color: colors.error }]}>{estado.erro}</Text>
         </View>
 
         <TouchableOpacity
-          style={styles.botaoBaixar}
+          style={[
+            styles.botaoBaixar,
+            { backgroundColor: colors.button, shadowColor: colors.glassShadow },
+          ]}
           onPress={handleIniciarDownload}
           activeOpacity={0.7}
         >
-          <Text style={styles.botaoTexto}>⬇️ Tentar Novamente</Text>
+          <Text style={[styles.botaoTexto, { color: colors.buttonText }]}>⬇️ Tentar novamente</Text>
         </TouchableOpacity>
       </Animated.View>
     );
@@ -310,19 +342,17 @@ export default function DownloadProgress({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#12121F',
     borderRadius: 16,
     padding: 20,
     marginHorizontal: 16,
     marginVertical: 12,
     borderWidth: 1,
-    borderColor: '#1DB95420',
+    // Contorno e sombra de vidro: as cores vêm do tema, aplicadas em linha
     ...Platform.select({
       ios: {
-        shadowColor: '#1DB954',
         shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.12,
-        shadowRadius: 10,
+        shadowOpacity: 0.25,
+        shadowRadius: 12,
       },
       android: {
         elevation: 5,
@@ -337,14 +367,12 @@ const styles = StyleSheet.create({
   titulo: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#FFFFFF',
     marginBottom: 4,
     letterSpacing: 0.3,
   },
 
   artista: {
     fontSize: 13,
-    color: '#8080A0',
     fontWeight: '500',
   },
 
@@ -354,7 +382,6 @@ const styles = StyleSheet.create({
 
   barraFundo: {
     height: 8,
-    backgroundColor: '#2A2A4A',
     borderRadius: 4,
     overflow: 'hidden',
     marginBottom: 10,
@@ -362,7 +389,6 @@ const styles = StyleSheet.create({
 
   barraProgresso: {
     height: '100%',
-    backgroundColor: '#1DB954',
     borderRadius: 4,
   },
 
@@ -375,36 +401,30 @@ const styles = StyleSheet.create({
   percentual: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#1DB954',
   },
 
   tamanho: {
     fontSize: 12,
-    color: '#606080',
     fontWeight: '500',
   },
 
   tamanhoFinal: {
     fontSize: 12,
-    color: '#8080A0',
     marginTop: 6,
   },
 
   concluido: {
-    backgroundColor: '#1DB95420',
     borderRadius: 12,
     padding: 16,
     marginVertical: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#1DB954',
   },
 
   checkmarkContainer: {
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: '#1DB954',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
@@ -412,23 +432,19 @@ const styles = StyleSheet.create({
 
   checkmark: {
     fontSize: 28,
-    color: '#FFFFFF',
     fontWeight: '700',
   },
 
   concluidoTexto: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#1DB954',
   },
 
   erroBox: {
-    backgroundColor: '#FF6B3520',
     borderRadius: 12,
     padding: 14,
     marginVertical: 14,
     borderLeftWidth: 3,
-    borderLeftColor: '#FF6B35',
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -440,13 +456,11 @@ const styles = StyleSheet.create({
 
   erroTexto: {
     fontSize: 12,
-    color: '#FF6B35',
     fontWeight: '600',
     flex: 1,
   },
 
   botaoBaixar: {
-    backgroundColor: '#1DB954',
     borderRadius: 10,
     paddingVertical: 12,
     paddingHorizontal: 14,
@@ -454,7 +468,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
     ...Platform.select({
       ios: {
-        shadowColor: '#1DB954',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 8,
@@ -466,42 +479,35 @@ const styles = StyleSheet.create({
   },
 
   botaoCancelar: {
-    backgroundColor: '#FF6B3520',
     borderRadius: 10,
     paddingVertical: 12,
     paddingHorizontal: 14,
     alignItems: 'center',
     marginTop: 10,
     borderWidth: 1,
-    borderColor: '#FF6B35',
   },
 
   botaoDeletar: {
-    backgroundColor: '#2E2E4E',
     borderRadius: 10,
     paddingVertical: 12,
     paddingHorizontal: 14,
     alignItems: 'center',
     marginTop: 10,
     borderWidth: 1,
-    borderColor: '#3E3E5E',
   },
 
   botaoTexto: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#FFFFFF',
   },
 
   botaoCancelarTexto: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#FF6B35',
   },
 
   botaoDeletarTexto: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#8080A0',
   },
 });

@@ -20,10 +20,15 @@ export interface Release {
   release_type_category: 'release_format' | 'mix_edit' | 'instrumental' | 'playback';
   metadata_source: string;
   source_reference_url: string | null;
-  // URLs de mídia - null se não disponível (ex: Spotify preview, YouTube Music)
+  // Campos de mídia legados (Regra 3): sempre null — o áudio agora vem
+  // exclusivamente de fontes web abertas via /api/releases/:id/stream|download
   audio_preview_url: string | null;
   streaming_url: string | null;
   download_url: string | null;
+  // Fonte de áudio aberta salva pelo orquestrador (blog/fórum/link direto, Regra 3)
+  audio_source_url?: string | null;
+  audio_source_provider?: string | null;
+  audio_source_page_url?: string | null;
   work_title: string;
   artist_name: string;
   artist_country: string | null;

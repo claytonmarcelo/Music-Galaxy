@@ -1,5 +1,6 @@
 // Tela de detalhes de um artista.
-// Exibe informações do artista e todas suas obras musicais.
+// Exibe informações do artista e todas suas obras musicais,
+// com o visual de vidro fosco: cabeçalho e cartões translúcidos.
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -10,18 +11,23 @@ import {
   FlatList,
   StyleSheet,
   TouchableOpacity,
-  Alert,
   RefreshControl,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RootStackParamList, Artista, Work } from '../types';
 import { buscarArtista, buscarObrasArtista } from '../services/api';
+import { useModal } from '../contexts/ModalContext';
+import { useTheme } from '../contexts/ThemeContext';
+import AuroraBackground from '../components/AuroraBackground';
+import GlassCard from '../components/GlassCard';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DetalheArtista'>;
 
 export default function DetalheArtistaScreen({ route, navigation }: Props): React.JSX.Element {
   const { artistaId } = route.params;
+  const { abrirErro } = useModal();
+  const { colors } = useTheme();
 
   // Estados
   const [carregando, setCarregando] = useState(true);
@@ -48,9 +54,12 @@ export default function DetalheArtistaScreen({ route, navigation }: Props): Reac
     } catch (err) {
       const mensagem = err instanceof Error ? err.message : 'Erro desconhecido';
       setErro(mensagem);
-      Alert.alert('Erro', mensagem);
+      abrirErro(
+        'Não foi possível carregar',
+        'Não foi possível carregar as informações deste artista. Verifique sua conexão e tente novamente.\n\nDetalhe: ' + mensagem
+      );
     }
-  }, [artistaId]);
+  }, [artistaId, abrirErro]);
 
   // Carrega obras do artista
   const carregarObras = useCallback(
@@ -79,13 +88,16 @@ export default function DetalheArtistaScreen({ route, navigation }: Props): Reac
       } catch (err) {
         const mensagem = err instanceof Error ? err.message : 'Erro desconhecido';
         setErro(mensagem);
-        Alert.alert('Erro', mensagem);
+        abrirErro(
+          'Não foi possível carregar',
+          'Não foi possível carregar as obras deste artista. Verifique sua conexão e tente novamente.\n\nDetalhe: ' + mensagem
+        );
       } finally {
         setCarregando(false);
         setAtualizando(false);
       }
     },
-    [artistaId]
+    [artistaId, abrirErro]
   );
 
   // Carregamento inicial
@@ -116,60 +128,67 @@ export default function DetalheArtistaScreen({ route, navigation }: Props): Reac
   // Renderers
   if (carregando) {
     return (
-      <View style={styles.containerCentrado}>
-        <ActivityIndicator size="large" color="#FF6B35" />
-        <Text style={styles.textoCentrado}>Carregando artista...</Text>
-      </View>
+      <AuroraBackground>
+        <View style={styles.containerCentrado}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.textoCentrado, { color: colors.textSecondary }]}>Carregando artista...</Text>
+        </View>
+      </AuroraBackground>
     );
   }
 
   if (erro && !artista) {
     return (
-      <View style={styles.containerCentrado}>
-        <Text style={styles.textoErro}>Erro ao carregar: {erro}</Text>
-        <TouchableOpacity
-          style={styles.botaoTentar}
-          onPress={() => {
-            carregarArtista();
-            carregarObras(0, false);
-          }}
-        >
-          <Text style={styles.textoButton}>Tentar Novamente</Text>
-        </TouchableOpacity>
-      </View>
+      <AuroraBackground>
+        <View style={styles.containerCentrado}>
+          <Text style={[styles.textoErro, { color: colors.error }]}>Erro ao carregar: {erro}</Text>
+          <TouchableOpacity
+            style={[styles.botaoTentar, { backgroundColor: colors.button }]}
+            onPress={() => {
+              carregarArtista();
+              carregarObras(0, false);
+            }}
+          >
+            <Text style={[styles.textoButton, { color: colors.buttonText }]}>Tentar novamente</Text>
+          </TouchableOpacity>
+        </View>
+      </AuroraBackground>
     );
   }
 
-  // Renderiza uma obra na lista
+  // Renderiza uma obra na lista, em cartão de vidro
   const renderObra = (obra: Work): React.JSX.Element => (
     <TouchableOpacity
-      style={styles.cardObra}
+      style={[
+        styles.cardObra,
+        { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+      ]}
       onPress={() => handleSelecionarObra(obra)}
       activeOpacity={0.7}
     >
       <View style={styles.conteudoCard}>
-        <Text style={styles.tituloObra} numberOfLines={2}>
+        <Text style={[styles.tituloObra, { color: colors.text }]} numberOfLines={2}>
           {obra.title}
         </Text>
-        <Text style={styles.anoObra}>
+        <Text style={[styles.anoObra, { color: colors.textSecondary }]}>
           {obra.original_release_year || 'Ano desconhecido'}
         </Text>
       </View>
-      <Text style={styles.seta}>→</Text>
+      <Text style={[styles.seta, { color: colors.primary }]}>→</Text>
     </TouchableOpacity>
   );
 
-  // Renderiza cabeçalho do artista
+  // Renderiza cabeçalho do artista em cartão de vidro
   const renderCabecalho = (): React.JSX.Element => (
-    <View style={styles.secaoCabecalho}>
-      <Text style={styles.nomeArtista}>{artista?.name || 'Artista'}</Text>
+    <GlassCard style={styles.secaoCabecalho}>
+      <Text style={[styles.nomeArtista, { color: colors.text }]}>{artista?.name || 'Artista'}</Text>
       {artista?.country && (
-        <Text style={styles.paisArtista}>🌍 {artista.country}</Text>
+        <Text style={[styles.paisArtista, { color: colors.textSecondary }]}>🌍 {artista.country}</Text>
       )}
-      <Text style={styles.totalObras}>
+      <Text style={[styles.totalObras, { color: colors.primary }]}>
         {obras.length} obra{obras.length !== 1 ? 's' : ''} encontrada{obras.length !== 1 ? 's' : ''}
       </Text>
-    </View>
+    </GlassCard>
   );
 
   // Renderiza rodapé de paginação
@@ -179,14 +198,17 @@ export default function DetalheArtistaScreen({ route, navigation }: Props): Reac
     return (
       <View style={styles.containerCarregarMais}>
         <TouchableOpacity
-          style={styles.botaoCarregarMais}
+          style={[
+            styles.botaoCarregarMais,
+            { backgroundColor: colors.card, borderColor: colors.primary },
+          ]}
           onPress={carregarMais}
           disabled={atualizando}
         >
           {atualizando ? (
-            <ActivityIndicator size="small" color="#FF6B35" />
+            <ActivityIndicator size="small" color={colors.primary} />
           ) : (
-            <Text style={styles.textoCarregarMais}>Carregar Mais</Text>
+            <Text style={[styles.textoCarregarMais, { color: colors.primary }]}>Carregar mais</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -194,17 +216,17 @@ export default function DetalheArtistaScreen({ route, navigation }: Props): Reac
   };
 
   return (
-    <View style={styles.container}>
-      {/* Cabeçalho */}
-      <View style={styles.headerBox}>
+    <AuroraBackground>
+      {/* Barra superior de vidro */}
+      <GlassCard forte style={styles.headerBox}>
         <TouchableOpacity
           style={styles.botaoVoltar}
           onPress={() => navigation.goBack()}
         >
-          <Text style={styles.textoVoltar}>← Voltar</Text>
+          <Text style={[styles.textoVoltar, { color: colors.primary }]}>← Voltar</Text>
         </TouchableOpacity>
-        <Text style={styles.tituloHeader}>Artista</Text>
-      </View>
+        <Text style={[styles.tituloHeader, { color: colors.text }]}>Artista</Text>
+      </GlassCard>
 
       {/* Conteúdo */}
       <ScrollView
@@ -213,7 +235,7 @@ export default function DetalheArtistaScreen({ route, navigation }: Props): Reac
           <RefreshControl
             refreshing={atualizando}
             onRefresh={handleAtualizacao}
-            tintColor="#FF6B35"
+            tintColor={colors.primary}
           />
         }
       >
@@ -229,7 +251,7 @@ export default function DetalheArtistaScreen({ route, navigation }: Props): Reac
           />
         ) : (
           <View style={styles.containerSemDados}>
-            <Text style={styles.textoSemDados}>Nenhuma obra encontrada</Text>
+            <Text style={[styles.textoSemDados, { color: colors.textSecondary }]}>Nenhuma obra encontrada</Text>
           </View>
         )}
 
@@ -238,7 +260,7 @@ export default function DetalheArtistaScreen({ route, navigation }: Props): Reac
         {/* Espaço extra no final */}
         <View style={{ height: 20 }} />
       </ScrollView>
-    </View>
+    </AuroraBackground>
   );
 }
 
@@ -247,19 +269,14 @@ export default function DetalheArtistaScreen({ route, navigation }: Props): Reac
 // ============================================================
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F0F1A',
-  },
-
   headerBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    marginHorizontal: 16,
+    marginTop: 8,
+    paddingHorizontal: 8,
     paddingVertical: 12,
-    backgroundColor: '#1A1A2E',
-    borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
+    borderRadius: 20,
   },
 
   botaoVoltar: {
@@ -267,7 +284,6 @@ const styles = StyleSheet.create({
   },
 
   textoVoltar: {
-    color: '#FF6B35',
     fontSize: 14,
     fontWeight: 'bold',
   },
@@ -275,7 +291,6 @@ const styles = StyleSheet.create({
   tituloHeader: {
     flex: 1,
     textAlign: 'center',
-    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
     marginRight: 40,
@@ -289,41 +304,33 @@ const styles = StyleSheet.create({
 
   secaoCabecalho: {
     marginBottom: 24,
-    paddingBottom: 16,
-    paddingHorizontal: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
+    borderRadius: 16,
   },
 
   nomeArtista: {
-    color: '#FFFFFF',
     fontSize: 28,
     fontWeight: 'bold',
     marginBottom: 8,
   },
 
   paisArtista: {
-    color: '#AAAAAA',
     fontSize: 14,
     marginBottom: 12,
   },
 
   totalObras: {
-    color: '#FF6B35',
     fontSize: 14,
     fontWeight: '600',
   },
 
   cardObra: {
-    backgroundColor: '#1A1A2E',
-    borderRadius: 8,
+    borderRadius: 16,
     marginBottom: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35',
+    borderWidth: 1,
   },
 
   conteudoCard: {
@@ -331,19 +338,16 @@ const styles = StyleSheet.create({
   },
 
   tituloObra: {
-    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '600',
     marginBottom: 4,
   },
 
   anoObra: {
-    color: '#AAAAAA',
     fontSize: 13,
   },
 
   seta: {
-    color: '#FF6B35',
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -352,31 +356,26 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F0F1A',
   },
 
   textoCentrado: {
-    color: '#AAAAAA',
     fontSize: 14,
     marginTop: 12,
   },
 
   textoErro: {
-    color: '#FF6B35',
     fontSize: 16,
     marginBottom: 16,
     textAlign: 'center',
   },
 
   botaoTentar: {
-    backgroundColor: '#FF6B35',
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 6,
+    borderRadius: 12,
   },
 
   textoButton: {
-    color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 14,
   },
@@ -388,7 +387,6 @@ const styles = StyleSheet.create({
   },
 
   textoSemDados: {
-    color: '#AAAAAA',
     fontSize: 16,
   },
 
@@ -399,16 +397,13 @@ const styles = StyleSheet.create({
   },
 
   botaoCarregarMais: {
-    backgroundColor: '#1A1A2E',
     paddingHorizontal: 32,
     paddingVertical: 12,
-    borderRadius: 6,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#FF6B35',
   },
 
   textoCarregarMais: {
-    color: '#FF6B35',
     fontWeight: 'bold',
     fontSize: 14,
   },

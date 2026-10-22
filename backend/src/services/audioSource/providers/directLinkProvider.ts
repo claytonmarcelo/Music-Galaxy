@@ -1,5 +1,10 @@
-// Direct Link Provider — Aceita URLs diretas de áudio fornecidas pelo usuário
-// Permite download de áudio de qualquer URL pública (MP3, FLAC, etc)
+// Direct Link Provider — Resolve e valida URLs diretas de áudio fornecidas
+// pelo usuário/painel (Regra 3: blogs, fóruns e sites abertos do mundo inteiro).
+//
+// Diferente do GenericWebProvider, este provider NÃO descobre músicas — ele é o
+// RESOLVEDOR: recebe uma URL direta (ou uma página que hospeda o áudio), valida
+// contra o guard anti-SSRF e a lista negra de plataformas, e devolve um
+// candidato pronto para o pipeline de stream/download.
 
 import { BaseAudioSourceProvider } from '../baseProvider';
 import {
@@ -9,68 +14,66 @@ import {
   ProviderTimeouts,
 } from '../types';
 import axios from 'axios';
+import {
+  USER_AGENT,
+  AUDIO_EXTENSIONS,
+  auditarUrl,
+  criarBeforeRedirect,
+  interpretarNomeDeArquivo,
+} from '../webAudio';
 
 export class DirectLinkProvider extends BaseAudioSourceProvider {
   readonly providerId = 'direct-link';
   readonly timeouts: ProviderTimeouts = {
-    search: 5000,       // 5 segundos (não usado, busca é direta)
+    search: 10000,      // 10 segundos para validar uma URL direta
     metadata: 10000,    // 10 segundos para metadados
     download: 600000,   // 10 minutos para download (arquivos grandes)
   };
 
-  // User agent para evitar bloqueios
-  private readonly USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-  // Extensões de áudio suportadas
-  private readonly AUDIO_EXTENSIONS = [
-    '.mp3', '.flac', '.wav', '.m4a', '.aac', '.ogg', '.wma', '.opus', '.webm'
-  ];
-
-  // Buscar não é aplicável para este provider (URL é fornecida diretamente)
+  // Este provider não faz descoberta — ele resolve URLs fornecidas.
+  // Retorna SUCCESS com zero candidatos para não poluir o ranking do orquestrador
+  // com falsos fracassos (comportamento esperado, não um erro).
   async search(identity: AudioIdentity): Promise<SearchResult> {
-    console.warn(`[DirectLinkProvider] Search not applicable. Use direct URL instead.`);
-    
     return {
       providerId: this.providerId,
       candidates: [],
-      status: 'FAILED',
-      error: 'DirectLinkProvider requires a direct URL. Use searchInUrl() method instead.',
+      status: 'SUCCESS',
       durationMs: 0,
     };
   }
 
-  // Buscar candidato a partir de uma URL direta
+  // Valida uma URL direta de áudio e a converte em candidato
   async searchInUrl(url: string): Promise<SearchResult> {
     const startTime = Date.now();
 
     try {
-      console.log(`[DirectLinkProvider] Processing direct URL: ${url}`);
+      console.log(`[DirectLinkProvider] Validando URL direta: ${url}`);
 
-      // Validar URL
-      if (!this.isValidAudioUrl(url)) {
+      // Guard de segurança (Regra 3 + anti-SSRF) antes de qualquer rede
+      const auditada = await auditarUrl(url);
+      if (!auditada.ok) {
         return {
           providerId: this.providerId,
           candidates: [],
-          status: 'FAILED',
-          error: 'Invalid audio URL. Supported formats: MP3, FLAC, WAV, M4A, AAC, OGG, WMA, Opus, WebM',
+          status: 'FORBIDDEN',
+          error: `URL rejeitada pelo guard de segurança: ${auditada.motivo}`,
           durationMs: Date.now() - startTime,
         };
       }
 
-      // Obter metadados via HEAD request
       const metadata = await this.getMetadata(url);
-      
+
       if (!metadata) {
         return {
           providerId: this.providerId,
           candidates: [],
           status: 'FAILED',
-          error: 'Failed to retrieve metadata. URL may be unavailable or blocked.',
+          error: 'Não foi possível acessar a URL. Ela pode estar fora do ar ou bloqueada.',
           durationMs: Date.now() - startTime,
         };
       }
 
-      console.log(`[DirectLinkProvider] URL processed successfully: ${metadata.format} ${metadata.metadata?.size}`);
+      console.log(`[DirectLinkProvider] URL validada: ${metadata.format ?? 'desconhecido'} ${metadata.metadata?.size ?? ''}`);
 
       return {
         providerId: this.providerId,
@@ -80,121 +83,95 @@ export class DirectLinkProvider extends BaseAudioSourceProvider {
       };
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
-      console.error(`[DirectLinkProvider] Direct URL processing failed:`, error.message);
+      console.error(`[DirectLinkProvider] Falha ao validar URL:`, error.message);
 
       let status: SearchResult['status'] = 'FAILED';
-      if (error.code === 'ECONNABORTED' || error.message.includes('Timeout')) {
+      if (error.code === 'ECONNABORTED' || error.message?.includes('Timeout')) {
         status = 'TIMEOUT';
       } else if (error.response?.status === 403) {
         status = 'FORBIDDEN';
-      } else if (error.response?.status === 404) {
-        status = 'FAILED';
       }
 
-      return {
-        providerId: this.providerId,
-        candidates: [],
-        status,
-        error: error.message,
-        durationMs,
-      };
+      return { providerId: this.providerId, candidates: [], status, error: error.message, durationMs };
     }
   }
 
-  // Validar se uma URL é um link de áudio válido
-  private isValidAudioUrl(url: string): boolean {
-    // Deve ser HTTP ou HTTPS
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      return false;
-    }
-
-    // Deve ter uma extensão de áudio válida
-    const lowerUrl = url.toLowerCase();
-    const hasValidExtension = this.AUDIO_EXTENSIONS.some(ext => 
-      lowerUrl.includes(ext)
-    );
-
-    return hasValidExtension;
-  }
-
-  // Obter metadados de uma URL (HEAD request)
+  // Metadados via HEAD — candidateId é a URL direta do arquivo
   async getMetadata(candidateId: string): Promise<AudioCandidate | null> {
     try {
-      const url = candidateId;
-
-      console.log(`[DirectLinkProvider] Getting metadata for: ${url}`);
-
-      const response = await axios.head(url, {
-        headers: {
-          'User-Agent': this.USER_AGENT,
-          'Accept': '*/*',
-        },
-        timeout: this.timeouts.metadata,
-        maxRedirects: 5,
-        validateStatus: (status) => status < 500, // Aceitar 4xx para verificar disponibilidade
-      });
-
-      // Se retornar 404 ou 403, não está disponível
-      if (response.status === 404 || response.status === 403) {
-        console.warn(`[DirectLinkProvider] URL not available: ${response.status}`);
+      const auditada = await auditarUrl(candidateId);
+      if (!auditada.ok) {
+        console.warn(`[DirectLinkProvider] Guard rejeitou a URL: ${auditada.motivo}`);
         return null;
       }
 
-      const contentType = (response.headers['content-type'] as string) || '';
-      const contentLength = response.headers['content-length'] as string | undefined;
-      const contentLengthNum = contentLength ? parseInt(contentLength) : undefined;
+      const resposta = await axios.head(candidateId, {
+        headers: { 'User-Agent': USER_AGENT, Accept: '*/*' },
+        timeout: this.timeouts.metadata,
+        maxRedirects: 3,
+        beforeRedirect: criarBeforeRedirect(),
+        validateStatus: (status) => status < 500,
+      });
 
-      // Extrair formato do content-type ou da URL
-      const format = this.extractFormatFromType(contentType) || this.extractFormatFromUrl(url);
+      if (resposta.status === 404 || resposta.status === 403) {
+        console.warn(`[DirectLinkProvider] URL indisponível: HTTP ${resposta.status}`);
+        return null;
+      }
 
-      // Extrair nome do arquivo da URL
-      const fileName = this.extractFileName(url);
+      const contentType = String(resposta.headers['content-type'] ?? '');
+      const contentLength = resposta.headers['content-length']
+        ? parseInt(String(resposta.headers['content-length']), 10)
+        : undefined;
+
+      const formato = this.extrairFormatoDoMime(contentType) ?? this.extrairFormatoDaUrl(candidateId);
+      const nomeArquivo = this.extrairNomeDoArquivo(candidateId);
+
+      // Interpreta "Artista - Título (Versão)" para o Exact Match Engine pontuar
+      const interpretado = interpretarNomeDeArquivo(nomeArquivo);
+
+      // Só aceita se parecer áudio (extensão ou content-type audio/*)
+      const ehAudio = contentType.toLowerCase().startsWith('audio') || !!formato;
+      if (!ehAudio) {
+        console.warn(`[DirectLinkProvider] URL não parece áudio: content-type="${contentType}"`);
+        return null;
+      }
 
       return {
         providerId: this.providerId,
-        sourceId: url,
-        artist: '', // Será preenchido pelo exact match
-        title: fileName || '', // Usa nome do arquivo como título inicial
-        url,
-        downloadUrl: url,
-        format,
+        sourceId: candidateId,
+        artist: interpretado.artist ?? '',
+        title: interpretado.title ?? nomeArquivo,
+        version: interpretado.version,
+        url: candidateId,
+        downloadUrl: candidateId,
+        streamUrl: candidateId,
+        format: formato,
         metadata: {
           contentType,
-          contentLength: contentLengthNum,
-          size: contentLengthNum ? this.formatBytes(contentLengthNum) : undefined,
-          fileName,
+          contentLength,
+          size: contentLength ? formatBytes(contentLength) : undefined,
+          fileName: nomeArquivo,
         },
       };
     } catch (error: any) {
-      console.error(`[DirectLinkProvider] Metadata failed for ${candidateId}:`, error.message);
+      console.error(`[DirectLinkProvider] Metadata falhou para ${candidateId}: ${error.message}`);
       return null;
     }
   }
 
-  // Obter informações de download
   async getDownloadInfo(candidateId: string): Promise<{ url: string; format: string } | null> {
     const metadata = await this.getMetadata(candidateId);
     if (!metadata) return null;
-
-    return {
-      url: metadata.url || candidateId,
-      format: metadata.format || 'mp3',
-    };
+    return { url: metadata.url || candidateId, format: metadata.format || 'mp3' };
   }
 
-  // Verificar disponibilidade de uma URL
   async checkAvailability(candidateId: string): Promise<boolean> {
-    try {
-      const metadata = await this.getMetadata(candidateId);
-      return metadata !== null;
-    } catch {
-      return false;
-    }
+    const metadata = await this.getMetadata(candidateId);
+    return metadata !== null;
   }
 
-  // Extrair formato do MIME type
-  private extractFormatFromType(mimeType: string): string | undefined {
-    const typeMap: Record<string, string> = {
+  private extrairFormatoDoMime(mimeType: string): string | undefined {
+    const mapa: Record<string, string> = {
       'audio/mpeg': 'mp3',
       'audio/mp3': 'mp3',
       'audio/flac': 'flac',
@@ -209,47 +186,35 @@ export class DirectLinkProvider extends BaseAudioSourceProvider {
       'audio/opus': 'opus',
       'audio/x-ms-wma': 'wma',
     };
-
-    return typeMap[mimeType.toLowerCase()];
+    const base = mimeType.toLowerCase().split(';')[0].trim();
+    return mapa[base];
   }
 
-  // Extrair formato da URL
-  private extractFormatFromUrl(url: string): string | undefined {
-    const lowerUrl = url.toLowerCase();
-    
-    for (const ext of this.AUDIO_EXTENSIONS) {
-      if (lowerUrl.includes(ext)) {
-        return ext.replace('.', '');
-      }
-    }
-
-    return undefined;
-  }
-
-  // Extrair nome do arquivo da URL
-  private extractFileName(url: string): string {
+  private extrairFormatoDaUrl(url: string): string | undefined {
     try {
-      const urlObj = new URL(url);
-      const pathname = urlObj.pathname;
-      const fileName = pathname.split('/').pop();
-      
-      if (fileName) {
-        // Remover extensão
-        return fileName.replace(/\.[^/.]+$/, '');
-      }
-      
-      return '';
+      const caminho = new URL(url).pathname.toLowerCase();
+      const ext = AUDIO_EXTENSIONS.find((e) => caminho.endsWith(e));
+      return ext ? ext.replace('.', '') : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private extrairNomeDoArquivo(url: string): string {
+    try {
+      const caminho = new URL(url).pathname;
+      const nome = caminho.split('/').pop() ?? '';
+      return decodeURIComponent(nome);
     } catch {
       return '';
     }
   }
+}
 
-  // Formatar bytes para legível
-  private formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
-  }
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const unidades = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + unidades[i];
 }

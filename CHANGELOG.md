@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Identidade visual e preparação para APK)
+- **Identidade visual "vidro fosco + aurora" aplicada globalmente** — `ThemeContext` ganhou tokens de vidro (`glassCard`, `glassCardForte`, `glassBorder`, `glassHighlight`, `glassShadow`, `backdrop`) e de luzes da aurora (`auroraPrimaria/Secundaria/Terciaria/Quaternaria`), mantendo todas as chaves antigas; novos componentes compartilhados `AuroraBackground` (céu de aurora com círculos de luz translúcidos, em React Native puro, sem dependências novas) e `GlassCard` (cartão de vidro com brilho de borda e sombra). Todas as telas, componentes, modais e toasts usam a nova identidade; zero cores hexadecimais fixas restantes.
+- **Modais personalizados globais** — As 15 chamadas `Alert.alert` foram substituídas por `useModal()` (`abrirErro`, `abrirConfirmacao`, `toastSucesso` etc.) com textos coerentes e contextuais em português brasileiro; `ModalPersonalizado` e `ToastNotificacao` restilizados em vidro fosco com cores do tema.
+- **Servidor da API configurável no app** — Novo `mobile/src/services/apiConfig.ts` (endereço salvo no AsyncStorage); `api.ts` agora carrega o endereço salvo ao iniciar e todas as chamadas usam a variável viva `BASE_URL`; nova seção "Servidor da API" em Ajustes com campo de endereço, botões Salvar / Testar conexão / Restaurar padrão. Eliminado o IP de rede local fixo da produção.
+- **Modo offline** — `OfflineBanner` global avisa quando o servidor não responde (ou não foi configurado) com atalho para Ajustes; o app abre normalmente sem internet.
+- **Ícone com fundo transparente** — Nova arte do ícone (disco em vidro com aurora + nome "Music Galaxy" em tipografia elegante) gerada e processada em Node para transparência real no canal alfa (comprovado: 73,8% dos pixels transparentes, cantos com alfa 0); `app.json` atualizado (ícone transparente, splash sobre `#0B0B1A`, adaptive icon removido conforme decisão do usuário).
+- **`mobile/eas.json`** — Perfis de build EAS (development/preview/production) gerando **APK** (`buildType: apk`).
+- **`utils/tiposRelease.ts`** — Tradução centralizada dos tipos de versão para pt-BR (Álbum, Single, EP, Coletânea, Ao vivo, Remix, Instrumental, Demo, Mixtape, Trilha sonora); usada em `ReleaseCard` e `DetalheReleaseScreen`.
+
+### Changed (Identidade visual e pt-BR)
+- **Textos em português brasileiro corrigidos** — "este release dos favoritos" → "esta versão dos favoritos", "Nenhum release encontrado" → "Nenhuma versão encontrada", "Tentar Novamente" → "Tentar novamente", "Releases Criados" → "Versões criadas", plural correto em "Encontrada(s) X versão(ões)", "Nenhuma URL de áudio original..." → "Nenhuma fonte de áudio disponível para esta versão."; "release(s)" em textos de interface → "versão(ões)" (código/API intactos).
+- **Navegação e tema** — `AppNavigator` com tema do React Navigation alinhado à identidade e `OfflineBanner` integrado; `App.tsx` carrega a configuração do servidor antes das primeiras requisições.
+- **Catálogo de tipos corrigido no banco** — As linhas do catálogo `Álbum` e `Coletânea` estavam com mojibake (`??lbum`, `Colet??nea`) por importação sem UTF-8; corrigidas via `UPDATE` com os valores do próprio seed (verificado na API: bytes UTF-8 corretos). A faixa "Penniefluitjie Kw?la" NÃO foi alterada — o `?` vem da própria fonte oficial (MusicBrainz), e os dados de fonte nunca são modificados (Regra 2).
+- **Remoção de código morto/órfãos** — Excluídos do mobile: `BottomSheet`, `CardArtista`, `FiltrosAvancados`, `GlobalPlayer`, `SkeletonLoader`, `TemaToggle`, `useModalGlobal`, `PlayerContext`, `TemaContext` (tema paralelo duplicado), `LoadingScreen`, `adaptive-icon.png`, `generate-assets.js` e o `dist/` web antigo — sem referências em lugar nenhum (verificado por grep) e com `tsc --noEmit` limpo depois.
+
+### Fixed (Identidade visual)
+- **`elevation` em estilo de `Image`** — `DetalheReleaseScreen` aplicava `elevation` (propriedade de `View`) no `Image` da capa; a sombra foi movida para o contêiner (`capaWrapper`) e o `tsc --noEmit` voltou a passar.
+- **Import quebrado `API_BASE_URL`** — `TelaExplorar` importava `API_BASE_URL`, que não existia mais no `api.ts`; migrado para `BASE_URL`.
+
+### Added (Regra 3 — áudio apenas de fontes web abertas)
+- **REGRA 3 permanente** — O projeto deve usar somente sites abertos no mundo inteiro (blogs, fóruns, links diretos); proibido YouTube, Spotify, Deezer e qualquer plataforma de música de qualquer tipo ou gênero. Registrada em `AGENTS.md`.
+- **`backend/src/services/audioSource/webAudio.ts`** — Guard central da Regra 3: `PLATAFORMAS_PROIBIDAS` (YouTube, Spotify, Deezer, Apple/iTunes, Amazon, Tidal, SoundCloud, Bandcamp, Qobuz etc.), `auditarUrl()` com anti-SSRF (apenas http/https, sem credenciais, DNS validado, rejeição de IPs não roteáveis), `criarBeforeRedirect()` para checagem em cada hop, `extrairLinksDeAudio()` (cheerio + regex de embeds) e `interpretarNomeDeArquivo()` ("Artista - Título (Versão)").
+- **Descoberta web global real no `GenericWebProvider`** — Busca em motores HTML sem chave de API (Bing em primeiro lugar; DuckDuckGo HTML e Mojeek mantidos como secundários pois hoje respondem desafio/403), visita páginas abertas de resultado e extrai links diretos de áudio; candidatos pontuáveis pelo ExactMatchEngine com artista/título/versão interpretados do nome do arquivo.
+- **Colunas de fonte aberta em `releases`** — `audio_source_url`, `audio_source_provider`, `audio_source_page_url` (migração `database/migrations/replace_platform_audio_with_web_sources.sql`, já aplicada; colunas de plataformas zeradas).
+- **`POST /api/releases/:id/audio-source`** — Registro manual de fonte aberta (`{ "url": "..." }`), validada pelo guard (Regra 3 + anti-SSRF) antes de salvar.
+- **Player nativo no mobile** — `MusicPlayer.tsx` agora reproduz no iOS/Android via `expo-av` (`Sound.createAsync`) além do HTML5 Audio na web; libera o recurso ao desmontar; removeu dependência de previews de plataformas.
+- **Endpoint `/stream` com suporte real a Range** — Proxy HTTP da fonte web aberta com repasse de `Range`/`Content-Range` (206), `X-Audio-Source-Provider` e invalidação da fonte salva quando a origem responde erro.
+
+### Changed (Regra 3)
+- **`audioController.ts` reescrito** — Pipeline único unificado (stream e download) sobre o `SourceOrchestrator` com apenas 2 providers (`generic-web`, `direct-link`): resolverFonte → cache → dedup → download HTTP com retry e limite de 200 MB → detecção via ffprobe → conversão FFmpeg condicional → validação de assinatura → cache permanente.
+- **Remoção total das plataformas** — Excluídos `backend/src/services/audio/` (youtubeAdapter, itunesAdapter, deezerAdapter, spotifyAdapter, audioEnricher, audioTranscoder), `youtubeProvider.ts`, `database/add_mock_audio.sql` e desinstaladas dependências `@distube/ytdl-core`, `youtube-dl-exec`, `yt-search`, `@choewy/yt-dlp`, `@ffmpeg-installer/ffmpeg`. O ingestion para de enriquecer releases com previews de plataformas.
+- **Mobile sem Spotify** — `SpotifyLoginScreen.tsx` excluído; botão/modal do Spotify removidos; `PlayerContext`, `GlobalPlayer`, `downloadManager` e `DetalheReleaseScreen` passam a usar exclusivamente `/api/releases/:id/stream|download` (sem URLs legadas null e sem localhost fixo).
+- **`downloadCache` com diretório permanente** — `backend/cache/audio` com índice `index.json`; `set()` MOVE o arquivo e devolve o caminho definitivo; limpeza horária de expirados agendada com `.unref()`.
+- **Contrato do `downloadDeduplication` documentado** — O produtor do download devolve o caminho do arquivo em cache (dados); nunca escreve no `Response`. Cada requisição serve o seu próprio cliente.
+- **Cache de descoberta do `SourceOrchestrator`** — Substituído o stub por cache em memória com TTL de 1h, tamanho máximo 500 e evicção de expirados.
+- **`AGENTS.md`** — Regra 3 documentada, novos endpoints de áudio e coluna de fonte aberta.
+
+### Fixed (Regra 3 / P1)
+- **Cache quebrado (P1)** — O pipeline antigo gravava o arquivo final, movia para o cache e depois apagava o caminho definitivo no `finally`; agora o produtor do cache é o único dono do arquivo e os temporários são removidos com segurança.
+- **Deduplicação travada (P1)** — O closure do produtor capturava `req/res` da primeira requisição, deixando o segundo cliente pendurado para sempre; hoje dois downloads simultâneos compartilham UM pipeline e ambos recebem o arquivo completo (comprovado por teste real: `Reusing in-flight download` nos logs, dois arquivos de 8.945.229 bytes íntegros).
+- **ffprobe ausente** — Instalado `ffprobe-static` e conectado em `detectAudioFormat`/`AudioValidator` (`setFfprobePath`); antes, "Cannot find ffprobe" forçava re-conversão de MP3 já válido. Com a detecção funcionando, o log mostra `stage=detect format=mp3 codec=mp3` → `stage=ffmpeg status=skipped` (download total em 3,6s).
+
 ### Added
 - **Global Audio Source Discovery (Exact Match)** - Sistema completo de descoberta e validação de fontes de áudio
   - **Arquitetura de Providers**: Abstração `IAudioSourceProvider` para múltiplas fontes de áudio

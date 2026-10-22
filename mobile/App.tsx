@@ -9,6 +9,11 @@ import { HistoricoProvider } from './src/contexts/HistoricoContext';
 import { ThemeProvider } from './src/contexts/ThemeContext';
 import { ModalProvider } from './src/contexts/ModalContext';
 import ModalGlobalContainer from './src/components/ModalGlobalContainer';
+import { inicializarApiConfig } from './src/services/api';
+
+// Carrega o endereço do servidor salvo pelo usuário antes das primeiras
+// requisições (sem bloquear a abertura do aplicativo).
+inicializarApiConfig();
 
 export default function App(): React.JSX.Element {
   return (

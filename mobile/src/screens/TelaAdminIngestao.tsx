@@ -1,6 +1,7 @@
 // Tela Administrativa de Ingestão.
 // Permite forçar ingestão manual de termos a partir de fontes externas (MusicBrainz, Discogs).
 // Endpoint: POST /api/search/ingest
+// Segue a identidade visual de vidro fosco: fundo com luzes suaves e cartões translúcidos.
 
 import React, { useState } from 'react';
 import {
@@ -11,16 +12,21 @@ import {
   TextInput,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RootStackParamList } from '../types';
 import { forcarIngestao } from '../services/api';
+import { useTheme } from '../contexts/ThemeContext';
+import { useModal } from '../contexts/ModalContext';
+import AuroraBackground from '../components/AuroraBackground';
+import GlassCard from '../components/GlassCard';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AdminIngestao'>;
 
 export default function TelaAdminIngestao({ navigation }: Props): React.JSX.Element {
+  const { colors } = useTheme();
+  const { abrirErro, abrirAviso, toastSucesso } = useModal();
   const [termo, setTermo] = useState('');
   const [carregando, setCarregando] = useState(false);
   const [resultado, setResultado] = useState<any>(null);
@@ -29,7 +35,7 @@ export default function TelaAdminIngestao({ navigation }: Props): React.JSX.Elem
   // Executa ingestão
   const handleForcarIngestao = async (): Promise<void> => {
     if (!termo.trim()) {
-      Alert.alert('Erro', 'Digite um termo para fazer ingestão');
+      abrirAviso('Termo vazio', 'Digite um termo para fazer a ingestão.');
       return;
     }
 
@@ -42,19 +48,16 @@ export default function TelaAdminIngestao({ navigation }: Props): React.JSX.Elem
 
       if (resposta.success && resposta.data) {
         setResultado(resposta.data);
-        Alert.alert(
-          'Sucesso',
-          `Ingestão concluída!\n\nObras criadas: ${resposta.data.works_created || 0}\nReleases criados: ${resposta.data.releases_created || 0}`
-        );
+        toastSucesso('Ingestão concluída com sucesso!');
       } else {
         const mensagem = resposta.error || 'Erro na ingestão';
         setErro(mensagem);
-        Alert.alert('Erro', mensagem);
+        abrirErro('Falha na ingestão', mensagem);
       }
     } catch (err) {
       const mensagem = err instanceof Error ? err.message : 'Erro desconhecido';
       setErro(mensagem);
-      Alert.alert('Erro', mensagem);
+      abrirErro('Falha na ingestão', mensagem);
     } finally {
       setCarregando(false);
     }
@@ -68,34 +71,42 @@ export default function TelaAdminIngestao({ navigation }: Props): React.JSX.Elem
   };
 
   return (
-    <View style={styles.container}>
-      {/* Cabeçalho */}
-      <View style={styles.headerBox}>
+    <AuroraBackground style={styles.container}>
+      {/* Cabeçalho em vidro forte */}
+      <View
+        style={[
+          styles.headerBox,
+          { backgroundColor: colors.glassCardForte, borderBottomColor: colors.glassBorder },
+        ]}
+      >
         <TouchableOpacity
           style={styles.botaoVoltar}
           onPress={() => navigation.goBack()}
         >
-          <Text style={styles.textoVoltar}>← Voltar</Text>
+          <Text style={[styles.textoVoltar, { color: colors.primary }]}>← Voltar</Text>
         </TouchableOpacity>
-        <Text style={styles.tituloHeader}>Admin: Ingestão</Text>
+        <Text style={[styles.tituloHeader, { color: colors.text }]}>Admin: Ingestão</Text>
       </View>
 
       {/* Conteúdo */}
       <ScrollView style={styles.conteudo} showsVerticalScrollIndicator={false}>
         <View style={styles.secao}>
-          <Text style={styles.tituloSecao}>⚙️ Forçar Ingestão Manual</Text>
-          <Text style={styles.descricao}>
+          <Text style={[styles.tituloSecao, { color: colors.primary }]}>⚙️ Forçar Ingestão Manual</Text>
+          <Text style={[styles.descricao, { color: colors.textSecondary }]}>
             Use este painel para forçar a busca de um termo nas fontes externas (MusicBrainz, Discogs, Cover Art Archive) e sincronizar os dados com o banco local.
           </Text>
         </View>
 
         {/* Form de Ingestão */}
-        <View style={styles.card}>
-          <Text style={styles.labelInput}>Termo de Busca</Text>
+        <GlassCard style={[styles.card, { borderLeftColor: colors.primary }]}>
+          <Text style={[styles.labelInput, { color: colors.text }]}>Termo de Busca</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              { backgroundColor: colors.input, borderColor: colors.glassBorder, color: colors.text },
+            ]}
             placeholder="Ex: Daft Punk, One More Time"
-            placeholderTextColor="#666666"
+            placeholderTextColor={colors.textSecondary}
             value={termo}
             onChangeText={setTermo}
             editable={!carregando}
@@ -104,135 +115,161 @@ export default function TelaAdminIngestao({ navigation }: Props): React.JSX.Elem
           {/* Botões */}
           <View style={styles.containerBotoes}>
             <TouchableOpacity
-              style={[styles.botao, styles.botaoPrimario, carregando && styles.botaoDisabilitado]}
+              style={[
+                styles.botao,
+                styles.botaoPrimario,
+                { backgroundColor: colors.button },
+                carregando && styles.botaoDisabilitado,
+              ]}
               onPress={handleForcarIngestao}
               disabled={carregando}
             >
               {carregando ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color={colors.buttonText} />
               ) : (
-                <Text style={styles.textoBotaoPrimario}>🔄 Iniciar Ingestão</Text>
+                <Text style={[styles.textoBotaoPrimario, { color: colors.buttonText }]}>
+                  🔄 Iniciar Ingestão
+                </Text>
               )}
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.botao, styles.botaoSecundario]}
+              style={[styles.botao, styles.botaoSecundario, { borderColor: colors.primary }]}
               onPress={handleLimpar}
               disabled={carregando}
             >
-              <Text style={styles.textoBotaoSecundario}>Limpar</Text>
+              <Text style={[styles.textoBotaoSecundario, { color: colors.primary }]}>Limpar</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </GlassCard>
 
         {/* Resultado da Ingestão */}
         {resultado && (
-          <View style={styles.card}>
-            <Text style={styles.tituloResultado}>✅ Resultado da Ingestão</Text>
+          <GlassCard style={[styles.card, { borderLeftColor: colors.success }]}>
+            <Text style={[styles.tituloResultado, { color: colors.success }]}>
+              ✅ Resultado da Ingestão
+            </Text>
 
             {resultado.works_created !== undefined && (
-              <View style={styles.itemResultado}>
-                <Text style={styles.labelResultado}>Obras Criadas:</Text>
-                <Text style={styles.valorResultado}>{resultado.works_created}</Text>
+              <View style={[styles.itemResultado, { borderBottomColor: colors.glassBorder }]}>
+                <Text style={[styles.labelResultado, { color: colors.textSecondary }]}>
+                  Obras criadas:
+                </Text>
+                <Text style={[styles.valorResultado, { color: colors.success }]}>
+                  {resultado.works_created}
+                </Text>
               </View>
             )}
 
             {resultado.releases_created !== undefined && (
-              <View style={styles.itemResultado}>
-                <Text style={styles.labelResultado}>Releases Criados:</Text>
-                <Text style={styles.valorResultado}>{resultado.releases_created}</Text>
+              <View style={[styles.itemResultado, { borderBottomColor: colors.glassBorder }]}>
+                <Text style={[styles.labelResultado, { color: colors.textSecondary }]}>
+                  Versões criadas:
+                </Text>
+                <Text style={[styles.valorResultado, { color: colors.success }]}>
+                  {resultado.releases_created}
+                </Text>
               </View>
             )}
 
             {resultado.metadata_source && (
-              <View style={styles.itemResultado}>
-                <Text style={styles.labelResultado}>Fonte de Metadados:</Text>
-                <Text style={styles.valorResultado}>{resultado.metadata_source}</Text>
+              <View style={[styles.itemResultado, { borderBottomColor: colors.glassBorder }]}>
+                <Text style={[styles.labelResultado, { color: colors.textSecondary }]}>
+                  Fonte de Metadados:
+                </Text>
+                <Text style={[styles.valorResultado, { color: colors.success }]}>
+                  {resultado.metadata_source}
+                </Text>
               </View>
             )}
 
             {resultado.timestamp && (
               <View style={styles.itemResultado}>
-                <Text style={styles.labelResultado}>Executado em:</Text>
-                <Text style={styles.valorResultado}>
+                <Text style={[styles.labelResultado, { color: colors.textSecondary }]}>
+                  Executado em:
+                </Text>
+                <Text style={[styles.valorResultado, { color: colors.success }]}>
                   {new Date(resultado.timestamp).toLocaleString('pt-BR')}
                 </Text>
               </View>
             )}
-          </View>
+          </GlassCard>
         )}
 
         {/* Erro */}
         {erro && (
-          <View style={styles.cardErro}>
-            <Text style={styles.tituloErro}>❌ Erro</Text>
-            <Text style={styles.textoErro}>{erro}</Text>
-          </View>
+          <GlassCard style={[styles.card, { borderLeftColor: colors.error }]}>
+            <Text style={[styles.tituloErro, { color: colors.error }]}>❌ Erro</Text>
+            <Text style={[styles.textoErro, { color: colors.textSecondary }]}>{erro}</Text>
+          </GlassCard>
         )}
 
         {/* Informações */}
-        <View style={styles.card}>
-          <Text style={styles.tituloSecao}>📝 Como Funciona</Text>
-          <Text style={styles.textoInfo}>
+        <GlassCard style={[styles.card, { borderLeftColor: colors.primary }]}>
+          <Text style={[styles.tituloSecao, { color: colors.primary }]}>📝 Como Funciona</Text>
+          <Text style={[styles.textoInfo, { color: colors.textSecondary }]}>
             Quando você realiza uma ingestão manual:
           </Text>
 
           <View style={styles.listaItems}>
             <View style={styles.itemLista}>
-              <Text style={styles.numeroBala}>1</Text>
-              <Text style={styles.textoLista}>
+              <Text style={[styles.numeroBala, { color: colors.primary }]}>1</Text>
+              <Text style={[styles.textoLista, { color: colors.textSecondary }]}>
                 O termo é enviado para as APIs externas (MusicBrainz, Discogs)
               </Text>
             </View>
 
             <View style={styles.itemLista}>
-              <Text style={styles.numeroBala}>2</Text>
-              <Text style={styles.textoLista}>
-                Novas obras e releases são criados/atualizados no banco de dados
+              <Text style={[styles.numeroBala, { color: colors.primary }]}>2</Text>
+              <Text style={[styles.textoLista, { color: colors.textSecondary }]}>
+                Novas obras e versões são criadas/atualizadas no banco de dados
               </Text>
             </View>
 
             <View style={styles.itemLista}>
-              <Text style={styles.numeroBala}>3</Text>
-              <Text style={styles.textoLista}>
+              <Text style={[styles.numeroBala, { color: colors.primary }]}>3</Text>
+              <Text style={[styles.textoLista, { color: colors.textSecondary }]}>
                 Capas oficiais são buscadas na Cover Art Archive
               </Text>
             </View>
 
             <View style={styles.itemLista}>
-              <Text style={styles.numeroBala}>4</Text>
-              <Text style={styles.textoLista}>
-                Cache é atualizado para próximas buscas serem mais rápidas
+              <Text style={[styles.numeroBala, { color: colors.primary }]}>4</Text>
+              <Text style={[styles.textoLista, { color: colors.textSecondary }]}>
+                O cache é atualizado para próximas buscas serem mais rápidas
               </Text>
             </View>
           </View>
-        </View>
+        </GlassCard>
 
         {/* Respeito a Rate Limiting */}
-        <View style={styles.cardAviso}>
-          <Text style={styles.tituloAviso}>⚠️ Respeito a Rate Limiting</Text>
-          <Text style={styles.textoAviso}>
+        <GlassCard style={[styles.card, { borderLeftColor: colors.warning }]}>
+          <Text style={[styles.tituloAviso, { color: colors.warning }]}>
+            ⚠️ Respeito a Rate Limiting
+          </Text>
+          <Text style={[styles.textoAviso, { color: colors.textSecondary }]}>
             • MusicBrainz: 1 requisição por segundo{'\n'}
             • Discogs: 60 requisições por minuto (autenticado){'\n'}
             • Ingestões são enfileiradas para respeitar estes limites
           </Text>
-        </View>
+        </GlassCard>
 
         {/* Espaço extra */}
         <View style={{ height: 40 }} />
       </ScrollView>
-    </View>
+    </AuroraBackground>
   );
 }
 
 // ============================================================
 // Estilos
+// As cores vêm do tema (useTheme) e são aplicadas nos componentes;
+// aqui ficam apenas os valores de layout.
 // ============================================================
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F1A',
   },
 
   headerBox: {
@@ -240,9 +277,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1A1A2E',
     borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
   },
 
   botaoVoltar: {
@@ -250,7 +285,6 @@ const styles = StyleSheet.create({
   },
 
   textoVoltar: {
-    color: '#FF6B35',
     fontSize: 14,
     fontWeight: 'bold',
   },
@@ -258,7 +292,6 @@ const styles = StyleSheet.create({
   tituloHeader: {
     flex: 1,
     textAlign: 'center',
-    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
     marginRight: 40,
@@ -275,7 +308,6 @@ const styles = StyleSheet.create({
   },
 
   tituloSecao: {
-    color: '#FF6B35',
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 8,
@@ -284,35 +316,27 @@ const styles = StyleSheet.create({
   },
 
   descricao: {
-    color: '#AAAAAA',
     fontSize: 13,
     lineHeight: 18,
   },
 
   card: {
-    backgroundColor: '#1A1A2E',
-    borderRadius: 8,
     padding: 12,
     marginBottom: 16,
     borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35',
   },
 
   labelInput: {
-    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 8,
   },
 
   input: {
-    backgroundColor: '#0F0F1A',
     borderWidth: 1,
-    borderColor: '#2E2E4E',
-    borderRadius: 6,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    color: '#FFFFFF',
     fontSize: 14,
     marginBottom: 16,
   },
@@ -325,19 +349,18 @@ const styles = StyleSheet.create({
   botao: {
     flex: 1,
     paddingVertical: 12,
-    borderRadius: 6,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
 
   botaoPrimario: {
-    backgroundColor: '#FF6B35',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 
   botaoSecundario: {
-    backgroundColor: 'transparent',
     borderWidth: 2,
-    borderColor: '#FF6B35',
   },
 
   botaoDisabilitado: {
@@ -345,19 +368,16 @@ const styles = StyleSheet.create({
   },
 
   textoBotaoPrimario: {
-    color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 13,
   },
 
   textoBotaoSecundario: {
-    color: '#FF6B35',
     fontWeight: 'bold',
     fontSize: 13,
   },
 
   tituloResultado: {
-    color: '#00FF00',
     fontSize: 15,
     fontWeight: 'bold',
     marginBottom: 12,
@@ -368,44 +388,29 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
   },
 
   labelResultado: {
-    color: '#AAAAAA',
     fontSize: 13,
   },
 
   valorResultado: {
-    color: '#00FF00',
     fontSize: 13,
     fontWeight: 'bold',
   },
 
-  cardErro: {
-    backgroundColor: '#FF6B3520',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35',
-  },
-
   tituloErro: {
-    color: '#FF6B35',
     fontSize: 15,
     fontWeight: 'bold',
     marginBottom: 8,
   },
 
   textoErro: {
-    color: '#AAAAAA',
     fontSize: 13,
     lineHeight: 18,
   },
 
   textoInfo: {
-    color: '#AAAAAA',
     fontSize: 13,
     marginBottom: 12,
     lineHeight: 18,
@@ -421,7 +426,6 @@ const styles = StyleSheet.create({
   },
 
   numeroBala: {
-    color: '#FF6B35',
     fontSize: 16,
     fontWeight: 'bold',
     marginRight: 12,
@@ -429,30 +433,18 @@ const styles = StyleSheet.create({
   },
 
   textoLista: {
-    color: '#AAAAAA',
     fontSize: 13,
     lineHeight: 18,
     flex: 1,
   },
 
-  cardAviso: {
-    backgroundColor: '#FF6B3510',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35',
-  },
-
   tituloAviso: {
-    color: '#FF6B35',
     fontSize: 14,
     fontWeight: 'bold',
     marginBottom: 8,
   },
 
   textoAviso: {
-    color: '#AAAAAA',
     fontSize: 12,
     lineHeight: 18,
   },

@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { Release } from '../types';
+import { BASE_URL } from './api';
 
 export interface DownloadItem {
   id: string;
@@ -112,12 +113,11 @@ class DownloadManager {
   }
 
   // Adiciona um download usando a release original do usuário.
+  // Regra 3: o arquivo sempre vem do endpoint do backend, que resolve a
+  // fonte em sites abertos (nunca YouTube/Spotify/Deezer).
   async addDownload(release: Release): Promise<string> {
-    if (!release.download_url) {
-      throw new Error('URL de download não disponível');
-    }
-
-    return this.baixar(release.download_url, release.version_name);
+    const url = `${BASE_URL}/api/releases/${release.id}/download?format=mp3`;
+    return this.baixar(url, release.version_name);
   }
 
   // Compatibilidade com o componente de UI antigo.

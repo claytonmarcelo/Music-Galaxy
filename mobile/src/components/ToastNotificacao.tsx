@@ -1,5 +1,6 @@
-// Toast Notificação Premium - Notificações elegantes no topo da tela
-// Substituem console.log e avisos simples com design gourmet
+// Toast de notificação — avisos elegantes no topo da tela.
+// Visual de vidro fosco alinhado à identidade Aurora, com animação de
+// entrada/saída e barra de progresso indicando o tempo de exibição.
 
 import React, { useEffect, useRef } from 'react';
 import {
@@ -9,6 +10,7 @@ import {
   Animated,
   Platform,
 } from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
 
 export type TipoToast = 'sucesso' | 'erro' | 'aviso' | 'info';
 
@@ -20,31 +22,22 @@ interface Props {
   onFechar?: () => void;
 }
 
-const CONFIG_TIPO: Record<TipoToast, {
-  cor: string;
-  corFundo: string;
-  icone: string;
-}> = {
-  sucesso: {
-    cor: '#1DB954',
-    corFundo: '#1DB95420',
-    icone: '✓',
-  },
-  erro: {
-    cor: '#FF6B35',
-    corFundo: '#FF6B3520',
-    icone: '✕',
-  },
-  aviso: {
-    cor: '#FFB627',
-    corFundo: '#FFB62720',
-    icone: '⚠',
-  },
-  info: {
-    cor: '#00D9FF',
-    corFundo: '#00D9FF20',
-    icone: 'ℹ',
-  },
+// Ícones por tipo (as cores vêm do tema).
+const ICONE_TIPO: Record<TipoToast, string> = {
+  sucesso: '✓',
+  erro: '✕',
+  aviso: '⚠',
+  info: 'ℹ',
+};
+
+// Cada tipo aponta para um token de cor do tema.
+type ChaveCor = 'success' | 'error' | 'warning' | 'primary';
+
+const COR_TIPO: Record<TipoToast, ChaveCor> = {
+  sucesso: 'success',
+  erro: 'error',
+  aviso: 'warning',
+  info: 'primary',
 };
 
 export default function ToastNotificacao({
@@ -54,36 +47,9 @@ export default function ToastNotificacao({
   duracao = 3000,
   onFechar,
 }: Props): React.JSX.Element {
+  const { colors } = useTheme();
   const translateYAnim = useRef(new Animated.Value(-100)).current;
   const opacidadeAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (visivel) {
-      // Animação de entrada
-      Animated.parallel([
-        Animated.spring(translateYAnim, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 65,
-          friction: 11,
-        }),
-        Animated.timing(opacidadeAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
-
-      // Auto-fechar se duracao > 0
-      if (duracao > 0) {
-        const timeout = setTimeout(() => {
-          fecharToast();
-        }, duracao);
-
-        return () => clearTimeout(timeout);
-      }
-    }
-  }, [visivel, duracao, translateYAnim, opacidadeAnim]);
 
   const fecharToast = () => {
     Animated.parallel([
@@ -102,9 +68,38 @@ export default function ToastNotificacao({
     });
   };
 
+  useEffect(() => {
+    if (visivel) {
+      // Animação de entrada
+      Animated.parallel([
+        Animated.spring(translateYAnim, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 65,
+          friction: 11,
+        }),
+        Animated.timing(opacidadeAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+
+      // Auto-fechar se a duração for maior que zero
+      if (duracao > 0) {
+        const timeout = setTimeout(() => {
+          fecharToast();
+        }, duracao);
+
+        return () => clearTimeout(timeout);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visivel, duracao, translateYAnim, opacidadeAnim]);
+
   if (!visivel) return <View />;
 
-  const config = CONFIG_TIPO[tipo];
+  const corDestaque = colors[COR_TIPO[tipo]];
 
   return (
     <Animated.View
@@ -116,27 +111,37 @@ export default function ToastNotificacao({
         },
       ]}
     >
-      <View style={[styles.toast, { borderLeftColor: config.cor }]}>
+      <View
+        style={[
+          styles.toast,
+          {
+            backgroundColor: colors.glassCardForte,
+            borderLeftColor: corDestaque,
+            borderColor: colors.glassBorder,
+            shadowColor: colors.glassShadow,
+          },
+        ]}
+      >
         {/* Ícone */}
-        <View style={[styles.iconeContainer, { backgroundColor: config.corFundo }]}>
-          <Text style={[styles.icone, { color: config.cor }]}>
-            {config.icone}
+        <View style={[styles.iconeContainer, { backgroundColor: `${corDestaque}22` }]}>
+          <Text style={[styles.icone, { color: corDestaque }]}>
+            {ICONE_TIPO[tipo]}
           </Text>
         </View>
 
         {/* Mensagem */}
-        <Text style={styles.mensagem} numberOfLines={2}>
+        <Text style={[styles.mensagem, { color: colors.text }]} numberOfLines={2}>
           {mensagem}
         </Text>
 
         {/* Barra de progresso (se tem duração) */}
         {duracao > 0 && (
-          <View style={styles.barraProgresso}>
+          <View style={[styles.barraProgresso, { backgroundColor: colors.glassBorder }]}>
             <Animated.View
               style={[
                 styles.barraPreenchida,
                 {
-                  backgroundColor: config.cor,
+                  backgroundColor: corDestaque,
                   width: '100%',
                 },
               ]}
@@ -158,30 +163,24 @@ const styles = StyleSheet.create({
   },
 
   toast: {
-    backgroundColor: '#1A1A2E',
-    borderRadius: 12,
+    borderRadius: 16,
+    borderWidth: 1,
     borderLeftWidth: 4,
     padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 8,
-      },
-    }),
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    overflow: 'hidden',
   },
 
   iconeContainer: {
     width: 40,
     height: 40,
-    borderRadius: 8,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
     minWidth: 40,
@@ -195,7 +194,6 @@ const styles = StyleSheet.create({
   mensagem: {
     flex: 1,
     fontSize: 13,
-    color: '#FFFFFF',
     fontWeight: '500',
     lineHeight: 18,
   },
@@ -206,10 +204,6 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 2,
-    backgroundColor: '#2E2E4E',
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
-    overflow: 'hidden',
   },
 
   barraPreenchida: {

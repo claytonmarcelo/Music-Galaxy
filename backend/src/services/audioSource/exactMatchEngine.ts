@@ -80,14 +80,14 @@ export class ExactMatchEngine {
   // Verificar compatibilidade de duração
   private checkDurationCompatibility(
     expectedDuration?: number,
-   实际Duration?: number,
+   candidateDuration?: number,
     tolerance: number = 5
   ): { compatible: boolean; score: number; reason: string } {
-    if (!expectedDuration || !实际Duration) {
+    if (!expectedDuration || !candidateDuration) {
       return { compatible: true, score: this.WEIGHTS.duration, reason: 'Duração não especificada' };
     }
 
-    const diff = Math.abs(expectedDuration - 实际Duration);
+    const diff = Math.abs(expectedDuration - candidateDuration);
     const compatible = diff <= tolerance;
 
     if (compatible) {

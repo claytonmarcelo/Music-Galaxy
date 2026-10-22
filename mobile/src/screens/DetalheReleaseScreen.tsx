@@ -1,5 +1,6 @@
 // Tela de detalhes de um release específico.
-// Exibe todas as informações disponíveis sobre a versão selecionada com design premium.
+// Exibe todas as informações disponíveis sobre a versão selecionada,
+// com cartões de vidro fosco sobre o fundo decorativo do app.
 // Respeita a Regra 1: capa oficial só quando cover_url não for null.
 // NÃO abre links externos — tudo permanece dentro do app.
 
@@ -20,10 +21,14 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
 import { useFavoritos } from '../contexts/FavoritosContext';
 import { useModal } from '../contexts/ModalContext';
+import { useTheme } from '../contexts/ThemeContext';
 import PlayerControls from '../components/PlayerControls';
 import DownloadProgress from '../components/DownloadProgress';
-import ModalPersonalizado from '../components/ModalPersonalizado';
-import { TIMINGS, EASING, fadeInOut, scaleSpring } from '../utils/animacoes';
+import AuroraBackground from '../components/AuroraBackground';
+import GlassCard from '../components/GlassCard';
+import { BASE_URL } from '../services/api';
+import { TIMINGS, EASING } from '../utils/animacoes';
+import { traduzirTipoRelease } from '../utils/tiposRelease';
 
 type RouteProps = RouteProp<RootStackParamList, 'DetalheRelease'>;
 
@@ -37,20 +42,19 @@ const LABELS_CATEGORIA: Record<string, string> = {
   playback:       'Playback',
 };
 
-const CORES_CATEGORIA: Record<string, string> = {
-  release_format: '#1DB954',
-  mix_edit:       '#1E90FF',
-  instrumental:   '#9B59B6',
-  playback:       '#E67E22',
-};
-
 export default function DetalheReleaseScreen(): React.JSX.Element {
   const navigation = useNavigation();
   const route      = useRoute<RouteProps>();
   const { release } = route.params;
+  const { colors, isDark } = useTheme();
+
+  // Regra 3: playback/download passam SEMPRE pelos endpoints do backend,
+  // que resolvem a fonte em sites abertos (nunca YouTube/Spotify/Deezer).
+  const urlStream   = `${BASE_URL}/api/releases/${release.id}/stream`;
+  const urlDownload = `${BASE_URL}/api/releases/${release.id}/download?format=mp3`;
   const { isFavorito, adicionarFavorito, removerFavorito } = useFavoritos();
   const { abrirInfo, toastSucesso, toastErro } = useModal();
-  
+
   const [mostraModalFonte, setMostraModalFonte] = useState(false);
   const [ehFavorito, setEhFavorito] = useState(isFavorito(release.id));
 
@@ -83,7 +87,14 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
     ]).start();
   }, [fadeInAnim, scaleCapaAnim, slideConteudeAnim]);
 
-  const corCategoria = CORES_CATEGORIA[release.release_type_category] ?? '#888';
+  // Cores de destaque por categoria, derivadas do tema (sem cores fixas)
+  const coresCategoria: Record<string, string> = {
+    release_format: colors.success,
+    mix_edit:       colors.auroraSecundaria,
+    instrumental:   colors.auroraPrimaria,
+    playback:       colors.warning,
+  };
+  const corCategoria = coresCategoria[release.release_type_category] ?? colors.textSecondary;
   const labelCategoria = LABELS_CATEGORIA[release.release_type_category] ?? release.release_type_category;
 
   // Toggles favorito
@@ -113,36 +124,35 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
   };
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F0F1A" />
+    <AuroraBackground>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.background} />
 
-      {/* Botões no header: voltar + favorito */}
+      {/* Barra superior de vidro: voltar + favorito */}
       <Animated.View
-        style={[
-          styles.headerTop,
-          {
-            opacity: fadeInAnim,
-          },
-        ]}
+        style={{
+          opacity: fadeInAnim,
+        }}
       >
-        <TouchableOpacity
-          style={styles.botaoVoltar}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
-          accessibilityLabel="Voltar para a busca"
-        >
-          <Text style={styles.botaoVoltarTexto}>← Voltar</Text>
-        </TouchableOpacity>
-        
-        {/* Botão de favorito */}
-        <TouchableOpacity
-          style={styles.botaoFavorito}
-          onPress={toggleFavorito}
-          activeOpacity={0.7}
-          accessibilityLabel={ehFavorito ? 'Remover de favoritos' : 'Adicionar aos favoritos'}
-        >
-          <Text style={styles.botaoFavoritoTexto}>{ehFavorito ? '❤️' : '🤍'}</Text>
-        </TouchableOpacity>
+        <GlassCard forte style={styles.headerTop}>
+          <TouchableOpacity
+            style={styles.botaoVoltar}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.7}
+            accessibilityLabel="Voltar para a busca"
+          >
+            <Text style={[styles.botaoVoltarTexto, { color: colors.primary }]}>← Voltar</Text>
+          </TouchableOpacity>
+
+          {/* Botão de favorito */}
+          <TouchableOpacity
+            style={styles.botaoFavorito}
+            onPress={toggleFavorito}
+            activeOpacity={0.7}
+            accessibilityLabel={ehFavorito ? 'Remover de favoritos' : 'Adicionar aos favoritos'}
+          >
+            <Text style={styles.botaoFavoritoTexto}>{ehFavorito ? '❤️' : '🤍'}</Text>
+          </TouchableOpacity>
+        </GlassCard>
       </Animated.View>
 
       <Animated.ScrollView
@@ -165,20 +175,33 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           ]}
         >
           {release.cover_url ? (
-            <View style={styles.capaWrapper}>
+            <View
+              style={[
+                styles.capaWrapper,
+                Platform.select({
+                  ios: {
+                    shadowColor: colors.primary,
+                    shadowOffset: { width: 0, height: 8 },
+                    shadowOpacity: 0.25,
+                    shadowRadius: 16,
+                  },
+                  android: { elevation: 12 },
+                }),
+              ]}
+            >
               <Image
                 source={{ uri: release.cover_url }}
                 style={styles.capa}
                 resizeMode="cover"
                 accessibilityLabel={`Capa de ${release.version_name}`}
               />
-              {/* Shadow effect */}
-              <View style={styles.capaShadow} />
+              {/* Sombra suave abaixo da capa */}
+              <View style={[styles.capaShadow, { backgroundColor: colors.accent }]} />
             </View>
           ) : (
-            <View style={[styles.capa, styles.semCapa]}>
-              <Text style={styles.semCapaIcone}>♪</Text>
-              <Text style={styles.semCapaTexto}>Sem Capa Oficial</Text>
+            <View style={[styles.capa, styles.semCapa, { backgroundColor: colors.card }]}>
+              <Text style={[styles.semCapaIcone, { color: colors.border }]}>♪</Text>
+              <Text style={[styles.semCapaTexto, { color: colors.textSecondary }]}>Sem Capa Oficial</Text>
             </View>
           )}
         </Animated.View>
@@ -193,20 +216,20 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
             },
           ]}
         >
-          <Text style={styles.artista}>{release.artist_name}</Text>
-          <Text style={styles.titulo}>{release.version_name}</Text>
+          <Text style={[styles.artista, { color: colors.textSecondary }]}>{release.artist_name}</Text>
+          <Text style={[styles.titulo, { color: colors.text }]}>{release.version_name}</Text>
 
           {release.album_name && release.album_name !== release.version_name && (
-            <Text style={styles.album}>do álbum "{release.album_name}"</Text>
+            <Text style={[styles.album, { color: colors.textSecondary }]}>do álbum "{release.album_name}"</Text>
           )}
 
-          {/* Badge do tipo com cor dinâmica */}
+          {/* Badge do tipo com cor dinâmica do tema */}
           <View style={[styles.badge, { backgroundColor: corCategoria }]}>
-            <Text style={styles.badgeTexto}>{release.release_type}</Text>
+            <Text style={[styles.badgeTexto, { color: colors.buttonText }]}>{traduzirTipoRelease(release.release_type)}</Text>
           </View>
         </Animated.View>
 
-        {/* Player de áudio — permite reprodução de preview SEMPRE VISÍVEL */}
+        {/* Player de áudio — stream completo via backend (Regra 3), SEMPRE VISÍVEL */}
         <Animated.View
           style={{
             opacity: fadeInAnim,
@@ -214,7 +237,7 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           }}
         >
           <PlayerControls
-            url={release.audio_preview_url || release.streaming_url || release.download_url || ''}
+            url={urlStream}
             titulo={release.version_name}
             artista={release.artist_name}
           />
@@ -228,7 +251,7 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           }}
         >
           <DownloadProgress
-            url={release.download_url || ''}
+            url={urlDownload}
             titulo={release.version_name}
             artista={release.artist_name}
           />
@@ -239,8 +262,8 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
             transform: [{ translateY: slideConteudeAnim }],
           }}
         >
-          <View style={styles.secao}>
-            <Text style={styles.secaoTitulo}>Detalhes do Lançamento</Text>
+          <GlassCard style={styles.secao}>
+            <Text style={[styles.secaoTitulo, { color: colors.primary }]}>Detalhes do Lançamento</Text>
 
             <InfoLinha label="Categoria"   valor={labelCategoria} cor={corCategoria} />
             <InfoLinha label="Tipo"        valor={release.release_type} />
@@ -248,51 +271,52 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
             <InfoLinha label="País"        valor={release.country} />
             <InfoLinha label="Gravadora"   valor={release.label} />
             <InfoLinha label="Qualidade"   valor={release.quality} />
-          </View>
+          </GlassCard>
 
-          <View style={styles.secao}>
-            <Text style={styles.secaoTitulo}>Obra Musical</Text>
+          <GlassCard style={styles.secao}>
+            <Text style={[styles.secaoTitulo, { color: colors.primary }]}>Obra Musical</Text>
             <InfoLinha label="Título"       valor={release.work_title} />
             <InfoLinha label="Artista"      valor={release.artist_name} />
             <InfoLinha label="País do artista" valor={release.artist_country} />
             <InfoLinha label="Lançamento original" valor={release.original_release_year?.toString()} />
-          </View>
+          </GlassCard>
 
-          <View style={styles.secao}>
-            <Text style={styles.secaoTitulo}>Metadados</Text>
-            <InfoLinha label="Fonte"   valor={release.metadata_source} cor="#1DB954" />
+          <GlassCard style={styles.secao}>
+            <Text style={[styles.secaoTitulo, { color: colors.primary }]}>Metadados</Text>
+            <InfoLinha label="Fonte"   valor={release.metadata_source} cor={colors.primary} />
 
             {release.source_reference_url && (
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={abrirModalFonte}
                 style={styles.linkFonte}
                 activeOpacity={0.7}
               >
-                <Text style={styles.linkFonteTexto}>ℹ️ Informações da Fonte →</Text>
+                <Text style={[styles.linkFonteTexto, { color: colors.primary }]}>ℹ️ Informações da Fonte →</Text>
               </TouchableOpacity>
             )}
-          </View>
+          </GlassCard>
         </Animated.View>
       </Animated.ScrollView>
-    </View>
+    </AuroraBackground>
   );
 }
 
 // Componente auxiliar para uma linha de informação "label: valor"
-function InfoLinha({ 
-  label, 
+function InfoLinha({
+  label,
   valor,
   cor,
-}: { 
-  label: string; 
+}: {
+  label: string;
   valor?: string | null;
   cor?: string;
 }): React.JSX.Element | null {
+  const { colors } = useTheme();
   if (!valor) return null;
   return (
-    <View style={infoStyles.container}>
-      <Text style={infoStyles.label}>{label}</Text>
-      <Text style={[infoStyles.valor, cor ? { color: cor } : undefined]}>{valor}</Text>
+    <View style={[infoStyles.container, { borderBottomColor: colors.border }]}>
+      <Text style={[infoStyles.label, { color: colors.textSecondary }]}>{label}</Text>
+      <Text style={[infoStyles.valor, { color: cor ?? colors.text }]}>{valor}</Text>
     </View>
   );
 }
@@ -303,17 +327,14 @@ const infoStyles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#1A1A2E',
   },
   label: {
     fontSize: 13,
-    color: '#8080A0',
     flex: 1,
     fontWeight: '500',
   },
   valor: {
     fontSize: 13,
-    color: '#FFFFFF',
     flex: 2,
     textAlign: 'right',
     fontWeight: '600',
@@ -321,26 +342,22 @@ const infoStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F0F1A',
-  },
   headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    marginHorizontal: 16,
+    marginTop: 8,
+    paddingHorizontal: 8,
     paddingTop: Platform.OS === 'ios' ? 50 : 16,
     paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1A1A2E',
+    borderRadius: 20,
   },
   botaoVoltar: {
     paddingVertical: 8,
     paddingHorizontal: 8,
   },
   botaoVoltarTexto: {
-    color: '#1DB954',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -365,17 +382,6 @@ const styles = StyleSheet.create({
     width: 240,
     height: 240,
     borderRadius: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#1DB954',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.25,
-        shadowRadius: 16,
-      },
-      android: {
-        elevation: 12,
-      },
-    }),
   },
   capaShadow: {
     position: 'absolute',
@@ -383,22 +389,18 @@ const styles = StyleSheet.create({
     left: 12,
     right: 12,
     height: 12,
-    backgroundColor: 'rgba(29, 185, 84, 0.15)',
     borderRadius: 50,
   },
   semCapa: {
-    backgroundColor: '#1A1A2E',
     alignItems: 'center',
     justifyContent: 'center',
   },
   semCapaIcone: {
     fontSize: 60,
-    color: '#2A2A4A',
     marginBottom: 8,
   },
   semCapaTexto: {
     fontSize: 14,
-    color: '#404060',
   },
   cabecalho: {
     paddingHorizontal: 24,
@@ -407,21 +409,18 @@ const styles = StyleSheet.create({
   },
   artista: {
     fontSize: 14,
-    color: '#8080A0',
     marginBottom: 4,
     fontWeight: '500',
   },
   titulo: {
     fontSize: 24,
     fontWeight: '800',
-    color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 6,
     letterSpacing: 0.5,
   },
   album: {
     fontSize: 13,
-    color: '#606080',
     marginBottom: 12,
     textAlign: 'center',
     fontStyle: 'italic',
@@ -431,48 +430,20 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
     marginTop: 8,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.15,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 3,
-      },
-    }),
   },
   badgeTexto: {
     fontSize: 12,
-    color: '#FFFFFF',
     fontWeight: '700',
     textTransform: 'capitalize',
   },
   secao: {
     marginHorizontal: 20,
     marginBottom: 16,
-    backgroundColor: '#12121F',
     borderRadius: 16,
-    padding: 16,
-    borderLeftWidth: 3,
-    borderLeftColor: '#1DB954',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
   },
   secaoTitulo: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#1DB954',
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: 12,
@@ -482,7 +453,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   linkFonteTexto: {
-    color: '#1DB954',
     fontSize: 13,
     fontWeight: '600',
   },

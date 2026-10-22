@@ -136,7 +136,10 @@ function AnimatedCardComponent({
       style={[
         styles.card,
         {
-          backgroundColor: colors.card,
+          // Cartão translúcido com contorno sutil e sombra suave de vidro
+          backgroundColor: colors.glassCard,
+          borderColor: colors.glassBorder,
+          shadowColor: colors.glassShadow,
           opacity: fadeAnim,
           transform: [...getTransform(), { scale: pressScale }],
         },
@@ -168,12 +171,13 @@ export default memo(AnimatedCardComponent);
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderWidth: 1,
+    // Sombra suave de vidro (cor vem do tema, definida em linha no componente)
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 5,
   },
 });

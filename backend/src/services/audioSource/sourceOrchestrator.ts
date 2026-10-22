@@ -272,21 +272,49 @@ export class SourceOrchestrator {
   }
 
   // Verificar cache de descoberta
+  // Cache de memória com TTL — evita re-crawlear a web a cada requisição.
+  // (A persistência principal continua sendo releases.audio_source_url.)
+  private readonly cacheDescoberta = new Map<string, { resultado: DiscoveryResult; expiraEm: number }>();
+  private readonly TTL_CACHE_MS = 60 * 60 * 1000; // 1 hora
+  private readonly TAMANHO_MAX_CACHE = 500;
+
   private async checkCache(key: string): Promise<DiscoveryResult | null> {
-    // Implementação simplificada - pode ser expandida para usar Redis ou outro cache
-    // Por enquanto, retorna null para forçar busca sempre
-    return null;
+    const entrada = this.cacheDescoberta.get(key);
+    if (!entrada) return null;
+
+    if (Date.now() > entrada.expiraEm) {
+      this.cacheDescoberta.delete(key);
+      return null;
+    }
+
+    // Resultado negativo não é reusado — permite tentar a descoberta de novo
+    if (!entrada.resultado.bestCandidate) return null;
+
+    return entrada.resultado;
   }
 
   // Salvar resultado no cache
   private async saveCache(key: string, result: DiscoveryResult): Promise<void> {
-    // Implementação simplificada - pode ser expandida para usar Redis ou outro cache
-    console.log(`[SourceOrchestrator] Cache saved: key=${key}`);
+    // Controle simples de tamanho: remove entradas mais antigas que expiraram
+    if (this.cacheDescoberta.size >= this.TAMANHO_MAX_CACHE) {
+      const agora = Date.now();
+      for (const [k, v] of this.cacheDescoberta.entries()) {
+        if (v.expiraEm <= agora) this.cacheDescoberta.delete(k);
+      }
+      if (this.cacheDescoberta.size >= this.TAMANHO_MAX_CACHE) {
+        const maisAntiga = this.cacheDescoberta.keys().next().value;
+        if (maisAntiga) this.cacheDescoberta.delete(maisAntiga);
+      }
+    }
+
+    this.cacheDescoberta.set(key, { resultado: result, expiraEm: Date.now() + this.TTL_CACHE_MS });
+    console.log(`[SourceOrchestrator] Cache salvo: key=${key}`);
   }
 
   // Limpar cache
   async clearCache(): Promise<void> {
-    console.log(`[SourceOrchestrator] Cache cleared`);
+    this.cacheDescoberta.clear();
+    console.log(`[SourceOrchestrator] Cache limpo`);
   }
 
   // Obter estatísticas

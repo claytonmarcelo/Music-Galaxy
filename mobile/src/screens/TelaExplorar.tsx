@@ -1,5 +1,6 @@
-// Tela de Exploração — releases recentes, obras por década.
-// Funciona como um discovery interface para encontrar novo conteúdo.
+// Tela de Exploração — versões recentes e obras por década.
+// Funciona como uma vitrine de descoberta para encontrar conteúdo novo.
+// Segue a identidade visual de vidro fosco: fundo com luzes suaves e cartões translúcidos.
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -10,19 +11,21 @@ import {
   TouchableOpacity,
   FlatList,
   ActivityIndicator,
-  Alert,
-  RefreshControl,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RootStackParamList, Release, Work } from '../types';
-import { API_BASE_URL } from '../services/api';
+import { BASE_URL } from '../services/api';
+import { useTheme } from '../contexts/ThemeContext';
+import { useModal } from '../contexts/ModalContext';
+import AuroraBackground from '../components/AuroraBackground';
+import GlassCard from '../components/GlassCard';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Explorar'>;
 
 type SecaoAtiva = 'recentes' | 'decadas';
 
-// Interface local para resposta de releases recentes
+// Interface local para resposta de versões recentes
 interface RespostaReleasesRecentes {
   success: boolean;
   data: {
@@ -48,6 +51,8 @@ interface RespostaObrasPorDecada {
 const DECADAS = [1960, 1970, 1980, 1990, 2000, 2010, 2020];
 
 export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
+  const { colors } = useTheme();
+  const { abrirErro } = useModal();
   const [secaoAtiva, setSecaoAtiva] = useState<SecaoAtiva>('recentes');
   const [carregandoRecentes, setCarregandoRecentes] = useState(true);
   const [releasesRecentes, setReleasesRecentes] = useState<Release[]>([]);
@@ -58,7 +63,7 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
   const [obrasDecada, setObrasDecada] = useState<Work[]>([]);
   const [erroDecada, setErroDecada] = useState<string | null>(null);
 
-  // Carrega releases recentes na primeira renderização
+  // Carrega versões recentes na primeira renderização
   useEffect(() => {
     carregarReleasesRecentes();
   }, []);
@@ -70,16 +75,16 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
     }
   }, [decadaSelecionada]);
 
-  // Carrega releases recentes
+  // Carrega versões recentes
   const carregarReleasesRecentes = useCallback(async (): Promise<void> => {
     try {
       setCarregandoRecentes(true);
       setErroRecentes(null);
 
-      const response = await fetch(`${API_BASE_URL}/api/releases/by-date?limit=50&offset=0`);
+      const response = await fetch(`${BASE_URL}/api/releases/by-date?limit=50&offset=0`);
 
       if (!response.ok) {
-        throw new Error('Erro ao carregar releases recentes');
+        throw new Error('Erro ao carregar versões recentes');
       }
 
       const data: RespostaReleasesRecentes = await response.json();
@@ -92,11 +97,11 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
     } catch (err) {
       const mensagem = err instanceof Error ? err.message : 'Erro desconhecido';
       setErroRecentes(mensagem);
-      Alert.alert('Erro', mensagem);
+      abrirErro('Não foi possível carregar', mensagem);
     } finally {
       setCarregandoRecentes(false);
     }
-  }, []);
+  }, [abrirErro]);
 
   // Carrega obras de uma década específica
   const carregarObrasPorDecada = useCallback(async (decada: number): Promise<void> => {
@@ -105,7 +110,7 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
       setErroDecada(null);
 
       const response = await fetch(
-        `${API_BASE_URL}/api/works/by-decade/${decada}?limit=50&offset=0`
+        `${BASE_URL}/api/works/by-decade/${decada}?limit=50&offset=0`
       );
 
       if (!response.ok) {
@@ -122,13 +127,13 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
     } catch (err) {
       const mensagem = err instanceof Error ? err.message : 'Erro desconhecido';
       setErroDecada(mensagem);
-      Alert.alert('Erro', mensagem);
+      abrirErro('Não foi possível carregar', mensagem);
     } finally {
       setCarregandoDecada(false);
     }
-  }, []);
+  }, [abrirErro]);
 
-  // Navega para detalhes do release
+  // Navega para detalhes da versão
   const handleSelecionarRelease = (release: Release): void => {
     navigation.push('DetalheRelease', { release });
   };
@@ -138,87 +143,95 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
     navigation.push('DetalheWork', { workId: obra.id });
   };
 
-  // Renderiza card de release
+  // Renderiza card de versão
   const renderReleaseCard = (release: Release): React.JSX.Element => (
     <TouchableOpacity
-      style={styles.cardRelease}
       onPress={() => handleSelecionarRelease(release)}
       activeOpacity={0.7}
     >
-      <View style={styles.conteudoCardRelease}>
-        <Text style={styles.versionName} numberOfLines={2}>
-          {release.version_name}
-        </Text>
-        <Text style={styles.workArtist} numberOfLines={1}>
-          {release.work_title} • {release.artist_name}
-        </Text>
-        <Text style={styles.releaseInfo}>
-          {release.release_year || '?'} • {release.release_type}
-        </Text>
-      </View>
-      <Text style={styles.seta}>→</Text>
+      <GlassCard style={[styles.cardRelease, { borderLeftColor: colors.primary }]}>
+        <View style={styles.conteudoCardRelease}>
+          <Text style={[styles.versionName, { color: colors.text }]} numberOfLines={2}>
+            {release.version_name}
+          </Text>
+          <Text style={[styles.workArtist, { color: colors.textSecondary }]} numberOfLines={1}>
+            {release.work_title} • {release.artist_name}
+          </Text>
+          <Text style={[styles.releaseInfo, { color: colors.primary }]}>
+            {release.release_year || '?'} • {release.release_type}
+          </Text>
+        </View>
+        <Text style={[styles.seta, { color: colors.primary }]}>→</Text>
+      </GlassCard>
     </TouchableOpacity>
   );
 
   // Renderiza card de obra
   const renderObraCard = (obra: Work): React.JSX.Element => (
     <TouchableOpacity
-      style={styles.cardObra}
       onPress={() => handleSelecionarObra(obra)}
       activeOpacity={0.7}
     >
-      <View style={styles.conteudoCardObra}>
-        <Text style={styles.tituloObra} numberOfLines={2}>
-          {obra.title}
-        </Text>
-        <Text style={styles.artistaObra} numberOfLines={1}>
-          {obra.artist.name}
-        </Text>
-        <Text style={styles.anoObra}>
-          {obra.original_release_year || 'Ano desconhecido'}
-        </Text>
-      </View>
-      <Text style={styles.seta}>→</Text>
+      <GlassCard style={[styles.cardObra, { borderLeftColor: colors.primary }]}>
+        <View style={styles.conteudoCardObra}>
+          <Text style={[styles.tituloObra, { color: colors.text }]} numberOfLines={2}>
+            {obra.title}
+          </Text>
+          <Text style={[styles.artistaObra, { color: colors.textSecondary }]} numberOfLines={1}>
+            {obra.artist.name}
+          </Text>
+          <Text style={[styles.anoObra, { color: colors.primary }]}>
+            {obra.original_release_year || 'Ano desconhecido'}
+          </Text>
+        </View>
+        <Text style={[styles.seta, { color: colors.primary }]}>→</Text>
+      </GlassCard>
     </TouchableOpacity>
   );
 
   // Renderiza botão de década
-  const renderBotaoDecada = (decada: number): React.JSX.Element => (
-    <TouchableOpacity
-      style={[
-        styles.botaoDecada,
-        decadaSelecionada === decada && styles.botaoDecadaSelecionado,
-      ]}
-      onPress={() => setDecadaSelecionada(decada)}
-    >
-      <Text
+  const renderBotaoDecada = (decada: number): React.JSX.Element => {
+    const selecionado = decadaSelecionada === decada;
+    return (
+      <TouchableOpacity
         style={[
-          styles.textoDecada,
-          decadaSelecionada === decada && styles.textoDecadaSelecionado,
+          styles.botaoDecada,
+          {
+            backgroundColor: selecionado ? colors.primary : colors.glassCard,
+            borderColor: selecionado ? colors.primary : colors.glassBorder,
+          },
         ]}
+        onPress={() => setDecadaSelecionada(decada)}
       >
-        {decada}s
-      </Text>
-    </TouchableOpacity>
-  );
+        <Text
+          style={[
+            styles.textoDecada,
+            { color: selecionado ? colors.buttonText : colors.textSecondary },
+          ]}
+        >
+          {decada}s
+        </Text>
+      </TouchableOpacity>
+    );
+  };
 
   // Renderiza seção de recentes
   const renderRecentes = (): React.JSX.Element => (
     <View style={styles.conteudoSecao}>
-      <Text style={styles.tituloSecao}>🎵 Releases Recentes</Text>
+      <Text style={[styles.tituloSecao, { color: colors.text }]}>🎵 Versões recentes</Text>
 
       {carregandoRecentes ? (
         <View style={styles.containerCarregando}>
-          <ActivityIndicator size="large" color="#FF6B35" />
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : erroRecentes ? (
         <View style={styles.containerErro}>
-          <Text style={styles.textoErro}>{erroRecentes}</Text>
+          <Text style={[styles.textoErro, { color: colors.error }]}>{erroRecentes}</Text>
           <TouchableOpacity
-            style={styles.botaoTentar}
+            style={[styles.botaoTentar, { backgroundColor: colors.button }]}
             onPress={carregarReleasesRecentes}
           >
-            <Text style={styles.textoButton}>Tentar Novamente</Text>
+            <Text style={[styles.textoButton, { color: colors.buttonText }]}>Tentar novamente</Text>
           </TouchableOpacity>
         </View>
       ) : releasesRecentes.length > 0 ? (
@@ -230,7 +243,9 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
         />
       ) : (
         <View style={styles.containerVazio}>
-          <Text style={styles.textoVazio}>Nenhum release encontrado</Text>
+          <Text style={[styles.textoVazio, { color: colors.textSecondary }]}>
+            Nenhuma versão encontrada
+          </Text>
         </View>
       )}
     </View>
@@ -239,7 +254,7 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
   // Renderiza seção de décadas
   const renderDecadas = (): React.JSX.Element => (
     <View style={styles.conteudoSecao}>
-      <Text style={styles.tituloSecao}>📅 Explorar por Década</Text>
+      <Text style={[styles.tituloSecao, { color: colors.text }]}>📅 Explorar por Década</Text>
 
       <View style={styles.containerDecadas}>
         {DECADAS.map(decada => renderBotaoDecada(decada))}
@@ -247,15 +262,15 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
 
       {carregandoDecada ? (
         <View style={styles.containerCarregando}>
-          <ActivityIndicator size="large" color="#FF6B35" />
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : erroDecada ? (
         <View style={styles.containerErro}>
-          <Text style={styles.textoErro}>{erroDecada}</Text>
+          <Text style={[styles.textoErro, { color: colors.error }]}>{erroDecada}</Text>
         </View>
       ) : obrasDecada.length > 0 ? (
         <>
-          <Text style={styles.subtitulo}>
+          <Text style={[styles.subtitulo, { color: colors.textSecondary }]}>
             {obrasDecada.length} obra{obrasDecada.length !== 1 ? 's' : ''} dos anos {decadaSelecionada}
           </Text>
           <FlatList
@@ -267,7 +282,7 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
         </>
       ) : (
         <View style={styles.containerVazio}>
-          <Text style={styles.textoVazio}>
+          <Text style={[styles.textoVazio, { color: colors.textSecondary }]}>
             Nenhuma obra encontrada na década de {decadaSelecionada}
           </Text>
         </View>
@@ -276,23 +291,38 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
   );
 
   return (
-    <View style={styles.container}>
-      {/* Cabeçalho */}
-      <View style={styles.headerBox}>
-        <Text style={styles.tituloHeader}>Explorar</Text>
-        <Text style={styles.subtituloHeader}>Descubra novo conteúdo</Text>
+    <AuroraBackground style={styles.container}>
+      {/* Cabeçalho em vidro forte */}
+      <View
+        style={[
+          styles.headerBox,
+          { backgroundColor: colors.glassCardForte, borderBottomColor: colors.glassBorder },
+        ]}
+      >
+        <Text style={[styles.tituloHeader, { color: colors.text }]}>Explorar</Text>
+        <Text style={[styles.subtituloHeader, { color: colors.textSecondary }]}>
+          Descubra novo conteúdo
+        </Text>
       </View>
 
       {/* Abas */}
-      <View style={styles.containerAbas}>
+      <View
+        style={[
+          styles.containerAbas,
+          { backgroundColor: colors.glassCardForte, borderBottomColor: colors.glassBorder },
+        ]}
+      >
         <TouchableOpacity
-          style={[styles.aba, secaoAtiva === 'recentes' && styles.abaAtiva]}
+          style={[
+            styles.aba,
+            secaoAtiva === 'recentes' && { borderBottomColor: colors.primary },
+          ]}
           onPress={() => setSecaoAtiva('recentes')}
         >
           <Text
             style={[
               styles.textoAba,
-              secaoAtiva === 'recentes' && styles.textoAbaAtiva,
+              { color: secaoAtiva === 'recentes' ? colors.primary : colors.textSecondary },
             ]}
           >
             Recentes
@@ -300,13 +330,16 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.aba, secaoAtiva === 'decadas' && styles.abaAtiva]}
+          style={[
+            styles.aba,
+            secaoAtiva === 'decadas' && { borderBottomColor: colors.primary },
+          ]}
           onPress={() => setSecaoAtiva('decadas')}
         >
           <Text
             style={[
               styles.textoAba,
-              secaoAtiva === 'decadas' && styles.textoAbaAtiva,
+              { color: secaoAtiva === 'decadas' ? colors.primary : colors.textSecondary },
             ]}
           >
             Por Década
@@ -322,45 +355,40 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
         {/* Espaço extra no final */}
         <View style={{ height: 20 }} />
       </ScrollView>
-    </View>
+    </AuroraBackground>
   );
 }
 
 // ============================================================
 // Estilos
+// As cores vêm do tema (useTheme) e são aplicadas nos componentes;
+// aqui ficam apenas os valores de layout.
 // ============================================================
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F1A',
   },
 
   headerBox: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1A1A2E',
     borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
   },
 
   tituloHeader: {
-    color: '#FFFFFF',
     fontSize: 20,
     fontWeight: 'bold',
     marginBottom: 4,
   },
 
   subtituloHeader: {
-    color: '#AAAAAA',
     fontSize: 13,
   },
 
   containerAbas: {
     flexDirection: 'row',
-    backgroundColor: '#1A1A2E',
     borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
   },
 
   aba: {
@@ -372,18 +400,9 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
 
-  abaAtiva: {
-    borderBottomColor: '#FF6B35',
-  },
-
   textoAba: {
-    color: '#AAAAAA',
     fontSize: 14,
     fontWeight: '600',
-  },
-
-  textoAbaAtiva: {
-    color: '#FF6B35',
   },
 
   conteudo: {
@@ -397,28 +416,22 @@ const styles = StyleSheet.create({
   },
 
   tituloSecao: {
-    color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 16,
   },
 
   subtitulo: {
-    color: '#AAAAAA',
     fontSize: 13,
     marginBottom: 12,
   },
 
   cardRelease: {
-    backgroundColor: '#1A1A2E',
-    borderRadius: 8,
     marginBottom: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35',
   },
 
   conteudoCardRelease: {
@@ -426,34 +439,27 @@ const styles = StyleSheet.create({
   },
 
   versionName: {
-    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '600',
     marginBottom: 4,
   },
 
   workArtist: {
-    color: '#AAAAAA',
     fontSize: 13,
     marginBottom: 4,
   },
 
   releaseInfo: {
-    color: '#FF6B35',
     fontSize: 12,
     fontWeight: 'bold',
   },
 
   cardObra: {
-    backgroundColor: '#1A1A2E',
-    borderRadius: 8,
     marginBottom: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35',
   },
 
   conteudoCardObra: {
@@ -461,26 +467,22 @@ const styles = StyleSheet.create({
   },
 
   tituloObra: {
-    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '600',
     marginBottom: 4,
   },
 
   artistaObra: {
-    color: '#AAAAAA',
     fontSize: 13,
     marginBottom: 4,
   },
 
   anoObra: {
-    color: '#FF6B35',
     fontSize: 12,
     fontWeight: 'bold',
   },
 
   seta: {
-    color: '#FF6B35',
     fontSize: 16,
     fontWeight: 'bold',
     marginLeft: 12,
@@ -495,29 +497,17 @@ const styles = StyleSheet.create({
 
   botaoDecada: {
     width: '48%',
-    backgroundColor: '#1A1A2E',
-    borderRadius: 8,
+    borderRadius: 16,
     paddingVertical: 12,
     marginBottom: 8,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#2E2E4E',
-  },
-
-  botaoDecadaSelecionado: {
-    backgroundColor: '#FF6B35',
-    borderColor: '#FF6B35',
   },
 
   textoDecada: {
-    color: '#AAAAAA',
     fontSize: 16,
     fontWeight: 'bold',
-  },
-
-  textoDecadaSelecionado: {
-    color: '#FFFFFF',
   },
 
   containerCarregando: {
@@ -533,21 +523,18 @@ const styles = StyleSheet.create({
   },
 
   textoErro: {
-    color: '#FF6B35',
     fontSize: 14,
     marginBottom: 16,
     textAlign: 'center',
   },
 
   botaoTentar: {
-    backgroundColor: '#FF6B35',
     paddingHorizontal: 24,
     paddingVertical: 10,
-    borderRadius: 6,
+    borderRadius: 12,
   },
 
   textoButton: {
-    color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 13,
   },
@@ -559,7 +546,6 @@ const styles = StyleSheet.create({
   },
 
   textoVazio: {
-    color: '#AAAAAA',
     fontSize: 14,
   },
 });

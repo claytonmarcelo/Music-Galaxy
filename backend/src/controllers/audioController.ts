@@ -1,53 +1,51 @@
-// Controller de Áudio — Streaming e Download via YouTube.
-// Expõe dois endpoints para o app mobile consumir:
-//   GET /api/releases/:id/stream   → faz pipe do áudio ao vivo do YouTube
-//   GET /api/releases/:id/download → entrega o arquivo de áudio completo para download
+// Controller de Áudio — Streaming e Download via sites abertos (Regra 3).
 //
-// A URL de stream do YouTube é resolvida sob demanda (evita links expirados no banco).
-// Sistema aprimorado com Source Orchestrator para descoberta global de fontes com exact match.
+// A Regra 3 do projeto PROÍBE YouTube, Spotify, Deezer, iTunes/Apple Music e
+// qualquer plataforma de música. As únicas fontes de áudio permitidas são
+// sites abertos no mundo inteiro: blogs, fóruns, homepages e links diretos.
+//
+// Endpoints:
+//   GET  /api/releases/:id/stream        → proxy de streaming da URL direta descoberta
+//   GET  /api/releases/:id/download      → baixa, converte (FFmpeg) e entrega MP3/FLAC
+//   POST /api/releases/:id/audio-source  → registra uma fonte web direta fornecida
+//
+// Fluxo unificado (substitui os antigos subsistemas audio/ e o fallback YouTube):
+//   resolverFonte() → fonte salva no banco (audio_source_url) ou descoberta
+//   sob demanda pelo SourceOrchestrator (GenericWebProvider + DirectLinkProvider).
 
 import { Request, Response } from 'express';
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/database';
-import { YoutubeAdapter } from '../services/audio/youtubeAdapter';
-import { transcoder, QualidadeAudio } from '../services/audio/audioTranscoder';
-import { youtubeDl } from 'youtube-dl-exec';
+import axios from 'axios';
 import ffmpegPath from 'ffmpeg-static';
+import { path as ffprobePath } from 'ffprobe-static';
 import ffmpeg from 'fluent-ffmpeg';
 import fs from 'fs/promises';
+import { createReadStream, createWriteStream } from 'fs';
 import path from 'path';
-import os from 'os';
 import { downloadCache } from '../services/downloadCache';
 import { downloadDeduplication } from '../services/downloadDeduplication';
 import { SourceOrchestrator } from '../services/audioSource/sourceOrchestrator';
-import { YouTubeProvider } from '../services/audioSource/providers/youtubeProvider';
 import { DirectLinkProvider } from '../services/audioSource/providers/directLinkProvider';
 import { GenericWebProvider } from '../services/audioSource/providers/genericWebProvider';
 import { AudioIdentity } from '../services/audioSource/types';
+import { USER_AGENT, auditarUrl, criarBeforeRedirect } from '../services/audioSource/webAudio';
 
-const youtube = new YoutubeAdapter();
+// Providers permitidos pela Regra 3 — apenas web aberta, sem plataformas.
+const directLinkProvider = new DirectLinkProvider();
+const genericWebProvider = new GenericWebProvider();
 
-// Inicializar orquestrador de fontes (sistema novo de descoberta global)
+// Único orquestrador de áudio do sistema (não existe mais fallback paralelo).
 const sourceOrchestrator = new SourceOrchestrator({
   enableParallelSearch: true,
   maxConcurrentProviders: 3,
   requireExactMatch: true,
   enableFallback: true,
 });
-
-// Registrar providers disponíveis
-const youtubeProvider = new YouTubeProvider();
-const directLinkProvider = new DirectLinkProvider();
-const genericWebProvider = new GenericWebProvider();
-
-sourceOrchestrator.registerProvider(youtubeProvider);
-sourceOrchestrator.registerProvider(directLinkProvider);
 sourceOrchestrator.registerProvider(genericWebProvider);
+sourceOrchestrator.registerProvider(directLinkProvider);
 
-// Flag para habilitar/desabilitar o novo sistema (pode ser movida para .env)
-const ENABLE_SOURCE_ORCHESTRATOR = true;
-
-// Tipos de erro para classificação
+// Tipos de erro para classificação do pipeline de download
 enum DownloadErrorType {
   SOURCE_UNAVAILABLE = 'SOURCE_UNAVAILABLE',
   FORMAT_UNAVAILABLE = 'FORMAT_UNAVAILABLE',
@@ -57,136 +55,68 @@ enum DownloadErrorType {
   VALIDATION_FAILED = 'VALIDATION_FAILED',
   TEMPORARY_NETWORK_ERROR = 'TEMPORARY_NETWORK_ERROR',
   INTERNAL_ERROR = 'INTERNAL_ERROR',
-  // Novos tipos para o sistema de descoberta global
-  EXACT_MATCH_NOT_CONFIRMED = 'EXACT_MATCH_NOT_CONFIRMED',
   NO_SUITABLE_SOURCE = 'NO_SUITABLE_SOURCE',
-  ALL_PROVIDERS_FAILED = 'ALL_PROVIDERS_FAILED',
-  INVALID_AUDIO = 'INVALID_AUDIO',
-  CORRUPTED_AUDIO = 'CORRUPTED_AUDIO',
+  FILE_TOO_LARGE = 'FILE_TOO_LARGE',
 }
 
-// Estrutura de erro detalhado
-interface DownloadError {
-  type: DownloadErrorType;
-  message: string;
-  details?: string;
-  retryable: boolean;
+interface DownloadError extends Error {
+  type?: DownloadErrorType;
+  retryable?: boolean;
 }
 
-// Dados mínimos da release necessários para o streaming
+// Dados da release necessários para resolver a fonte de áudio
 interface ReleaseAudioRow extends RowDataPacket {
   id: number;
-  youtube_video_id: string | null;
-  audio_preview_url: string | null;
-  artist_name: string;
-  work_title: string;
+  audio_source_url: string | null;
+  audio_source_provider: string | null;
+  audio_source_page_url: string | null;
   version_name: string;
+  work_title: string;
+  artist_name: string;
 }
 
-// Estratégias de formato para yt-dlp (em ordem de preferência)
-const FORMAT_STRATEGIES = [
-  'bestaudio[ext=m4a]/bestaudio/best',
-  'bestaudio[ext=mp3]/bestaudio/best',
-  'bestaudio[ext=webm]/bestaudio/best',
-  'bestaudio[ext=opus]/bestaudio/best',
-  'bestaudio/best',
-];
+// Fonte de áudio resolvida (site aberto — Regra 3)
+interface FonteAudio {
+  url: string;        // URL direta do arquivo de áudio
+  provider: string;   // generic-web | direct-link
+  pageUrl?: string;   // página de origem (blog/forum), para auditoria
+}
 
-// Função de delay para retry
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// Limites de segurança do pipeline
+const TIMEOUTS = {
+  DOWNLOAD: 5 * 60 * 1000,   // 5 minutos para baixar da fonte
+  FFMPEG: 10 * 60 * 1000,    // 10 minutos para converter
+  VALIDATION: 30 * 1000,     // 30 segundos para validar
+};
+const TAMANHO_MAX_AUDIO = 200 * 1024 * 1024; // 200 MB por arquivo
 
 // Função de timeout com Promise.race
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> => {
   return Promise.race([
     promise,
-    new Promise<T>((_, reject) => 
-      setTimeout(() => reject(new Error(errorMessage)), timeoutMs)
-    )
+    new Promise<T>((_, reject) => {
+      const timer = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+      (timer as { unref?: () => void }).unref?.();
+    }),
   ]);
 };
 
-// Configurações de timeout (podem ser movidas para .env no futuro)
-const TIMEOUTS = {
-  YTDLP: 5 * 60 * 1000,      // 5 minutos para yt-dlp
-  FFMPEG: 10 * 60 * 1000,     // 10 minutos para FFmpeg
-  VALIDATION: 30 * 1000,      // 30 segundos para validação
-  TOTAL: 15 * 60 * 1000,      // 15 minutos total
-};
-
-// Função para classificar erro do yt-dlp
-function classifyYtDlpError(error: any): DownloadError {
-  const errorMessage = error.message || '';
-  const stderr = error.stderr || '';
-
-  if (errorMessage.includes('HTTP Error 403') || stderr.includes('HTTP Error 403')) {
-    return {
-      type: DownloadErrorType.SOURCE_UNAVAILABLE,
-      message: 'Acesso negado pela fonte (HTTP 403)',
-      details: 'A fonte bloqueou o download deste conteúdo',
-      retryable: false,
-    };
-  }
-
-  if (errorMessage.includes('HTTP Error 429') || stderr.includes('HTTP Error 429')) {
-    return {
-      type: DownloadErrorType.TEMPORARY_NETWORK_ERROR,
-      message: 'Limite de taxa da fonte excedido (HTTP 429)',
-      details: 'A fonte limitou o número de requisições',
-      retryable: true,
-    };
-  }
-
-  if (errorMessage.includes('HTTP Error 5') || stderr.includes('HTTP Error 5')) {
-    return {
-      type: DownloadErrorType.TEMPORARY_NETWORK_ERROR,
-      message: 'Erro temporário da fonte (HTTP 5xx)',
-      details: 'A fonte está temporariamente indisponível',
-      retryable: true,
-    };
-  }
-
-  if (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT')) {
-    return {
-      type: DownloadErrorType.SOURCE_TIMEOUT,
-      message: 'Timeout ao acessar a fonte',
-      details: 'A fonte não respondeu dentro do tempo esperado',
-      retryable: true,
-    };
-  }
-
-  if (errorMessage.includes('Video unavailable') || stderr.includes('Video unavailable')) {
-    return {
-      type: DownloadErrorType.SOURCE_UNAVAILABLE,
-      message: 'Vídeo indisponível na fonte',
-      details: 'O conteúdo não está mais disponível',
-      retryable: false,
-    };
-  }
-
-  if (errorMessage.includes('no suitable format') || stderr.includes('no suitable format')) {
-    return {
-      type: DownloadErrorType.FORMAT_UNAVAILABLE,
-      message: 'Formato de áudio não disponível',
-      details: 'A fonte não fornece áudio no formato solicitado',
-      retryable: true,
-    };
-  }
-
-  return {
-    type: DownloadErrorType.EXTRACTION_FAILED,
-    message: 'Falha ao extrair áudio da fonte',
-    details: errorMessage,
-    retryable: true,
-  };
+// Marca um erro com tipo e retentabilidade do pipeline
+function erroDownload(message: string, type: DownloadErrorType, retryable = true): DownloadError {
+  const erro = new Error(message) as DownloadError;
+  erro.type = type;
+  erro.retryable = retryable;
+  return erro;
 }
 
-// Busca os dados de áudio da release, incluindo o youtube_video_id e audio_preview_url
+// Busca os dados de áudio da release (colunas web da Regra 3)
 async function buscarRelease(releaseId: number): Promise<ReleaseAudioRow | null> {
   const [rows] = await pool.execute<ReleaseAudioRow[]>(
     `SELECT
        r.id,
-       r.youtube_video_id,
-       r.audio_preview_url,
+       r.audio_source_url,
+       r.audio_source_provider,
+       r.audio_source_page_url,
        r.version_name,
        w.title  AS work_title,
        a.name   AS artist_name
@@ -200,76 +130,101 @@ async function buscarRelease(releaseId: number): Promise<ReleaseAudioRow | null>
   return rows[0] ?? null;
 }
 
-// Garante que a release tem um youtube_video_id.
-// Se ainda não tiver, tenta buscar agora e salva no banco.
-// Sistema aprimorado: usa Source Orchestrator para descoberta global quando habilitado.
-async function garantirVideoId(release: ReleaseAudioRow): Promise<string | null> {
-  if (release.youtube_video_id) {
-    // Verifica se o vídeo ainda está disponível
-    const disponivel = await youtube.verificarDisponibilidade(release.youtube_video_id);
-    if (disponivel) return release.youtube_video_id;
+// Salva a fonte descoberta na release para reaproveitar nas próximas requisições
+async function persistirFonte(releaseId: number, fonte: FonteAudio): Promise<void> {
+  await pool.execute(
+    `UPDATE releases
+        SET audio_source_url = ?, audio_source_provider = ?, audio_source_page_url = ?
+      WHERE id = ?`,
+    [fonte.url, fonte.provider, fonte.pageUrl ?? null, releaseId]
+  );
+}
 
-    // Vídeo foi removido — busca um novo
-    console.warn(`[AudioController] Vídeo ${release.youtube_video_id} indisponível — buscando substituto`);
-  }
+// Limpa a fonte salva (quando sai do ar ou viola a Regra 3) para forçar nova descoberta
+async function limparFonte(releaseId: number): Promise<void> {
+  await pool.execute(
+    `UPDATE releases
+        SET audio_source_url = NULL, audio_source_provider = NULL, audio_source_page_url = NULL
+      WHERE id = ?`,
+    [releaseId]
+  );
+}
 
-  // Se o novo sistema de descoberta global estiver habilitado, usa o orquestrador
-  if (ENABLE_SOURCE_ORCHESTRATOR) {
-    console.log(`[AudioController] Usando Source Orchestrator para descoberta global`);
-    
-    try {
-      const identity: AudioIdentity = {
-        artist: release.artist_name,
-        title: release.work_title,
-        album: undefined, // Pode ser expandido para incluir album do banco
-        version: release.version_name,
-        duration: undefined, // Pode ser expandido para incluir duration do banco
-      };
+// Monta a identidade musical usada pelo Exact Match Engine
+function montarIdentidade(release: ReleaseAudioRow): AudioIdentity {
+  return {
+    artist: release.artist_name,
+    title: release.work_title,
+    version: release.version_name,
+  };
+}
 
-      const discoveryResult = await sourceOrchestrator.discover(identity);
-      
-      if (discoveryResult.bestCandidate && discoveryResult.bestCandidate.candidate.sourceId) {
-        const novoVideoId = discoveryResult.bestCandidate.candidate.sourceId;
-        console.log(
-          `[AudioController] Source Orchestrator encontrou candidato: ` +
-          `provider=${discoveryResult.bestCandidate.candidate.providerId} ` +
-          `sourceId=${novoVideoId} ` +
-          `score=${discoveryResult.bestCandidate.score.toFixed(1)} ` +
-          `classification=${discoveryResult.bestCandidate.classification}`
-        );
-
-        // Salva o novo videoId no banco para futuras requisições
-        await pool.execute(
-          `UPDATE releases SET youtube_video_id = ? WHERE id = ?`,
-          [novoVideoId, release.id]
-        );
-
-        return novoVideoId;
-      } else {
-        console.warn(`[AudioController] Source Orchestrator não encontrou candidato adequado, fallback para método tradicional`);
+// Resolve a fonte de áudio de uma release (único caminho do sistema):
+//   1. Usa a fonte salva no banco, se ainda estiver no ar e passar no guard.
+//   2. Senão, dispara a descoberta global em sites abertos via SourceOrchestrator
+//      e salva o resultado (exact match obrigatório).
+async function resolverFonte(
+  release: ReleaseAudioRow,
+  opts: { reDescobrir?: boolean } = {}
+): Promise<FonteAudio | null> {
+  // 1. Fonte já salva — valida segurança (Regra 3) e disponibilidade
+  if (!opts.reDescobrir && release.audio_source_url) {
+    const guard = await auditarUrl(release.audio_source_url);
+    if (guard.ok) {
+      const disponivel = await directLinkProvider.checkAvailability(release.audio_source_url);
+      if (disponivel) {
+        return {
+          url: release.audio_source_url,
+          provider: release.audio_source_provider ?? 'web',
+          pageUrl: release.audio_source_page_url ?? undefined,
+        };
       }
-    } catch (error) {
-      console.error(`[AudioController] Source Orchestrator falhou, fallback para método tradicional:`, error);
+      console.warn(`[AudioController] Fonte salva indisponível — redescobrindo (releaseId=${release.id})`);
+    } else {
+      // Fonte antiga viola a Regra 3 ou é insegura — descarta e limpa do banco
+      console.warn(`[AudioController] Fonte salva rejeitada pelo guard (${guard.motivo}) — limpando (releaseId=${release.id})`);
+      await limparFonte(release.id);
     }
   }
 
-  // Fallback para método tradicional (YouTubeAdapter)
-  const novoVideoId = await youtube.buscarVideoId(release.artist_name, release.work_title);
+  // 2. Descoberta global em sites abertos (blogs, fóruns, links diretos)
+  try {
+    const discovery = await sourceOrchestrator.discover(montarIdentidade(release));
+    const melhor = discovery.bestCandidate;
 
-  if (novoVideoId) {
-    // Salva o novo videoId no banco para futuras requisições
-    await pool.execute(
-      `UPDATE releases SET youtube_video_id = ? WHERE id = ?`,
-      [novoVideoId, release.id]
-    );
+    if (melhor?.candidate) {
+      const url = melhor.candidate.downloadUrl ?? melhor.candidate.url;
+      if (url) {
+        const guard = await auditarUrl(url);
+        if (guard.ok) {
+          const fonte: FonteAudio = {
+            url,
+            provider: melhor.candidate.providerId,
+            pageUrl: melhor.candidate.metadata?.sourcePageUrl,
+          };
+          console.log(
+            `[AudioController] Fonte web descoberta (releaseId=${release.id}): ` +
+            `provider=${fonte.provider} score=${melhor.score.toFixed(1)} url=${fonte.url}`
+          );
+          await persistirFonte(release.id, fonte);
+          return fonte;
+        }
+        console.warn(`[AudioController] Candidato rejeitado pelo guard: ${guard.motivo}`);
+      }
+    }
+    console.warn(`[AudioController] Nenhum candidato exact match em sites abertos (releaseId=${release.id})`);
+    return null;
+  } catch (error) {
+    console.error(`[AudioController] Descoberta de fonte falhou (releaseId=${release.id}):`, error);
+    return null;
   }
-
-  return novoVideoId;
 }
 
+// ============================================================
 // GET /api/releases/:id/stream
-// Faz pipe do áudio completo do YouTube diretamente ao cliente.
-// Suporta Range headers para que o player nativo (expo-av) possa buscar posições.
+// Proxy de streaming da URL direta em site aberto. Encaminha o cabeçalho
+// Range para que o player (web ou expo-av) possa buscar posições.
+// ============================================================
 export async function streamAudio(req: Request, res: Response): Promise<void> {
   const releaseId = parseInt(req.params['id'] ?? '0', 10);
 
@@ -284,134 +239,87 @@ export async function streamAudio(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // Tenta obter a URL de preview (iTunes/Deezer) caso precise de fallback rápido
-  let previewUrl = release.audio_preview_url;
-  if (!previewUrl) {
-    try {
-      const itunes = new (require('../services/audio/itunesAdapter').ItunesAdapter)();
-      previewUrl = await itunes.buscarPreviewAudio(release.artist_name, release.work_title);
-      if (!previewUrl) {
-        const deezer = new (require('../services/audio/deezerAdapter').DeezerAdapter)();
-        previewUrl = await deezer.buscarPreviewAudio(release.artist_name, release.work_title);
-      }
-      if (previewUrl) {
-        await pool.execute('UPDATE releases SET audio_preview_url = ? WHERE id = ?', [previewUrl, release.id]);
-      }
-    } catch {
-      // Ignora erro de fallback
-    }
-  }
-
-  const videoId = release.youtube_video_id ?? (await garantirVideoId(release));
-
-  // Serve o preview como proxy (nunca redireciona — redirecionamento
-  // para domínios externos é bloqueado por CORS/CORP no browser)
-  const servirFallback = async (): Promise<boolean> => {
-    if (!previewUrl) return false;
-    try {
-      console.log(`[AudioController] Fazendo proxy do preview: ${previewUrl}`);
-      const https = require('https') as typeof import('https');
-      const http  = require('http')  as typeof import('http');
-      const mod   = previewUrl.startsWith('https') ? https : http;
-
-      await new Promise<void>((resolve, reject) => {
-        mod.get(previewUrl as string, (upstream) => {
-          res.setHeader('Content-Type', upstream.headers['content-type'] ?? 'audio/mpeg');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-          res.setHeader('Cache-Control', 'no-cache');
-          upstream.pipe(res);
-          upstream.on('end', resolve);
-          upstream.on('error', reject);
-        }).on('error', reject);
-      });
-      return true;
-    } catch (err) {
-      console.error('[AudioController] Falha no proxy do preview:', err);
-      return false;
-    }
-  };
-
-  if (!videoId) {
-    if (await servirFallback()) return;
-    res.status(404).json({ success: false, error: 'Áudio não disponível para esta release' });
+  const fonte = await resolverFonte(release);
+  if (!fonte) {
+    res.status(404).json({
+      success: false,
+      error: 'Nenhum áudio encontrado em sites abertos para esta versão (Regra 3)',
+    });
     return;
   }
 
   try {
-    // Usa ytdl-core para streaming (yt-dlp não suporta streaming direto)
-    const stream = youtube.obterStreamAudio(videoId);
-    let headersEnviados = false;
+    // Revalida no guard antes de pedir ao site externo
+    const guard = await auditarUrl(fonte.url);
+    if (!guard.ok) {
+      await limparFonte(releaseId);
+      res.status(404).json({ success: false, error: `Fonte rejeitada pelo guard de segurança: ${guard.motivo}` });
+      return;
+    }
 
-    req.on('close', () => {
-      stream.destroy();
+    // Encaminha Range para suporte a seek no player do app
+    const headers: Record<string, string> = { 'User-Agent': USER_AGENT };
+    const range = req.headers.range;
+    if (typeof range === 'string') headers['Range'] = range;
+
+    const upstream = await axios.get(fonte.url, {
+      responseType: 'stream',
+      timeout: 30 * 1000,
+      headers,
+      maxRedirects: 3,
+      beforeRedirect: criarBeforeRedirect(),
+      validateStatus: (s) => s < 500,
     });
 
-    stream.on('data', (chunk) => {
-      if (!headersEnviados) {
-        headersEnviados = true;
-        res.setHeader('Content-Type', 'audio/mpeg');
-        res.setHeader('Transfer-Encoding', 'chunked');
-        res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Cache-Control', 'no-cache, no-store');
-        res.setHeader('X-Video-Id', videoId);
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-      }
-      res.write(chunk);
-    });
+    if (upstream.status >= 400) {
+      (upstream.data as NodeJS.ReadableStream & { resume?: () => void }).resume?.();
+      await limparFonte(releaseId);
+      res.status(502).json({ success: false, error: `A fonte externa respondeu HTTP ${upstream.status}` });
+      return;
+    }
 
-    stream.on('end', () => {
-      if (!res.writableEnded) res.end();
-    });
+    res.status(upstream.status); // 200 ou 206 (Partial Content)
+    res.setHeader('Content-Type', String(upstream.headers['content-type'] ?? 'audio/mpeg'));
+    const contentLength = upstream.headers['content-length'];
+    if (contentLength) res.setHeader('Content-Length', String(contentLength));
+    const contentRange = upstream.headers['content-range'];
+    if (contentRange) res.setHeader('Content-Range', String(contentRange));
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Audio-Source-Provider', fonte.provider);
 
+    const stream = upstream.data as NodeJS.ReadableStream & { destroy?: () => void };
+    stream.pipe(res);
+
+    // Se o cliente fechar a conexão, derruba o stream de origem
+    req.on('close', () => stream.destroy?.());
     stream.on('error', (err: Error) => {
-      console.error(`[AudioController] Erro no stream do vídeo ${videoId}:`, err.message);
-      if (!headersEnviados && !res.headersSent) {
-        servirFallback().then((serviu) => {
-          if (!serviu) res.status(500).json({ success: false, error: 'Falha ao obter stream de áudio' });
-        });
+      console.error(`[AudioController] Erro no stream da fonte (releaseId=${releaseId}):`, err.message);
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, error: 'Falha ao transmitir áudio' });
       } else if (!res.writableEnded) {
         res.end();
       }
     });
   } catch (err) {
-    console.error('[AudioController] Erro ao iniciar stream:', err);
+    console.error(`[AudioController] Erro ao iniciar stream (releaseId=${releaseId}):`, err);
+    await limparFonte(releaseId).catch(() => undefined);
     if (!res.headersSent) {
-      servirFallback().then((serviu) => {
-        if (!serviu) res.status(500).json({ success: false, error: 'Erro interno ao processar áudio' });
-      });
+      res.status(500).json({ success: false, error: 'Erro interno ao processar áudio' });
     }
   }
 }
 
-// Função para detectar formato do arquivo de origem
-async function detectAudioFormat(filePath: string): Promise<{ format: string; codec: string } | null> {
-  try {
-    return new Promise((resolve, reject) => {
-      ffmpeg(filePath)
-        .setFfmpegPath(ffmpegPath || 'ffmpeg')
-        .ffprobe((err, metadata) => {
-          if (err) {
-            reject(err);
-            return;
-          }
-          
-          const format = metadata.format?.format_name || '';
-          const codec = metadata.streams?.[0]?.codec_name || '';
-          
-          resolve({ format, codec });
-        });
-    });
-  } catch (error) {
-    console.error('[AudioController] Erro ao detectar formato:', error);
-    return null;
-  }
-}
-
-// GET /api/releases/:id/download
-// Entrega o áudio completo como download com nome de arquivo formatado.
-// Pipeline: cache → deduplicação → yt-dlp (com retry e múltiplas estratégias) → arquivo temporário → FFmpeg (otimizado) → arquivo final → validação → cache → cliente
+// ============================================================
+// GET /api/releases/:id/download?format=mp3|flac
+// Pipeline: cache → deduplicação (leader/follower) → download HTTP da fonte
+// → FFmpeg (se necessário) → validação → cache PERMANENTE → cliente.
+// Correções: o cache não é mais apagado no finally (antes, set() gravava um
+// arquivo que o próprio fluxo deletava) e cada requisição serve o seu próprio
+// res (antes, o 2º cliente ficava pendurado esperando uma promise já resolvida).
+// ============================================================
 export async function downloadAudio(req: Request, res: Response): Promise<void> {
   const releaseId = parseInt(req.params['id'] ?? '0', 10);
   const startTime = Date.now();
@@ -429,284 +337,120 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
     return;
   }
 
+  // Formato solicitado (mp3 padrão; flac lossless)
   const queryFormat = req.query['format'] as string | undefined;
-  let formatoAudio = 'mp3';
-  let extensao = 'mp3';
-  let mimeType = 'audio/mpeg';
-  
-  if (queryFormat === 'flac') {
-    formatoAudio = 'flac';
-    extensao = 'flac';
-    mimeType = 'audio/flac';
-  }
+  const formatoAudio = queryFormat === 'flac' ? 'flac' : 'mp3';
+  const mimeType = formatoAudio === 'flac' ? 'audio/flac' : 'audio/mpeg';
 
-  // Verificar cache primeiro
-  const cachedEntry = await downloadCache.get(releaseId, formatoAudio);
-  if (cachedEntry) {
-    console.log(`[AudioDownload] releaseId=${releaseId} status=cache-hit format=${formatoAudio}`);
-    
-    try {
-      const nomeArquivo = `${release.artist_name} - ${release.work_title} - ${release.version_name}`
-        .replace(/[<>:"/\\|?*]/g, '')
-        .trim()
-        .substring(0, 200);
-
-      res.setHeader('Content-Type', mimeType);
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(nomeArquivo)}.${extensao}"`);
-      res.setHeader('Cache-Control', 'public, max-age=86400'); // 24 horas
-      res.setHeader('X-Cache', 'HIT');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-
-      // Streaming do arquivo em vez de carregar tudo em memória
-      const fileStream = await fs.readFile(cachedEntry.filePath);
-      res.send(fileStream);
-
-      const totalDuration = (Date.now() - startTime) / 1000;
-      console.log(`[AudioDownload] releaseId=${releaseId} status=completed total=${totalDuration}s cache=HIT`);
-      return;
-    } catch (error) {
-      console.error('[AudioDownload] Erro ao servir arquivo do cache:', error);
-      // Invalidar cache e continuar com processamento normal
-      await downloadCache.invalidate(releaseId, formatoAudio);
-    }
-  }
-
-  console.log(`[AudioDownload] releaseId=${releaseId} status=cache-miss format=${formatoAudio}`);
-
-  // Usar deduplicação para evitar processamento duplicado
-  return downloadDeduplication.execute(releaseId, formatoAudio, async () => {
-    return processDownload(req, res, release, releaseId, formatoAudio, extensao, mimeType, startTime);
-  });
-}
-
-async function processDownload(
-  req: Request,
-  res: Response,
-  release: ReleaseAudioRow,
-  releaseId: number,
-  formatoAudio: string,
-  extensao: string,
-  mimeType: string,
-  startTime: number
-): Promise<void> {
-  const videoId = await garantirVideoId(release);
-  if (!videoId) {
-    res.status(404).json({
-      success: false,
-      error: 'Áudio não disponível para esta release no YouTube',
-    });
-    return;
-  }
-
-  // Arquivos temporários
-  const tempDir = path.join(__dirname, '../../temp/audio');
-  const timestamp = Date.now();
-  const sourceFile = path.join(tempDir, `source_${timestamp}.m4a`);
-  const outputFile = path.join(tempDir, `output_${timestamp}`);
-  
-  let arquivoFinal = `${outputFile}.${extensao}`;
-  let arquivoParaRemover: string[] = [sourceFile, arquivoFinal];
+  const nomeArquivo = `${release.artist_name} - ${release.work_title} - ${release.version_name}`
+    .replace(/[<>:"/\\|?*]/g, '')
+    .trim()
+    .substring(0, 200);
 
   try {
-    // Garante que o diretório temporário existe
-    await fs.mkdir(tempDir, { recursive: true });
-
-    const nomeArquivo = `${release.artist_name} - ${release.work_title} - ${release.version_name}`
-      .replace(/[<>:"/\\|?*]/g, '')
-      .trim()
-      .substring(0, 200);
-
-    console.log(`[AudioDownload] releaseId=${releaseId} videoId=${videoId} format=${extensao} status=yt-dlp-start`);
-
-    // Passo 1: Baixar áudio fonte com yt-dlp (com retry e múltiplas estratégias)
-    const url = `https://www.youtube.com/watch?v=${videoId}`;
-    let downloadSuccess = false;
-    let lastError: DownloadError | null = null;
-    
-    // Tentar cada estratégia de formato
-    for (let strategyIndex = 0; strategyIndex < FORMAT_STRATEGIES.length; strategyIndex++) {
-      const formatStrategy = FORMAT_STRATEGIES[strategyIndex];
-      
-      // Para cada estratégia, tentar com retry
-      const maxRetries = 2; // Reduzido de 3 para 2 para evitar espera excessiva
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} attempt=${attempt} format=${formatStrategy} status=downloading`);
-          
-          const ytDlpStart = Date.now();
-          
-          await withTimeout(
-            youtubeDl(url, {
-              format: formatStrategy,
-              noPlaylist: true,
-              ffmpegLocation: ffmpegPath || undefined,
-              output: sourceFile,
-              noCheckCertificates: true,
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              noWarnings: true,
-            }),
-            TIMEOUTS.YTDLP,
-            'Timeout ao baixar áudio da fonte (yt-dlp)'
-          );
-          
-          const ytDlpDuration = (Date.now() - ytDlpStart) / 1000;
-          console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} attempt=${attempt} stage=yt-dlp duration=${ytDlpDuration}s status=success`);
-          
-          downloadSuccess = true;
-          break; // Sucesso - sair do loop de retry
-        } catch (err: any) {
-          const classifiedError = classifyYtDlpError(err);
-          lastError = classifiedError;
-          
-          console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} attempt=${attempt} type=${classifiedError.type} retryable=${classifiedError.retryable} status=failed`);
-          
-          // Se não for retryable, tentar próxima estratégia imediatamente
-          if (!classifiedError.retryable) {
-            break;
-          }
-          
-          // Se ainda há tentativas, fazer exponential backoff
-          if (attempt < maxRetries) {
-            const backoffDelay = Math.pow(2, attempt - 1) * 1000; // 1s, 2s
-            console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} attempt=${attempt} backoff=${backoffDelay}ms status=waiting`);
-            await delay(backoffDelay);
-          }
-        }
-      }
-      
-      if (downloadSuccess) {
-        break; // Sucesso - sair do loop de estratégias
-      }
-      
-      // Se falhou todas as tentativas desta estratégia, tentar próxima
-      console.log(`[AudioDownload] releaseId=${releaseId} strategy=${strategyIndex} status=strategy-failed trying-next`);
-    }
-
-    if (!downloadSuccess) {
-      // Todas as estratégias falharam - tentar buscar novo videoId com Source Orchestrator
-      console.log(`[AudioDownload] releaseId=${releaseId} status=all-strategies-failed error=${lastError?.type}`);
-      
-      // Se o erro for SOURCE_UNAVAILABLE e o Source Orchestrator estiver habilitado, tentar buscar novo videoId
-      if (ENABLE_SOURCE_ORCHESTRATOR && lastError?.type === DownloadErrorType.SOURCE_UNAVAILABLE) {
-        console.log(`[AudioDownload] releaseId=${releaseId} tentando buscar novo videoId com Source Orchestrator`);
-        
-        try {
-          // Invalidar videoId atual no banco
-          await pool.execute(
-            `UPDATE releases SET youtube_video_id = NULL WHERE id = ?`,
-            [releaseId]
-          );
-          
-          // Buscar novo videoId usando Source Orchestrator
-          const identity: AudioIdentity = {
-            artist: release.artist_name,
-            title: release.work_title,
-            album: undefined,
-            version: release.version_name,
-            duration: undefined,
-          };
-
-          const discoveryResult = await sourceOrchestrator.discover(identity);
-          
-          if (discoveryResult.bestCandidate && discoveryResult.bestCandidate.candidate.sourceId) {
-            const novoVideoId = discoveryResult.bestCandidate.candidate.sourceId;
-            console.log(
-              `[AudioDownload] Source Orchestrator encontrou novo candidato: ` +
-              `provider=${discoveryResult.bestCandidate.candidate.providerId} ` +
-              `sourceId=${novoVideoId} ` +
-              `score=${discoveryResult.bestCandidate.score.toFixed(1)} ` +
-              `classification=${discoveryResult.bestCandidate.classification}`
-            );
-
-            // Salvar novo videoId no banco
-            await pool.execute(
-              `UPDATE releases SET youtube_video_id = ? WHERE id = ?`,
-              [novoVideoId, releaseId]
-            );
-
-            // Tentar download novamente com o novo videoId
-            console.log(`[AudioDownload] releaseId=${releaseId} tentando download com novo videoId=${novoVideoId}`);
-            
-            // Atualizar videoId e tentar download novamente (recursão limitada)
-            return processDownload(req, res, release, releaseId, formatoAudio, extensao, mimeType, startTime);
-          } else {
-            console.warn(`[AudioDownload] Source Orchestrator não encontrou candidato adequado`);
-          }
-        } catch (error) {
-          console.error(`[AudioDownload] Erro ao usar Source Orchestrator como fallback:`, error);
-        }
-      }
-      
-      if (!res.headersSent) {
-        res.status(503).json({ 
-          success: false, 
-          error: lastError?.message || 'Falha ao baixar áudio',
-          errorType: lastError?.type,
-        });
-      }
+    // Passo 1: cache permanente — HIT entrega direto
+    const cached = await downloadCache.get(releaseId, formatoAudio);
+    if (cached) {
+      console.log(`[AudioDownload] releaseId=${releaseId} status=cache-hit format=${formatoAudio}`);
+      await servirArquivo(req, res, cached.filePath, nomeArquivo, mimeType, 'HIT', releaseId);
       return;
     }
 
-    console.log(`[AudioDownload] releaseId=${releaseId} status=yt-dlp-complete sourceFile=${sourceFile}`);
+    console.log(`[AudioDownload] releaseId=${releaseId} status=cache-miss format=${formatoAudio}`);
 
-    // Passo 2: Detectar formato da fonte para decidir se conversão é necessária
-    console.log(`[AudioDownload] releaseId=${releaseId} stage=detect-format status=detecting`);
-    const sourceFormat = await detectAudioFormat(sourceFile);
-    
+    // Passo 2: deduplicação — o produtor devolve o CAMINHO em cache e nunca
+    // escreve na Response. Líder e seguidores servem cada um ao seu req/res.
+    const caminhoCache = await downloadDeduplication.execute(releaseId, formatoAudio, async () => {
+      // Re-confere o cache dentro do lock: quem chegou depois do líder acerta aqui
+      const recemProduzido = await downloadCache.get(releaseId, formatoAudio);
+      if (recemProduzido) return recemProduzido.filePath;
+      return produzirArquivoCache(release, formatoAudio);
+    });
+
+    await servirArquivo(req, res, caminhoCache, nomeArquivo, mimeType, 'MISS', releaseId);
+
+    const totalDuration = (Date.now() - startTime) / 1000;
+    console.log(`[AudioDownload] releaseId=${releaseId} status=completed total=${totalDuration}s`);
+  } catch (err: unknown) {
+    const erro = err as DownloadError;
+    const totalDuration = (Date.now() - startTime) / 1000;
+    console.error(`[AudioDownload] releaseId=${releaseId} status=failed duration=${totalDuration}s error=`, erro?.message ?? err);
+
+    if (!res.headersSent) {
+      res.status(erro?.type === DownloadErrorType.NO_SUITABLE_SOURCE ? 404 : 503).json({
+        success: false,
+        error: erro?.message || 'Falha ao baixar áudio',
+        errorType: erro?.type ?? DownloadErrorType.INTERNAL_ERROR,
+      });
+    }
+  }
+}
+
+// Produz o arquivo de áudio e devolve o caminho PERMANENTE dentro do cache.
+// Arquivos temporários são apagados no finally — o cache nunca é deletado.
+async function produzirArquivoCache(
+  release: ReleaseAudioRow,
+  formatoAudio: string
+): Promise<string> {
+  const releaseId = release.id;
+
+  const fonte = await resolverFonte(release);
+  if (!fonte) {
+    throw erroDownload(
+      'Nenhum áudio encontrado em sites abertos para esta versão (Regra 3)',
+      DownloadErrorType.NO_SUITABLE_SOURCE,
+      false
+    );
+  }
+
+  // Diretório temporário de trabalho (sempre apagado; o cache fica fora daqui)
+  const tempDir = path.join(__dirname, '../../temp/audio');
+  await fs.mkdir(tempDir, { recursive: true });
+  const timestamp = Date.now();
+  const sourceFile = path.join(tempDir, `source_${releaseId}_${timestamp}.bin`);
+  const outputFile = path.join(tempDir, `output_${releaseId}_${timestamp}.${formatoAudio}`);
+  const temporarios: string[] = [sourceFile, outputFile];
+
+  // Passo 1: baixar o arquivo da fonte externa (com retry)
+  console.log(`[AudioDownload] releaseId=${releaseId} stage=fetch status=start provider=${fonte.provider}`);
+  try {
+    await baixarComRetry(fonte.url, sourceFile, releaseId);
+    console.log(`[AudioDownload] releaseId=${releaseId} stage=fetch status=complete`);
+
+    // Passo 2: detectar o formato real da fonte
+    const formatoFonte = await detectAudioFormat(sourceFile);
+    let arquivoFinal = outputFile;
     let needsConversion = true;
-    if (sourceFormat) {
-      console.log(`[AudioDownload] releaseId=${releaseId} stage=detect-format format=${sourceFormat.format} codec=${sourceFormat.codec}`);
-      
-      // Se a fonte já é MP3 e solicitado MP3, não converter
-      if (formatoAudio === 'mp3' && sourceFormat.codec === 'mp3') {
-        needsConversion = false;
-        console.log(`[AudioDownload] releaseId=${releaseId} stage=detect-format status=skip-conversion reason=source-already-mp3`);
-        arquivoFinal = sourceFile;
-        arquivoParaRemover = [sourceFile]; // Não remover sourceFile pois é o arquivo final
-      }
-      // Se a fonte já é FLAC e solicitado FLAC, não converter
-      else if (formatoAudio === 'flac' && sourceFormat.codec === 'flac') {
-        needsConversion = false;
-        console.log(`[AudioDownload] releaseId=${releaseId} stage=detect-format status=skip-conversion reason=source-already-flac`);
-        arquivoFinal = sourceFile;
-        arquivoParaRemover = [sourceFile];
-      }
+
+    if (formatoFonte) {
+      console.log(`[AudioDownload] releaseId=${releaseId} stage=detect format=${formatoFonte.format} codec=${formatoFonte.codec}`);
+      if (formatoAudio === 'mp3' && formatoFonte.codec === 'mp3') needsConversion = false;
+      else if (formatoAudio === 'flac' && formatoFonte.codec === 'flac') needsConversion = false;
     }
 
-    // Passo 3: Converter com FFmpeg somente se necessário
     if (needsConversion) {
+      // Passo 3: converter com FFmpeg para o formato pedido
       console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=converting`);
       const ffmpegStart = Date.now();
-      
+
       await withTimeout(
         new Promise<void>((resolve, reject) => {
-          const ffmpegCommand = ffmpeg(sourceFile)
-            .setFfmpegPath(ffmpegPath || 'ffmpeg')
-            .output(arquivoFinal);
+          const cmd = ffmpeg(sourceFile).setFfmpegPath(ffmpegPath || 'ffmpeg').output(outputFile);
 
-          if (extensao === 'flac') {
-            ffmpegCommand
-              .audioCodec('flac')
-              .audioFrequency(44100)
-              .audioChannels(2);
+          if (formatoAudio === 'flac') {
+            cmd.audioCodec('flac').audioFrequency(44100).audioChannels(2);
           } else {
-            ffmpegCommand
-              .audioCodec('libmp3lame')
-              .audioBitrate('320k')
-              .audioFrequency(44100)
-              .audioChannels(2);
+            cmd.audioCodec('libmp3lame').audioBitrate('320k').audioFrequency(44100).audioChannels(2);
           }
 
-          ffmpegCommand
+          cmd
             .on('end', () => {
-              const ffmpegDuration = (Date.now() - ffmpegStart) / 1000;
-              console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg duration=${ffmpegDuration}s status=success`);
+              console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg duration=${(Date.now() - ffmpegStart) / 1000}s status=success`);
               resolve();
             })
             .on('error', (err) => {
               console.error(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=failed error=${err.message}`);
-              reject(err);
+              reject(erroDownload('Falha ao converter áudio', DownloadErrorType.CONVERSION_FAILED, false));
             })
             .run();
         }),
@@ -714,95 +458,275 @@ async function processDownload(
         'Timeout ao converter áudio (FFmpeg)'
       );
     } else {
-      console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=skipped`);
+      // Fonte já está no formato pedido — usa o arquivo baixado direto
+      arquivoFinal = sourceFile;
+      console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=skipped source-already-in-format`);
     }
 
-    // Passo 4: Validar arquivo final
-    console.log(`[AudioDownload] releaseId=${releaseId} stage=validation status=validating`);
-    const validationStart = Date.now();
-    
-    await withTimeout(
-      (async () => {
-        if (extensao === 'flac') {
-          // Validar assinatura FLAC (fLaC = 66 4C 61 43)
-          const buffer = await fs.readFile(arquivoFinal);
-          const signature = buffer.subarray(0, 4).toString('ascii');
-          
-          if (signature !== 'fLaC') {
-            console.error(`[AudioDownload] releaseId=${releaseId} stage=validation status=failed signature=${signature}`);
-            throw new Error('Arquivo gerado não é um FLAC válido');
-          }
-          console.log(`[AudioDownload] releaseId=${releaseId} stage=validation signature=fLaC status=success`);
-        } else {
-          // Validar MP3 verificando bytes iniciais (ID3 tag ou sync bytes)
-          const buffer = await fs.readFile(arquivoFinal);
-          const firstBytes = buffer.subarray(0, 3);
-          
-          // MP3 pode começar com ID3v2 tag (49 44 33 = "ID3")
-          // ou com sync bytes (FF FB ou FF FA)
-          const isID3 = firstBytes[0] === 0x49 && firstBytes[1] === 0x44 && firstBytes[2] === 0x33;
-          const isSync = firstBytes[0] === 0xFF && (firstBytes[1] === 0xFB || firstBytes[1] === 0xFA);
-          
-          if (!isID3 && !isSync) {
-            console.error(`[AudioDownload] releaseId=${releaseId} stage=validation status=failed bytes=${firstBytes.toString('hex')}`);
-            throw new Error('Arquivo gerado não é um MP3 válido');
-          }
-          
-          console.log(`[AudioDownload] releaseId=${releaseId} stage=validation signature=${isID3 ? 'ID3' : 'Sync'} status=success`);
-        }
-      })(),
-      TIMEOUTS.VALIDATION,
-      'Timeout ao validar arquivo'
-    );
+    // Passo 4: validar assinatura do arquivo final
+    await validarArquivo(arquivoFinal, formatoAudio, releaseId);
 
-    const validationDuration = (Date.now() - validationStart) / 1000;
-    console.log(`[AudioDownload] releaseId=${releaseId} stage=validation duration=${validationDuration}s status=complete`);
-
-    // Salvar no cache
-    await downloadCache.set(releaseId, formatoAudio, arquivoFinal);
-
-    // Passo 5: Enviar arquivo para o cliente
-    console.log(`[AudioDownload] releaseId=${releaseId} stage=send status=sending`);
-    
-    res.setHeader('Content-Type', mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(nomeArquivo)}.${extensao}"`);
-    res.setHeader('Cache-Control', 'public, max-age=86400'); // 24 horas
-    res.setHeader('X-Cache', 'MISS');
-    res.setHeader('X-Video-Id', videoId);
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-
-    // Streaming do arquivo em vez de carregar tudo em memória
-    const fileStream = await fs.readFile(arquivoFinal);
-    res.send(fileStream);
-
-    const totalDuration = (Date.now() - startTime) / 1000;
-    console.log(`[AudioDownload] releaseId=${releaseId} status=completed total=${totalDuration}s cache=MISS`);
-
-  } catch (err) {
-    const totalDuration = (Date.now() - startTime) / 1000;
-    console.error(`[AudioDownload] releaseId=${releaseId} status=failed duration=${totalDuration}s error=`, err);
-    
-    if (!res.headersSent) {
-      res.status(503).json({ 
-        success: false, 
-        error: 'Falha ao baixar áudio',
-        errorType: DownloadErrorType.INTERNAL_ERROR,
-      });
+    // Passo 5: mover para o cache PERMANENTE e devolver o caminho definitivo.
+    // set() move o arquivo (rename) — o unlink do finally vira no-op seguro.
+    const caminhoCache = await downloadCache.set(releaseId, formatoAudio, arquivoFinal);
+    if (!caminhoCache) {
+      throw erroDownload('Falha ao gravar arquivo no cache', DownloadErrorType.INTERNAL_ERROR, false);
     }
+
+    return caminhoCache;
   } finally {
-    // Passo 6: Limpeza de arquivos temporários
-    console.log(`[AudioDownload] releaseId=${releaseId} stage=cleanup status=starting`);
-    
-    for (const arquivo of arquivoParaRemover) {
-      try {
-        await fs.unlink(arquivo);
-        console.log(`[AudioDownload] releaseId=${releaseId} stage=cleanup file=${arquivo} status=removed`);
-      } catch (err) {
-        console.warn(`[AudioDownload] releaseId=${releaseId} stage=cleanup file=${arquivo} status=skipped reason=not-exists`);
-      }
+    // Limpeza: SOMENTE temporários — o cache permanente nunca é tocado aqui
+    for (const arquivo of temporarios) {
+      await fs.unlink(arquivo).catch(() => undefined);
     }
-    
-    console.log(`[AudioDownload] releaseId=${releaseId} stage=cleanup status=complete`);
   }
+}
+
+// Baixa a fonte para um arquivo local, com limite de tamanho e 1 retry
+async function baixarComRetry(url: string, destino: string, releaseId: number): Promise<void> {
+  let ultimaFalha: DownloadError | null = null;
+
+  for (let tentativa = 1; tentativa <= 2; tentativa++) {
+    try {
+      const guard = await auditarUrl(url);
+      if (!guard.ok) {
+        throw erroDownload(`Fonte rejeitada pelo guard: ${guard.motivo}`, DownloadErrorType.SOURCE_UNAVAILABLE, false);
+      }
+
+      const resposta = await axios.get(url, {
+        responseType: 'stream',
+        timeout: TIMEOUTS.DOWNLOAD,
+        headers: { 'User-Agent': USER_AGENT },
+        maxRedirects: 3,
+        beforeRedirect: criarBeforeRedirect(),
+        validateStatus: (s) => s < 400,
+      });
+
+      // Rejeita cedo respostas que não são áudio
+      const contentType = String(resposta.headers['content-type'] ?? '');
+      const ehAudio = contentType.toLowerCase().startsWith('audio') ||
+        /\.(mp3|flac|wav|m4a|aac|ogg|opus|webm|wma)(\?|$)/i.test(url);
+      if (!ehAudio) {
+        (resposta.data as NodeJS.ReadableStream & { resume?: () => void }).resume?.();
+        throw erroDownload(
+          `A fonte não entregou áudio (content-type: ${contentType || 'desconhecido'})`,
+          DownloadErrorType.FORMAT_UNAVAILABLE,
+          false
+        );
+      }
+
+      const declarado = parseInt(String(resposta.headers['content-length'] ?? '0'), 10);
+      if (declarado > TAMANHO_MAX_AUDIO) {
+        (resposta.data as NodeJS.ReadableStream & { resume?: () => void }).resume?.();
+        throw erroDownload(
+          `Arquivo grande demais (${Math.round(declarado / 1024 / 1024)} MB)`,
+          DownloadErrorType.FILE_TOO_LARGE,
+          false
+        );
+      }
+
+      await gravarStreamComLimite(resposta.data, destino);
+      return;
+    } catch (err: unknown) {
+      await fs.unlink(destino).catch(() => undefined);
+
+      const erro = (err instanceof Error ? err : new Error(String(err))) as DownloadError;
+      if (!erro.type) {
+        const msg = String(erro.message ?? '');
+        if (/status code 40[1-9]|status code 41[0-9]/.test(msg)) {
+          erro.type = DownloadErrorType.SOURCE_UNAVAILABLE;
+          erro.retryable = false;
+        } else {
+          erro.type = DownloadErrorType.TEMPORARY_NETWORK_ERROR;
+          erro.retryable = true;
+        }
+      }
+
+      console.warn(`[AudioDownload] releaseId=${releaseId} tentativa=${tentativa} falhou: ${erro.message}`);
+      ultimaFalha = erro;
+
+      if (erro.retryable === false) break;
+      if (tentativa < 2) await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+
+  throw ultimaFalha ?? erroDownload('Falha desconhecida ao baixar da fonte', DownloadErrorType.INTERNAL_ERROR, false);
+}
+
+// Grava um stream HTTP em disco respeitando o limite de tamanho
+async function gravarStreamComLimite(stream: NodeJS.ReadableStream, destino: string): Promise<void> {
+  const saida = createWriteStream(destino);
+  let baixado = 0;
+
+  await new Promise<void>((resolve, reject) => {
+    const origem = stream as NodeJS.ReadableStream & { destroy?: () => void };
+
+    origem.on('data', (chunk: Buffer) => {
+      baixado += chunk.length;
+      if (baixado > TAMANHO_MAX_AUDIO) {
+        origem.destroy?.();
+        saida.destroy();
+        reject(erroDownload(
+          `Download excedeu ${Math.round(TAMANHO_MAX_AUDIO / 1024 / 1024)} MB`,
+          DownloadErrorType.FILE_TOO_LARGE,
+          false
+        ));
+      }
+    });
+    origem.on('error', (err: Error) => {
+      saida.destroy();
+      reject(err);
+    });
+    saida.on('error', (err: Error) => {
+      origem.destroy?.();
+      reject(err);
+    });
+    saida.on('finish', () => resolve());
+    origem.pipe(saida);
+  });
+}
+
+// Detecta formato/codec reais do arquivo baixado via ffprobe
+async function detectAudioFormat(filePath: string): Promise<{ format: string; codec: string } | null> {
+  try {
+    return await withTimeout(
+      new Promise((resolve, reject) => {
+        ffmpeg(filePath)
+          .setFfmpegPath(ffmpegPath || 'ffmpeg')
+          // ffprobe próprio: sem isso o fluent-ffmpeg procura no PATH e falha
+          // ("Cannot find ffprobe"), forçando conversão até de arquivos já válidos
+          .setFfprobePath(ffprobePath || 'ffprobe')
+          .ffprobe((err, metadata) => {
+            if (err) return reject(err);
+            resolve({
+              format: metadata.format?.format_name || '',
+              codec: metadata.streams?.[0]?.codec_name || '',
+            });
+          });
+      }),
+      TIMEOUTS.VALIDATION,
+      'Timeout ao inspecionar arquivo (ffprobe)'
+    );
+  } catch (error) {
+    console.error('[AudioController] Erro ao detectar formato:', error);
+    return null;
+  }
+}
+
+// Valida a assinatura do arquivo final (MP3: ID3/sync; FLAC: "fLaC")
+async function validarArquivo(arquivo: string, formato: string, releaseId: number): Promise<void> {
+  console.log(`[AudioDownload] releaseId=${releaseId} stage=validation status=validating`);
+
+  await withTimeout(
+    (async () => {
+      const buffer = await fs.readFile(arquivo);
+
+      if (formato === 'flac') {
+        const assinatura = buffer.subarray(0, 4).toString('ascii');
+        if (assinatura !== 'fLaC') {
+          throw erroDownload('Arquivo gerado não é um FLAC válido', DownloadErrorType.VALIDATION_FAILED, false);
+        }
+      } else {
+        const b = buffer.subarray(0, 3);
+        const ehId3 = b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33;
+        const ehMpegSync = b[0] === 0xff && (b[1] & 0xe0) === 0xe0;
+        if (!ehId3 && !ehMpegSync) {
+          throw erroDownload('Arquivo gerado não é um MP3 válido', DownloadErrorType.VALIDATION_FAILED, false);
+        }
+      }
+    })(),
+    TIMEOUTS.VALIDATION,
+    'Timeout ao validar arquivo'
+  );
+
+  console.log(`[AudioDownload] releaseId=${releaseId} stage=validation status=complete`);
+}
+
+// Entrega o arquivo em cache ao cliente (stream em disco, sem ler tudo em memória)
+async function servirArquivo(
+  req: Request,
+  res: Response,
+  caminho: string,
+  nomeArquivo: string,
+  mimeType: string,
+  statusCache: 'HIT' | 'MISS',
+  releaseId: number
+): Promise<void> {
+  const stats = await fs.stat(caminho);
+  const extensao = caminho.split('.').pop() ?? 'mp3';
+
+  res.setHeader('Content-Type', mimeType);
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(nomeArquivo)}.${extensao}"`);
+  res.setHeader('Content-Length', String(stats.size));
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('X-Cache', statusCache);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(caminho);
+    stream.on('error', reject);
+    req.on('close', () => stream.destroy());
+    stream.on('end', () => resolve());
+    stream.pipe(res);
+  });
+
+  console.log(`[AudioDownload] releaseId=${releaseId} stage=send status=sent cache=${statusCache} size=${stats.size}`);
+}
+
+// ============================================================
+// POST /api/releases/:id/audio-source  { url }
+// Registra uma fonte direta em site aberto fornecida pelo usuário/painel.
+// Valida contra o guard (Regra 3 + anti-SSRF) antes de salvar.
+// ============================================================
+export async function definirFonteAudio(req: Request, res: Response): Promise<void> {
+  const releaseId = parseInt(req.params['id'] ?? '0', 10);
+  const url = typeof req.body?.['url'] === 'string' ? (req.body['url'] as string).trim() : '';
+
+  if (!releaseId) {
+    res.status(400).json({ success: false, error: 'ID de release inválido' });
+    return;
+  }
+  if (!url) {
+    res.status(400).json({ success: false, error: 'Informe a URL da fonte de áudio (body: { url })' });
+    return;
+  }
+
+  const release = await buscarRelease(releaseId);
+  if (!release) {
+    res.status(404).json({ success: false, error: 'Release não encontrada' });
+    return;
+  }
+
+  // 1. Tenta como arquivo de áudio direto
+  const resultado = await directLinkProvider.searchInUrl(url);
+  let urlArquivo = resultado.status === 'SUCCESS' && resultado.candidates.length > 0
+    ? resultado.candidates[0]?.url ?? null
+    : null;
+
+  // 2. Senão, tenta como página de blog/forum que hospeda o arquivo
+  if (!urlArquivo) {
+    const naPagina = await genericWebProvider.searchInUrl(url);
+    if (naPagina.status === 'SUCCESS' && naPagina.candidates.length > 0) {
+      urlArquivo = naPagina.candidates[0]?.url ?? null;
+    }
+  }
+
+  if (!urlArquivo) {
+    res.status(400).json({
+      success: false,
+      error: 'Não foi possível validar uma fonte de áudio nessa URL',
+      detalhe: resultado.error ?? 'URL rejeitada (plataforma proibida, formato inválido ou indisponível)',
+    });
+    return;
+  }
+
+  const fonte: FonteAudio = { url: urlArquivo, provider: 'direct-link', pageUrl: url };
+  await persistirFonte(releaseId, fonte);
+
+  res.json({
+    success: true,
+    message: 'Fonte de áudio registrada na release',
+    fonte: { url: fonte.url, provider: fonte.provider, pageUrl: fonte.pageUrl },
+  });
 }

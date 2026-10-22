@@ -1,5 +1,8 @@
 // Contexto de Tema - Dark/Light
-// Gerencia o tema do aplicativo com persistência no AsyncStorage
+// Gerencia o tema do aplicativo com persistência no AsyncStorage.
+// A partir da identidade visual Aurora, o tema ganhou tokens de vidro fosco
+// (glass) e de luzes da aurora. As chaves antigas foram mantidas para que
+// nenhuma tela existente quebre.
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -9,6 +12,7 @@ import { useColorScheme } from 'react-native';
 type Theme = 'light' | 'dark' | 'auto';
 
 interface ThemeColors {
+  // Chaves clássicas (compatibilidade)
   background: string;
   card: string;
   text: string;
@@ -25,44 +29,82 @@ interface ThemeColors {
   buttonText: string;
   icon: string;
   overlay: string;
+  // Tokens de vidro fosco (identidade Aurora)
+  glassCard: string;        // fundo translúcido de cartões
+  glassCardForte: string;   // vidro mais opaco (modais, navegação, player)
+  glassBorder: string;      // contorno sutil de vidro
+  glassHighlight: string;   // brilho superior do vidro
+  glassShadow: string;      // cor da sombra projetada
+  backdrop: string;         // véu escuro atrás dos modais
+  // Luzes da aurora
+  auroraPrimaria: string;   // violeta
+  auroraSecundaria: string; // ciano
+  auroraTerciaria: string;  // rosa
+  auroraQuaternaria: string;// verde
 }
 
 const lightTheme: ThemeColors = {
-  background: '#FFFFFF',
-  card: '#F5F5F5',
-  text: '#000000',
-  textSecondary: '#666666',
-  primary: '#1DB954',
-  secondary: '#191414',
-  accent: '#E6F4FE',
-  border: '#E0E0E0',
-  success: '#4CAF50',
-  error: '#F44336',
-  warning: '#FF9800',
-  input: '#F0F0F0',
-  button: '#1DB954',
+  // Chaves clássicas
+  background: '#F5F6FB',
+  card: '#FFFFFF',
+  text: '#14142B',
+  textSecondary: '#5A5C77',
+  primary: '#6D28D9',
+  secondary: '#1F2937',
+  accent: '#EDE9FE',
+  border: '#E4E4F0',
+  success: '#16A34A',
+  error: '#DC2626',
+  warning: '#D97706',
+  input: '#F0F0F6',
+  button: '#6D28D9',
   buttonText: '#FFFFFF',
-  icon: '#000000',
-  overlay: 'rgba(0, 0, 0, 0.5)',
+  icon: '#14142B',
+  overlay: 'rgba(20, 20, 43, 0.35)',
+  // Vidro fosco
+  glassCard: 'rgba(255, 255, 255, 0.55)',
+  glassCardForte: 'rgba(255, 255, 255, 0.92)',
+  glassBorder: 'rgba(20, 20, 43, 0.12)',
+  glassHighlight: 'rgba(255, 255, 255, 0.95)',
+  glassShadow: '#8B8BA8',
+  backdrop: 'rgba(20, 20, 43, 0.35)',
+  // Luzes da aurora
+  auroraPrimaria: '#7C3AED',
+  auroraSecundaria: '#06B6D4',
+  auroraTerciaria: '#DB2777',
+  auroraQuaternaria: '#10B981',
 };
 
 const darkTheme: ThemeColors = {
-  background: '#0F0F1A',
-  card: '#1A1A2E',
+  // Chaves clássicas
+  background: '#0B0B1A',
+  card: '#151528',
   text: '#FFFFFF',
-  textSecondary: '#A0A0C0',
-  primary: '#1DB954',
-  secondary: '#E6F4FE',
-  accent: '#252540',
-  border: '#2C2C54',
-  success: '#4CAF50',
-  error: '#F44336',
-  warning: '#FF9800',
-  input: '#252540',
-  button: '#1DB954',
+  textSecondary: '#A9ABC6',
+  primary: '#8B5CF6',
+  secondary: '#3B3B5E',
+  accent: '#232342',
+  border: '#2E2E52',
+  success: '#34D399',
+  error: '#F87171',
+  warning: '#FBBF24',
+  input: '#1C1C33',
+  button: '#8B5CF6',
   buttonText: '#FFFFFF',
   icon: '#FFFFFF',
-  overlay: 'rgba(0, 0, 0, 0.7)',
+  overlay: 'rgba(8, 8, 20, 0.62)',
+  // Vidro fosco
+  glassCard: 'rgba(255, 255, 255, 0.07)',
+  glassCardForte: 'rgba(23, 23, 48, 0.88)',
+  glassBorder: 'rgba(255, 255, 255, 0.14)',
+  glassHighlight: 'rgba(255, 255, 255, 0.25)',
+  glassShadow: '#000000',
+  backdrop: 'rgba(8, 8, 20, 0.62)',
+  // Luzes da aurora
+  auroraPrimaria: '#7C3AED',
+  auroraSecundaria: '#06B6D4',
+  auroraTerciaria: '#DB2777',
+  auroraQuaternaria: '#10B981',
 };
 
 interface ThemeContextType {

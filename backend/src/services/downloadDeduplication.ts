@@ -1,5 +1,11 @@
 // Deduplicação de Downloads Simultâneos — Evita processamento duplicado.
-// Quando múltiplas requisições solicitam a mesma música, compartilham o mesmo processo.
+// Quando múltiplas requisições pedem a mesma música, apenas a primeira produz
+// o arquivo; as demais aguardam e recebem o MESMO resultado.
+//
+// CONTRATO (correção do bug do 2º cliente pendurado): a operação produzida
+// deve retornar DADOS (ex.: o caminho do arquivo em cache) e NUNCA escrever
+// na Response. Quem chama é responsável por servir cada req/res individualmente
+// a partir do resultado compartilhado.
 
 interface InFlightDownload {
   promise: Promise<any>;

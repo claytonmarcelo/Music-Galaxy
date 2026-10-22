@@ -70,8 +70,23 @@ export default function CustomButton({
     };
 
     const variantStyles = {
-      primary: { backgroundColor: colors.button },
-      secondary: { backgroundColor: colors.secondary },
+      // Botões sólidos ganham sombra suave de vidro para "flutuar" sobre a tela
+      primary: {
+        backgroundColor: colors.button,
+        shadowColor: colors.glassShadow,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+      },
+      secondary: {
+        backgroundColor: colors.secondary,
+        shadowColor: colors.glassShadow,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 8,
+        elevation: 3,
+      },
       outline: { 
         backgroundColor: 'transparent',
         borderWidth: 2,

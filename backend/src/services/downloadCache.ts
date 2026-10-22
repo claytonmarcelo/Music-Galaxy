@@ -1,5 +1,8 @@
 // Cache de Downloads — Evita processamento repetido do mesmo áudio.
-// Armazena arquivos MP3 e FLAC já processados para entrega rápida.
+// Armazena arquivos MP3 e FLAC já processados em um diretório PERMANENTE
+// (backend/cache/audio). O set() MOVE o arquivo para o cache e devolve o
+// caminho definitivo — assim o chamador pode apagar apenas os temporários,
+// sem quebrar a entrada recém-criada (correção do ciclo set/unlink).
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -17,11 +20,22 @@ class DownloadCache {
   private cacheDir: string;
   private maxAge: number; // em milissegundos
   private entries: Map<string, CacheEntry> = new Map();
+  private limpezaAgendada: NodeJS.Timeout | null = null;
 
   constructor() {
-    this.cacheDir = path.join(__dirname, '../../temp/cache/audio');
+    // Diretório permanente fora de temp/ — sobrevive à limpeza dos temporários
+    this.cacheDir = path.join(__dirname, '../../cache/audio');
     this.maxAge = 24 * 60 * 60 * 1000; // 24 horas
     this.initialize();
+
+    // Limpeza periódica de entradas expiradas (a cada hora).
+    // unref() evita impedir o encerramento do processo.
+    this.limpezaAgendada = setInterval(() => {
+      this.clearExpired().catch((err) =>
+        console.error('[DownloadCache] Erro na limpeza agendada:', err)
+      );
+    }, 60 * 60 * 1000);
+    this.limpezaAgendada.unref();
   }
 
   private async initialize(): Promise<void> {
@@ -98,13 +112,34 @@ class DownloadCache {
     }
   }
 
-  async set(releaseId: number, format: string, filePath: string): Promise<void> {
+  // Move o arquivo para o diretório permanente do cache e registra a entrada.
+  // Devolve o caminho DEFINITIVO dentro do cache (ou null em falha) — o
+  // chamador deve usar esse caminho para servir o cliente e pode apagar com
+  // segurança qualquer arquivo temporário que tenha restado.
+  async set(releaseId: number, format: string, filePath: string): Promise<string | null> {
     try {
       const stats = await fs.stat(filePath);
       const key = this.getCacheKey(releaseId, format);
-      
+      const destino = path.join(this.cacheDir, `${key}.${format}`);
+
+      // Se já existia outra entrada para a chave, remove o arquivo antigo
+      const anterior = this.entries.get(key);
+      if (anterior && anterior.filePath !== destino) {
+        await fs.unlink(anterior.filePath).catch(() => undefined);
+      }
+
+      // rename funciona dentro do mesmo volume; senão, copia e apaga a origem
+      if (path.resolve(filePath) !== path.resolve(destino)) {
+        try {
+          await fs.rename(filePath, destino);
+        } catch {
+          await fs.copyFile(filePath, destino);
+          await fs.unlink(filePath).catch(() => undefined);
+        }
+      }
+
       const entry: CacheEntry = {
-        filePath,
+        filePath: destino,
         format,
         size: stats.size,
         createdAt: Date.now(),
@@ -113,10 +148,12 @@ class DownloadCache {
 
       this.entries.set(key, entry);
       await this.saveEntries();
-      
-      console.log(`[DownloadCache] Cache set: releaseId=${releaseId} format=${format} size=${stats.size}`);
+
+      console.log(`[DownloadCache] Cache set: releaseId=${releaseId} format=${format} size=${stats.size} path=${destino}`);
+      return destino;
     } catch (error) {
       console.error('[DownloadCache] Erro ao adicionar entrada:', error);
+      return null;
     }
   }
 

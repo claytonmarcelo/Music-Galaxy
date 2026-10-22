@@ -7,15 +7,16 @@
     "userInterfaceStyle": "dark",
     "scheme": "musicgalaxy",
     "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B0B1A"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.musicgalaxy.app"
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
-        "backgroundColor": "#0F0F1A"
-      },
       "package": "com.musicgalaxy.app"
     },
     "web": {

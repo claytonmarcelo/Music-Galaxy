@@ -55,6 +55,34 @@ musicgalaxy/
 - Suportar todos os formatos de lançamento e tipos de versão especificados
 - No frontend: exibir cada versão individualmente na lista
 
+### Regra 3 — Áudio Apenas de Fontes Web Abertas (Proibição Total de Plataformas)
+- O áudio (stream/download) deve vir **exclusivamente de sites abertos no mundo inteiro**: blogs, fóruns, sites pessoais e links diretos de arquivos de áudio
+- **JAMAIS, em hipótese alguma, usar YouTube, Spotify, Deezer ou qualquer plataforma/serviço de música** de qualquer tipo ou gênero
+- Aplicação em código (não só de comentário):
+  - `backend/src/services/audioSource/webAudio.ts` contém `PLATAFORMAS_PROIBIDAS` e `auditarUrl()`, um guard anti-SSRF que bloqueia domínios de plataformas, protocolos não-HTTP, IPs não roteáveis e redirects suspeitos. **Toda URL de áudio visitada pelo sistema passa por esse guard.**
+  - O ingestion (`searchOrchestrator.ts`) nunca salva URLs de plataformas; as colunas legadas (`youtube_video_id`, `audio_preview_url`, `streaming_url`, `download_url`) foram zeradas e são de somente leitura.
+  - O app mobile não exibe nem chama nenhum serviço de plataforma (Spotify/YouTube etc.)
+- Fonte descoberta é persistida por release em: `audio_source_url`, `audio_source_provider`, `audio_source_page_url`
+- Para registrar manualmente uma fonte aberta confiável: `POST /api/releases/:id/audio-source` com `{ "url": "..." }` (validada pelo guard antes de salvar)
+
+### Exceções da Regra 3
+- Nenhuma. Se uma funcionalidade depender de conteúdo de plataforma de música, ela deve ser redesenhada com fontes web abertas ou removida.
+
+### Regra 4 — Identidade Visual (Vidro Fosco + Aurora)
+- Todas as telas e componentes usam os tokens do `ThemeContext` (mobile/src/contexts/ThemeContext.tsx) e os componentes compartilhados `AuroraBackground` e `GlassCard`
+- **Proibido exibir o nome da identidade visual como texto** em qualquer interface, código visível ao usuário ou comentário desnecessário — é apenas um conceito de design
+- **Proibido usar cores hexadecimais fixas** em estilos — sempre tokens do tema (a troca claro/escuro depende disso)
+- Ícone do aplicativo: **fundo transparente obrigatório** (PNG com canal alfa real)
+- Textos de interface **sempre em português brasileiro correto** (acentos, crase, concordância, plural)
+- Em texto de interface, "release" é "versão" (o termo técnico "release" permanece apenas em código/API/banco)
+
+### Regra 5 — Aplicativo Sem Erros (APK)
+- **Proibido deixar erros de TypeScript, código quebrado, imports mortos, arquivos órfãos ou pastas vazias** no projeto
+- Antes de concluir qualquer alteração: `npx tsc --noEmit` limpo nas duas camadas (backend e mobile)
+- **Nenhum tipo de suposição**: fatos devem ser verificados com saída real de comandos/APIs
+- O endereço do servidor **nunca** deve ser fixado em código para produção — usar a configuração em Ajustes (seção "Servidor da API")
+- O aplicativo deve abrir normalmente **sem internet** (modo offline com aviso claro)
+
 ## Schema do Banco de Dados
 
 O schema é definitivo e não deve ser alterado sem justificativa técnica documentada.
@@ -81,6 +109,9 @@ O schema é definitivo e não deve ser alterado sem justificativa técnica docum
 - `GET /api/works/:id/releases` - Lista versões de uma obra
 - `GET /api/releases/:id` - Detalhes de release específico
 - `GET /api/release-types` - Lista catálogo de tipos
+- `GET /api/releases/:id/stream` - Stream de áudio completo (proxy da fonte web aberta, com suporte a Range). Única fonte de playback do app (Regra 3)
+- `GET /api/releases/:id/download?format=mp3|flac` - Download do arquivo de áudio gerado a partir da fonte web aberta (pipeline: cache → dedup → fetch → ffprobe → conversão condicional → validação)
+- `POST /api/releases/:id/audio-source` - Registra manualmente uma fonte aberta (`{ "url": "..." }`), sempre validada pelo guard da Regra 3
 
 ### Formato de Resposta
 Todas as respostas devem preservar:
@@ -125,7 +156,7 @@ Para decisões técnicas não cobertas neste documento:
 
 ### Exceções que Requerem Confirmação Humana
 1. **Mudança na porta 3307 do MariaDB** - Nunca alterar sem autorização explícita
-2. **Flexibilização das Regras 1 ou 2** - Nunca flexibilizar sem autorização explícita
+2. **Flexibilização das Regras 1, 2, 3, 4 ou 5** - Nunca flexibilizar sem autorização explícita
 
 ## Comandos de Desenvolvimento
 
@@ -150,6 +181,16 @@ npm run dev
 # Ou linha de comando (schema inclui seeds automaticamente):
 mysql -u root -p -P 3307 musicgalaxy < database/schema.sql
 ```
+
+### Build do APK (EAS)
+```bash
+cd mobile
+npx eas-cli login            # uma vez, com conta Expo
+npx eas-cli build --platform android --profile preview
+```
+- O `eas.json` gera **APK** (`buildType: "apk"`) nos três perfis (development, preview, production)
+- O backend não está embutido no APK: o usuário informa o endereço na tela de Ajustes (seção "Servidor da API"), salvo no aparelho
+- Ícone do app: `mobile/assets/icon.png` (fundo transparente, canal alfa real)
 
 ## Integração com Fontes Externas
 

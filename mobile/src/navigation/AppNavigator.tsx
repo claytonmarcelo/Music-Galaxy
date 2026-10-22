@@ -3,9 +3,11 @@
 // Otimizado sem lazy loading para evitar problemas de estado
 
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { View } from 'react-native';
+import { NavigationContainer, DefaultTheme, DarkTheme, Theme, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useTheme } from '../contexts/ThemeContext';
+import OfflineBanner from '../components/OfflineBanner';
 
 import { RootStackParamList } from '../types';
 import BuscaScreen from '../screens/BuscaScreen';
@@ -21,10 +23,27 @@ import TelaAdminIngestao from '../screens/TelaAdminIngestao';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function AppNavigator(): React.JSX.Element {
-  const { colors } = useTheme();
-  
+  const { colors, isDark } = useTheme();
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
+
+  // Tema da navegação alinhado à identidade visual Aurora.
+  const base = isDark ? DarkTheme : DefaultTheme;
+  const temaNavegacao: Theme = {
+    ...base,
+    colors: {
+      ...base.colors,
+      primary: colors.primary,
+      background: colors.background,
+      card: colors.glassCardForte,
+      text: colors.text,
+      border: colors.glassBorder,
+      notification: colors.primary,
+    },
+  };
+
   return (
-    <NavigationContainer>
+    <View style={{ flex: 1 }}>
+      <NavigationContainer ref={navigationRef} theme={temaNavegacao}>
       <Stack.Navigator
         initialRouteName="Busca"
         screenOptions={{
@@ -44,6 +63,9 @@ export default function AppNavigator(): React.JSX.Element {
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="AdminIngestao" component={TelaAdminIngestao} />
       </Stack.Navigator>
-    </NavigationContainer>
+      </NavigationContainer>
+      {/* Aviso global de falta de conexão com o servidor */}
+      <OfflineBanner onAbrirAjustes={() => navigationRef.navigate('Settings')} />
+    </View>
   );
 }

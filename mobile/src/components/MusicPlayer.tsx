@@ -1,50 +1,76 @@
 // Componente MusicPlayer — Controles de reprodução e download.
-// Player universal: tenta stream completo, cai para preview iTunes/Deezer automaticamente.
+// Player universal (Regra 3): reproduz o stream completo servido pelo backend,
+// que resolve a fonte exclusivamente em sites abertos (blogs, fóruns, links diretos).
+// Nunca usa YouTube / Spotify / Deezer ou qualquer plataforma de música.
+// - Web: HTML5 Audio
+// - iOS/Android: expo-av (Sound.createAsync)
 // Download in-page com barra de progresso real (sem abrir nova janela).
 
-import React, { useState, useCallback, useRef, memo } from 'react';
+import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   Modal,
   Pressable,
   Platform,
 } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
+import { useModal } from '../contexts/ModalContext';
 import { MusicEmojis } from './AnimatedIcon';
 import { Release } from '../types';
 import { BASE_URL } from '../services/api';
-import { SpotifyLoginScreen } from '../screens/SpotifyLoginScreen';
+
+// Importa expo-av apenas em ambiente React Native (nunca no web)
+let ExpoAudio: any;
+if (Platform.OS !== 'web') {
+  try {
+    ExpoAudio = require('expo-av').Audio;
+  } catch {
+    console.warn('expo-av não disponível');
+  }
+}
 
 interface MusicPlayerProps {
   release: Release;
 }
 
-// Cache de áudios que já tocaram com sucesso — evita tentar URL com falha novamente
-const urlsSucesso = new Map<number, string>();
-
 function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element {
   const { colors } = useTheme();
+  // Sistema global de modais e toasts no lugar do Alert nativo
+  const { abrirErro, toastSucesso } = useModal();
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   const [qualityModalVisible, setQualityModalVisible] = useState(false);
-  const [spotifyLoginVisible, setSpotifyLoginVisible] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // URL base de stream do backend
+  // Referências de playback por plataforma
+  const audioRef = useRef<HTMLAudioElement | null>(null);   // Web
+  const soundRef = useRef<any>(null);                        // expo-av (nativo)
+
+  // URL de stream do backend — única fonte de playback (Regra 3)
   const streamUrl   = `${BASE_URL}/api/releases/${release.id}/stream`;
   const downloadUrl = `${BASE_URL}/api/releases/${release.id}/download`;
 
-  // URLs de fallback que já vêm do banco
-  const previewUrl  = release.audio_preview_url ?? release.streaming_url ?? null;
+  // Libera o áudio ao desmontar o componente — evita som tocando em background
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+        audioRef.current = null;
+      }
+      if (soundRef.current) {
+        soundRef.current.unloadAsync().catch(() => {});
+        soundRef.current = null;
+      }
+    };
+  }, []);
 
   // ──────────────────────────────────────────────
-  // PLAYER — tenta stream; fallback para preview
+  // PLAYER WEB — HTML5 Audio
   // ──────────────────────────────────────────────
   const tocarWeb = useCallback(async (url: string): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -65,7 +91,11 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
         cleanup();
         audioRef.current = audio;
         audio.play()
-          .then(() => resolve(true))
+          .then(() => {
+            audio.addEventListener('ended', () => setIsPlaying(false), { once: true });
+            audio.addEventListener('error', () => setIsPlaying(false), { once: true });
+            resolve(true);
+          })
           .catch(() => resolve(false));
       };
 
@@ -81,66 +111,116 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
     });
   }, []);
 
+  // ──────────────────────────────────────────────
+  // PLAYER NATIVO — expo-av (iOS/Android)
+  // ──────────────────────────────────────────────
+  const tocarNativo = useCallback(async (url: string): Promise<boolean> => {
+    if (!ExpoAudio?.Sound) return false;
+
+    try {
+      // Descarta som anterior antes de criar novo
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync().catch(() => {});
+        soundRef.current = null;
+      }
+
+      // Toca em modo silencioso no iOS e ducking no Android
+      await ExpoAudio.setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        staysActiveInBackground: false,
+      });
+
+      // createAsync retorna a instância real do Sound (com pauseAsync/playAsync)
+      const { sound, status } = await ExpoAudio.Sound.createAsync(
+        { uri: url },
+        { shouldPlay: true },
+        // Listener de status: termina quando a faixa acaba
+        (st: any) => {
+          if (st.isLoaded && st.didJustFinish) {
+            setIsPlaying(false);
+          }
+        }
+      );
+
+      if (!status.isLoaded) {
+        await sound.unloadAsync().catch(() => {});
+        return false;
+      }
+
+      soundRef.current = sound;
+      return true;
+    } catch (err) {
+      console.error('Erro no player nativo:', err);
+      return false;
+    }
+  }, []);
+
+  // Pausar playback atual em qualquer plataforma
+  const pausarPlayback = useCallback(async () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    if (soundRef.current?.pauseAsync) {
+      await soundRef.current.pauseAsync().catch(() => {});
+    }
+    setIsPlaying(false);
+  }, []);
+
+  // Retomar playback nativo pausado (web retoma via tocarWeb com nova URL)
+  const retomarNativo = useCallback(async (): Promise<boolean> => {
+    if (soundRef.current?.playAsync) {
+      try {
+        await soundRef.current.playAsync();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }, []);
+
   const togglePlayback = useCallback(async () => {
     // Pausar se já está tocando
     if (isPlaying) {
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-      setIsPlaying(false);
+      await pausarPlayback();
+      return;
+    }
+
+    // Retomar se ainda há instância de som carregada
+    const retomou = await retomarNativo();
+    if (retomou) {
+      setIsPlaying(true);
       return;
     }
 
     setIsLoading(true);
     try {
-      // 1. Tentativa com URL em cache (já funcionou antes)
-      const urlCache = urlsSucesso.get(release.id);
-      if (urlCache) {
-        const ok = await tocarWeb(urlCache);
-        if (ok) {
-          setIsPlaying(true);
-          setIsLoading(false);
+      // Regra 3: o único caminho de playback é o stream do backend,
+      // que resolve a fonte em sites abertos (blog/fórum/link direto).
+      const ok = Platform.OS === 'web'
+        ? await tocarWeb(streamUrl)
+        : await tocarNativo(streamUrl);
 
-          audioRef.current?.addEventListener('ended', () => setIsPlaying(false), { once: true });
-          audioRef.current?.addEventListener('error', () => setIsPlaying(false), { once: true });
-          return;
-        }
-        urlsSucesso.delete(release.id);
-      }
-
-      // 2. Stream completo via backend
-      let ok = await tocarWeb(streamUrl);
       if (ok) {
-        urlsSucesso.set(release.id, streamUrl);
         setIsPlaying(true);
-        audioRef.current?.addEventListener('ended', () => setIsPlaying(false), { once: true });
-        audioRef.current?.addEventListener('error', () => setIsPlaying(false), { once: true });
-        setIsLoading(false);
         return;
       }
 
-      // 3. Fallback: preview do banco (iTunes/Deezer)
-      if (previewUrl) {
-        ok = await tocarWeb(previewUrl);
-        if (ok) {
-          urlsSucesso.set(release.id, previewUrl);
-          setIsPlaying(true);
-          audioRef.current?.addEventListener('ended', () => setIsPlaying(false), { once: true });
-          audioRef.current?.addEventListener('error', () => setIsPlaying(false), { once: true });
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      // 4. Sem áudio disponível
-      Alert.alert('Sem áudio', 'Nenhuma fonte de áudio disponível para esta versão.');
+      abrirErro(
+        'Não foi possível reproduzir',
+        'Nenhuma fonte de áudio aberta disponível para esta versão.'
+      );
     } catch (err) {
       console.error('Erro no player:', err);
-      Alert.alert('Erro', 'Não foi possível reproduzir a música.');
+      abrirErro(
+        'Não foi possível reproduzir',
+        'Não foi possível reproduzir o áudio desta versão. Verifique sua conexão e tente novamente.'
+      );
     } finally {
       setIsLoading(false);
     }
-  }, [isPlaying, release.id, streamUrl, previewUrl, tocarWeb]);
+  }, [isPlaying, streamUrl, tocarWeb, tocarNativo, pausarPlayback, retomarNativo, abrirErro]);
 
   // ──────────────────────────────────────────────
   // DOWNLOAD IN-PAGE — sem abrir nova janela
@@ -199,7 +279,7 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
         document.body.removeChild(link);
         URL.revokeObjectURL(objectUrl);
 
-        Alert.alert('Download concluído', `${nomeArquivo} salvo!`);
+        toastSucesso('Download concluído! O arquivo foi salvo.');
       } else {
         // React Native: usa expo-file-system/legacy
         const FileSystem = require('expo-file-system/legacy');
@@ -219,19 +299,32 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
         );
         await task.downloadAsync();
         setDownloadProgress(100);
-        Alert.alert('Download concluído', `${nomeArquivo} salvo!`);
+        toastSucesso('Download concluído! O arquivo foi salvo.');
       }
     } catch (err) {
       console.error('Erro no download:', err);
-      Alert.alert('Erro no download', 'Não foi possível baixar o arquivo. Tente novamente.');
+      abrirErro(
+        'Erro no download',
+        'Não foi possível baixar o arquivo. Verifique sua conexão e tente novamente.'
+      );
     } finally {
       setIsDownloading(false);
       setDownloadProgress(0);
     }
-  }, [isDownloading, downloadUrl, release.artist_name, release.version_name]);
+  }, [isDownloading, downloadUrl, release.artist_name, release.version_name, abrirErro, toastSucesso]);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.card }]}>
+    <View
+      style={[
+        styles.container,
+        {
+          // Painel do player em vidro mais opaco, com contorno e sombra do tema
+          backgroundColor: colors.glassCardForte,
+          borderColor: colors.glassBorder,
+          shadowColor: colors.glassShadow,
+        },
+      ]}
+    >
       {/* Informações da música */}
       <View style={styles.infoContainer}>
         <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
@@ -276,14 +369,6 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
             {isDownloading ? `${downloadProgress}%` : MusicEmojis.download}
           </Text>
         </TouchableOpacity>
-
-        {/* Botão Spotify — opcional */}
-        <TouchableOpacity
-          style={[styles.spotifyBtn, { backgroundColor: '#1DB954' }]}
-          onPress={() => setSpotifyLoginVisible(true)}
-        >
-          <Text style={styles.spotifyBtnText}>Spotify</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Barra de progresso do download */}
@@ -310,8 +395,21 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
         animationType="fade"
         onRequestClose={() => setQualityModalVisible(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setQualityModalVisible(false)}>
-          <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
+        <Pressable
+          style={[styles.modalOverlay, { backgroundColor: colors.backdrop }]}
+          onPress={() => setQualityModalVisible(false)}
+        >
+          <View
+            style={[
+              styles.modalContent,
+              {
+                // Conteúdo do modal em vidro mais opaco, com contorno e sombra
+                backgroundColor: colors.glassCardForte,
+                borderColor: colors.glassBorder,
+                shadowColor: colors.glassShadow,
+              },
+            ]}
+          >
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               Qualidade do Download
             </Text>
@@ -340,13 +438,6 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
           </View>
         </Pressable>
       </Modal>
-
-      {/* Modal Spotify */}
-      <SpotifyLoginScreen
-        visible={spotifyLoginVisible}
-        onClose={() => setSpotifyLoginVisible(false)}
-        onLoginSuccess={() => setSpotifyLoginVisible(false)}
-      />
     </View>
   );
 }
@@ -355,9 +446,15 @@ export default memo(MusicPlayerComponent);
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
     marginVertical: 8,
+    borderWidth: 1,
+    // Sombra suave de vidro (a cor vem do tema, aplicada em linha)
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 5,
   },
   infoContainer: { marginBottom: 12 },
   title: { fontSize: 16, fontWeight: '600', marginBottom: 4 },
@@ -380,21 +477,23 @@ const styles = StyleSheet.create({
   progressBar: { height: 4, borderRadius: 2, overflow: 'hidden', marginBottom: 4 },
   progressFill: { height: '100%' },
   progressText: { fontSize: 12, textAlign: 'center' },
-  spotifyBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  spotifyBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    // O véu escuro translúcido vem do tema (colors.backdrop), aplicado em linha
   },
-  modalContent: { width: '80%', borderRadius: 12, padding: 20, elevation: 5 },
+  modalContent: {
+    width: '80%',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    // Sombra suave de vidro (a cor vem do tema, aplicada em linha)
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 5,
+  },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
   qualityOption: { paddingVertical: 16 },
   qualityText: { fontSize: 16, fontWeight: '600', marginBottom: 4 },

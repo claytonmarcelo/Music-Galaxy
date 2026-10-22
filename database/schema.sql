@@ -108,10 +108,20 @@ CREATE TABLE IF NOT EXISTS releases (
   metadata_source_id SMALLINT UNSIGNED NOT NULL, -- Origem dos metadados desta versão
   source_reference_url VARCHAR(500) NULL,   -- Link direto ao registro na fonte original (auditoria)
 
-  -- URLs de mídia - nunca inventar, apenas quando a fonte fornece
-  audio_preview_url VARCHAR(500) NULL,      -- URL para preview de áudio (ex: Spotify preview)
-  streaming_url VARCHAR(500) NULL,          -- URL para streaming (ex: Spotify, YouTube Music)
-  download_url VARCHAR(500) NULL,           -- URL para download (ex: arquivo MP3, FLAC)
+  -- LEGADO (descontinuado pela Regra 3 — sempre NULL): URLs e IDs de
+  -- plataformas de música (YouTube/Spotify/Deezer/iTunes) são proibidos.
+  -- Mantidos apenas por histórico; novas gravações usam audio_source_*.
+  audio_preview_url VARCHAR(500) NULL,
+  streaming_url VARCHAR(500) NULL,
+  download_url VARCHAR(500) NULL,
+  youtube_video_id VARCHAR(20) NULL,
+
+  -- Regra 3 — Fonte de áudio em sites abertos (blogs, fóruns, links diretos).
+  -- Preenchido sob demanda pelo SourceOrchestrator no momento do stream/download.
+  -- Nunca apontar para plataformas de música (ver migrations/replace_platform_audio_with_web_sources.sql).
+  audio_source_url VARCHAR(700) NULL,
+  audio_source_provider VARCHAR(60) NULL,
+  audio_source_page_url VARCHAR(700) NULL,
 
   -- Identificador do registro na fonte externa (ex.: MBID do MusicBrainz
   -- ou release_id do Discogs). Combinado com metadata_source_id, impede

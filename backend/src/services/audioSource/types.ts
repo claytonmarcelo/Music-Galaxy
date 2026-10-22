@@ -15,7 +15,7 @@ export interface AudioIdentity {
 // Candidato encontrado por um provider
 export interface AudioCandidate {
   providerId: string;
-  sourceId: string; // ID interno do provider (ex: video ID do YouTube)
+  sourceId: string; // Identificador da fonte no provider (Regra 3: URL de site aberto — nunca plataforma de música)
   artist: string;
   title: string;
   album?: string;

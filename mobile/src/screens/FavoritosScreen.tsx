@@ -1,4 +1,5 @@
-// Tela de Favoritos — lista todos os releases marcados como favoritos.
+// Tela de Favoritos — lista todas as versões marcadas como favoritas,
+// com o visual de vidro fosco: cabeçalho e estados sobre o fundo decorativo.
 
 import React from 'react';
 import {
@@ -8,18 +9,23 @@ import {
   FlatList,
   StyleSheet,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RootStackParamList } from '../types';
 import { useFavoritos } from '../contexts/FavoritosContext';
+import { useModal } from '../contexts/ModalContext';
+import { useTheme } from '../contexts/ThemeContext';
 import ReleaseCard from '../components/ReleaseCard';
+import AuroraBackground from '../components/AuroraBackground';
+import GlassCard from '../components/GlassCard';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Favoritos'>;
 
 export default function FavoritosScreen({ navigation }: Props): React.JSX.Element {
   const { favoritos, removerFavorito } = useFavoritos();
+  const { abrirConfirmacao } = useModal();
+  const { colors } = useTheme();
 
   // Navega para detalhes do release
   const handleSelecionarRelease = (releaseId: number): void => {
@@ -29,31 +35,24 @@ export default function FavoritosScreen({ navigation }: Props): React.JSX.Elemen
     }
   };
 
-  // Remove favorito com confirmação
+  // Remove favorito com confirmação no modal global
   const handleRemoverFavorito = (releaseId: number): void => {
-    Alert.alert(
-      'Remover Favorito',
-      'Tem certeza que deseja remover este release dos favoritos?',
-      [
-        { text: 'Cancelar', onPress: () => {}, style: 'cancel' },
-        {
-          text: 'Remover',
-          onPress: () => removerFavorito(releaseId),
-          style: 'destructive',
-        },
-      ]
+    abrirConfirmacao(
+      'Remover dos favoritos?',
+      'Deseja remover esta versão dos seus favoritos?',
+      () => removerFavorito(releaseId)
     );
   };
 
   return (
-    <View style={styles.container}>
-      {/* Cabeçalho */}
-      <View style={styles.headerBox}>
-        <Text style={styles.tituloHeader}>Favoritos</Text>
-        <Text style={styles.subtituloHeader}>
-          {favoritos.length} release{favoritos.length !== 1 ? 's' : ''}
+    <AuroraBackground>
+      {/* Barra superior de vidro */}
+      <GlassCard forte style={styles.headerBox}>
+        <Text style={[styles.tituloHeader, { color: colors.text }]}>Favoritos</Text>
+        <Text style={[styles.subtituloHeader, { color: colors.textSecondary }]}>
+          {favoritos.length} versão{favoritos.length !== 1 ? 'ões' : ''}
         </Text>
-      </View>
+      </GlassCard>
 
       {/* Conteúdo */}
       {favoritos.length > 0 ? (
@@ -72,22 +71,22 @@ export default function FavoritosScreen({ navigation }: Props): React.JSX.Elemen
         <ScrollView style={styles.containerVazio}>
           <View style={styles.viewVazio}>
             <Text style={styles.emoji}>♡</Text>
-            <Text style={styles.textoVazio}>
+            <Text style={[styles.textoVazio, { color: colors.text }]}>
               Nenhum favorito ainda
             </Text>
-            <Text style={styles.descricaoVazia}>
-              Adicione releases aos seus favoritos tocando no ♡ para vê-los aqui
+            <Text style={[styles.descricaoVazia, { color: colors.textSecondary }]}>
+              Adicione versões aos seus favoritos tocando no ♡ para vê-las aqui
             </Text>
             <TouchableOpacity
-              style={styles.botaoVoltar}
+              style={[styles.botaoVoltar, { backgroundColor: colors.button }]}
               onPress={() => navigation.push('Busca')}
             >
-              <Text style={styles.textoBotao}>Começar a Buscar</Text>
+              <Text style={[styles.textoBotao, { color: colors.buttonText }]}>Começar a buscar</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
       )}
-    </View>
+    </AuroraBackground>
   );
 }
 
@@ -96,28 +95,21 @@ export default function FavoritosScreen({ navigation }: Props): React.JSX.Elemen
 // ============================================================
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F0F1A',
-  },
-
   headerBox: {
+    marginHorizontal: 16,
+    marginTop: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1A1A2E',
-    borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
+    borderRadius: 20,
   },
 
   tituloHeader: {
-    color: '#FFFFFF',
     fontSize: 20,
     fontWeight: 'bold',
     marginBottom: 4,
   },
 
   subtituloHeader: {
-    color: '#AAAAAA',
     fontSize: 13,
   },
 
@@ -142,7 +134,6 @@ const styles = StyleSheet.create({
   },
 
   textoVazio: {
-    color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 8,
@@ -150,7 +141,6 @@ const styles = StyleSheet.create({
   },
 
   descricaoVazia: {
-    color: '#AAAAAA',
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 24,
@@ -158,14 +148,12 @@ const styles = StyleSheet.create({
   },
 
   botaoVoltar: {
-    backgroundColor: '#FF6B35',
     paddingHorizontal: 32,
     paddingVertical: 12,
-    borderRadius: 6,
+    borderRadius: 12,
   },
 
   textoBotao: {
-    color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 14,
   },

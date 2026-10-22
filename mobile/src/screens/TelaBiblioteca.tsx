@@ -1,7 +1,8 @@
 // Tela de Biblioteca — estatísticas, favoritos e histórico de buscas.
 // Usa contextos de Favoritos e Histórico para exibir dados persistidos localmente.
+// Segue a identidade visual de vidro fosco: fundo com luzes suaves e cartões translúcidos.
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -9,14 +10,16 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RootStackParamList, Release } from '../types';
 import { useFavoritos } from '../contexts/FavoritosContext';
 import { useHistorico } from '../contexts/HistoricoContext';
+import { useTheme } from '../contexts/ThemeContext';
+import { useModal } from '../contexts/ModalContext';
+import AuroraBackground from '../components/AuroraBackground';
+import GlassCard from '../components/GlassCard';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Biblioteca'>;
 
@@ -25,6 +28,8 @@ type AbaAtiva = 'estatisticas' | 'favoritos' | 'historico';
 export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element {
   const { favoritos, removerFavorito } = useFavoritos();
   const { historico, limparHistorico } = useHistorico();
+  const { colors } = useTheme();
+  const { abrirConfirmacao } = useModal();
   const [abaAtiva, setAbaAtiva] = useState<AbaAtiva>('estatisticas');
 
   // Calcula estatísticas dos favoritos
@@ -52,55 +57,41 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
 
   const stats = calcularEstatisticas();
 
-  // Navega para detalhes do release
+  // Navega para detalhes da versão
   const handleSelecionarRelease = (release: Release): void => {
     navigation.push('DetalheRelease', { release });
   };
 
-  // Remove favorito com confirmação
+  // Remove favorito com confirmação no modal global
   const handleRemoverFavorito = (releaseId: number): void => {
-    Alert.alert(
-      'Remover Favorito',
-      'Tem certeza que deseja remover este release dos favoritos?',
-      [
-        { text: 'Cancelar', onPress: () => {}, style: 'cancel' },
-        {
-          text: 'Remover',
-          onPress: () => removerFavorito(releaseId),
-          style: 'destructive',
-        },
-      ]
+    abrirConfirmacao(
+      'Remover dos favoritos?',
+      'Deseja remover esta versão dos favoritos?',
+      () => removerFavorito(releaseId)
     );
   };
 
-  // Limpa histórico com confirmação
+  // Limpa histórico com confirmação no modal global
   const handleLimparHistorico = (): void => {
-    Alert.alert(
-      'Limpar Histórico',
-      'Tem certeza que deseja limpar todo o histórico de buscas?',
-      [
-        { text: 'Cancelar', onPress: () => {}, style: 'cancel' },
-        {
-          text: 'Limpar',
-          onPress: () => limparHistorico(),
-          style: 'destructive',
-        },
-      ]
+    abrirConfirmacao(
+      'Limpar histórico?',
+      'Deseja limpar todo o histórico de buscas?',
+      () => limparHistorico()
     );
   };
 
   // Renderiza card de estatística
   const renderStatCard = (label: string, valor: number | string): React.JSX.Element => (
-    <View style={styles.cardStat}>
-      <Text style={styles.valorStat}>{valor}</Text>
-      <Text style={styles.labelStat}>{label}</Text>
-    </View>
+    <GlassCard style={[styles.cardStat, { borderLeftColor: colors.primary }]}>
+      <Text style={[styles.valorStat, { color: colors.primary }]}>{valor}</Text>
+      <Text style={[styles.labelStat, { color: colors.textSecondary }]}>{label}</Text>
+    </GlassCard>
   );
 
   // Renderiza aba de estatísticas
   const renderEstatisticas = (): React.JSX.Element => (
     <View style={styles.conteudoAba}>
-      <Text style={styles.tituloSecao}>Resumo da Biblioteca</Text>
+      <Text style={[styles.tituloSecao, { color: colors.text }]}>Resumo da Biblioteca</Text>
 
       <View style={styles.gridStats}>
         {renderStatCard('Favoritos', stats.totalFavoritos)}
@@ -111,11 +102,11 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
 
       {stats.totalFavoritos > 0 && (
         <>
-          <Text style={styles.tituloSecao}>Tipos de Release Favoritos</Text>
+          <Text style={[styles.tituloSecao, { color: colors.text }]}>Tipos de versão favoritos</Text>
           <View style={styles.containerTipos}>
             {Array.from(stats.tiposRelease).map((tipo, idx) => (
-              <View key={idx} style={styles.badgeTipo}>
-                <Text style={styles.textoTipo}>{tipo}</Text>
+              <View key={idx} style={[styles.badgeTipo, { backgroundColor: colors.primary }]}>
+                <Text style={[styles.textoTipo, { color: colors.buttonText }]}>{tipo}</Text>
               </View>
             ))}
           </View>
@@ -124,45 +115,45 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
 
       {stats.totalFavoritos === 0 && (
         <View style={styles.containerVazio}>
-          <Text style={styles.textoVazio}>
-            Você não tem favoritos ainda.{'\n'}Comece adicionando releases!
+          <Text style={[styles.textoVazio, { color: colors.textSecondary }]}>
+            Você não tem favoritos ainda.{'\n'}Comece adicionando versões!
           </Text>
         </View>
       )}
     </View>
   );
 
-  // Renderiza card de release
+  // Renderiza card de versão favorita
   const renderCardRelease = (release: Release): React.JSX.Element => (
-    <View style={styles.cardRelease}>
+    <GlassCard style={[styles.cardRelease, { borderLeftColor: colors.primary }]}>
       <TouchableOpacity
         style={styles.conteudoCardRelease}
         onPress={() => handleSelecionarRelease(release)}
         activeOpacity={0.7}
       >
         <View style={styles.infoRelease}>
-          <Text style={styles.tituloRelease} numberOfLines={2}>
+          <Text style={[styles.tituloRelease, { color: colors.text }]} numberOfLines={2}>
             {release.version_name}
           </Text>
-          <Text style={styles.obreaArtista} numberOfLines={1}>
+          <Text style={[styles.obreaArtista, { color: colors.textSecondary }]} numberOfLines={1}>
             {release.work_title} • {release.artist_name}
           </Text>
-          <Text style={styles.tipoRelease}>{release.release_type}</Text>
+          <Text style={[styles.tipoRelease, { color: colors.primary }]}>{release.release_type}</Text>
         </View>
       </TouchableOpacity>
       <TouchableOpacity
-        style={styles.botaoRemover}
+        style={[styles.botaoRemover, { backgroundColor: colors.accent }]}
         onPress={() => handleRemoverFavorito(release.id)}
       >
-        <Text style={styles.textoRemover}>✕</Text>
+        <Text style={[styles.textoRemover, { color: colors.error }]}>✕</Text>
       </TouchableOpacity>
-    </View>
+    </GlassCard>
   );
 
   // Renderiza aba de favoritos
   const renderFavoritos = (): React.JSX.Element => (
     <View style={styles.conteudoAba}>
-      <Text style={styles.tituloSecao}>
+      <Text style={[styles.tituloSecao, { color: colors.text }]}>
         Favoritos ({favoritos.length})
       </Text>
 
@@ -175,8 +166,8 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
         />
       ) : (
         <View style={styles.containerVazio}>
-          <Text style={styles.textoVazio}>
-            Nenhum favorito ainda.{'\n'}Toque no ♡ em um release para adicionar!
+          <Text style={[styles.textoVazio, { color: colors.textSecondary }]}>
+            Nenhum favorito ainda.{'\n'}Toque no ♡ em uma versão para adicionar!
           </Text>
         </View>
       )}
@@ -187,33 +178,36 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
   const renderHistorico = (): React.JSX.Element => (
     <View style={styles.conteudoAba}>
       <View style={styles.headerHistorico}>
-        <Text style={styles.tituloSecao}>
+        <Text style={[styles.tituloSecao, { color: colors.text }]}>
           Histórico de Buscas ({historico.length})
         </Text>
         {historico.length > 0 && (
           <TouchableOpacity
-            style={styles.botaoLimpar}
+            style={[styles.botaoLimpar, { backgroundColor: colors.button }]}
             onPress={handleLimparHistorico}
           >
-            <Text style={styles.textoLimpar}>Limpar</Text>
+            <Text style={[styles.textoLimpar, { color: colors.buttonText }]}>Limpar</Text>
           </TouchableOpacity>
         )}
       </View>
 
       {historico.length > 0 ? (
-        <View style={styles.listaHistorico}>
+        <GlassCard style={styles.listaHistorico}>
           {historico.map((item, idx) => (
-            <View key={idx} style={styles.itemHistorico}>
-              <Text style={styles.textoHistorico}>{item.termo}</Text>
-              <Text style={styles.dataHistorico}>
+            <View
+              key={idx}
+              style={[styles.itemHistorico, { borderBottomColor: colors.glassBorder }]}
+            >
+              <Text style={[styles.textoHistorico, { color: colors.text }]}>{item.termo}</Text>
+              <Text style={[styles.dataHistorico, { color: colors.textSecondary }]}>
                 {formatarData(new Date(item.timestamp))}
               </Text>
             </View>
           ))}
-        </View>
+        </GlassCard>
       ) : (
         <View style={styles.containerVazio}>
-          <Text style={styles.textoVazio}>
+          <Text style={[styles.textoVazio, { color: colors.textSecondary }]}>
             Histórico vazio.{'\n'}Suas buscas aparecerão aqui.
           </Text>
         </View>
@@ -222,22 +216,35 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
   );
 
   return (
-    <View style={styles.container}>
-      {/* Cabeçalho */}
-      <View style={styles.headerBox}>
-        <Text style={styles.tituloHeader}>Biblioteca</Text>
+    <AuroraBackground style={styles.container}>
+      {/* Cabeçalho em vidro forte */}
+      <View
+        style={[
+          styles.headerBox,
+          { backgroundColor: colors.glassCardForte, borderBottomColor: colors.glassBorder },
+        ]}
+      >
+        <Text style={[styles.tituloHeader, { color: colors.text }]}>Biblioteca</Text>
       </View>
 
       {/* Abas */}
-      <View style={styles.containerAbas}>
+      <View
+        style={[
+          styles.containerAbas,
+          { backgroundColor: colors.glassCardForte, borderBottomColor: colors.glassBorder },
+        ]}
+      >
         <TouchableOpacity
-          style={[styles.aba, abaAtiva === 'estatisticas' && styles.abaAtiva]}
+          style={[
+            styles.aba,
+            abaAtiva === 'estatisticas' && { borderBottomColor: colors.primary },
+          ]}
           onPress={() => setAbaAtiva('estatisticas')}
         >
           <Text
             style={[
               styles.textoAba,
-              abaAtiva === 'estatisticas' && styles.textoAbaAtiva,
+              { color: abaAtiva === 'estatisticas' ? colors.primary : colors.textSecondary },
             ]}
           >
             📊 Estatísticas
@@ -245,13 +252,16 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.aba, abaAtiva === 'favoritos' && styles.abaAtiva]}
+          style={[
+            styles.aba,
+            abaAtiva === 'favoritos' && { borderBottomColor: colors.primary },
+          ]}
           onPress={() => setAbaAtiva('favoritos')}
         >
           <Text
             style={[
               styles.textoAba,
-              abaAtiva === 'favoritos' && styles.textoAbaAtiva,
+              { color: abaAtiva === 'favoritos' ? colors.primary : colors.textSecondary },
             ]}
           >
             ♡ Favoritos ({favoritos.length})
@@ -259,13 +269,16 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.aba, abaAtiva === 'historico' && styles.abaAtiva]}
+          style={[
+            styles.aba,
+            abaAtiva === 'historico' && { borderBottomColor: colors.primary },
+          ]}
           onPress={() => setAbaAtiva('historico')}
         >
           <Text
             style={[
               styles.textoAba,
-              abaAtiva === 'historico' && styles.textoAbaAtiva,
+              { color: abaAtiva === 'historico' ? colors.primary : colors.textSecondary },
             ]}
           >
             🕐 Histórico
@@ -279,7 +292,7 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
         {abaAtiva === 'favoritos' && renderFavoritos()}
         {abaAtiva === 'historico' && renderHistorico()}
       </ScrollView>
-    </View>
+    </AuroraBackground>
   );
 }
 
@@ -304,33 +317,29 @@ function formatarData(data: Date): string {
 
 // ============================================================
 // Estilos
+// As cores vêm do tema (useTheme) e são aplicadas nos componentes;
+// aqui ficam apenas os valores de layout.
 // ============================================================
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F1A',
   },
 
   headerBox: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1A1A2E',
     borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
   },
 
   tituloHeader: {
-    color: '#FFFFFF',
     fontSize: 20,
     fontWeight: 'bold',
   },
 
   containerAbas: {
     flexDirection: 'row',
-    backgroundColor: '#1A1A2E',
     borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
   },
 
   aba: {
@@ -343,19 +352,10 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
 
-  abaAtiva: {
-    borderBottomColor: '#FF6B35',
-  },
-
   textoAba: {
-    color: '#AAAAAA',
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
-  },
-
-  textoAbaAtiva: {
-    color: '#FF6B35',
   },
 
   conteudo: {
@@ -369,7 +369,6 @@ const styles = StyleSheet.create({
   },
 
   tituloSecao: {
-    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 16,
@@ -384,25 +383,19 @@ const styles = StyleSheet.create({
 
   cardStat: {
     width: '48%',
-    backgroundColor: '#1A1A2E',
-    borderRadius: 8,
-    padding: 16,
     marginBottom: 12,
     borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35',
     justifyContent: 'center',
     alignItems: 'center',
   },
 
   valorStat: {
-    color: '#FF6B35',
     fontSize: 28,
     fontWeight: 'bold',
     marginBottom: 4,
   },
 
   labelStat: {
-    color: '#AAAAAA',
     fontSize: 13,
     textAlign: 'center',
   },
@@ -414,7 +407,6 @@ const styles = StyleSheet.create({
   },
 
   badgeTipo: {
-    backgroundColor: '#FF6B35',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
@@ -423,20 +415,17 @@ const styles = StyleSheet.create({
   },
 
   textoTipo: {
-    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: 'bold',
   },
 
   cardRelease: {
-    backgroundColor: '#1A1A2E',
-    borderRadius: 8,
     marginBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    padding: 0,
     paddingRight: 8,
     borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35',
   },
 
   conteudoCardRelease: {
@@ -450,20 +439,17 @@ const styles = StyleSheet.create({
   },
 
   tituloRelease: {
-    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 4,
   },
 
   obreaArtista: {
-    color: '#AAAAAA',
     fontSize: 12,
     marginBottom: 4,
   },
 
   tipoRelease: {
-    color: '#FF6B35',
     fontSize: 11,
     fontWeight: 'bold',
   },
@@ -473,12 +459,10 @@ const styles = StyleSheet.create({
     height: 32,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FF6B3520',
     borderRadius: 16,
   },
 
   textoRemover: {
-    color: '#FF6B35',
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -493,20 +477,16 @@ const styles = StyleSheet.create({
   botaoLimpar: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#FF6B35',
-    borderRadius: 4,
+    borderRadius: 8,
   },
 
   textoLimpar: {
-    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: 'bold',
   },
 
   listaHistorico: {
-    backgroundColor: '#1A1A2E',
-    borderRadius: 8,
-    overflow: 'hidden',
+    padding: 0,
   },
 
   itemHistorico: {
@@ -516,17 +496,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#2E2E4E',
   },
 
   textoHistorico: {
-    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '500',
   },
 
   dataHistorico: {
-    color: '#AAAAAA',
     fontSize: 12,
   },
 
@@ -537,7 +514,6 @@ const styles = StyleSheet.create({
   },
 
   textoVazio: {
-    color: '#AAAAAA',
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,

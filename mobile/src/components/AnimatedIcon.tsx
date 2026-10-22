@@ -104,7 +104,21 @@ export default function AnimatedIcon({
     : { transform: [{ scale: animValue }] };
 
   return (
-    <Animated.View style={[styles.container, transformStyle, style]}>
+    <Animated.View
+      style={[
+        styles.container,
+        transformStyle,
+        {
+          // Sombra suave para destacar o ícone sobre superfícies de vidro
+          shadowColor: colors.glassShadow,
+          shadowOpacity: 0.25,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 3 },
+          elevation: 4,
+        },
+        style,
+      ]}
+    >
       <Text style={[styles.emoji, { fontSize: size, color: color || colors.icon }]}>
         {emoji}
       </Text>
@@ -188,7 +202,6 @@ export const MusicEmojis = {
 
   // Extra / Mídia
   cd: '💿',
-  spotify: '🎧',
 };
 
 const styles = StyleSheet.create({

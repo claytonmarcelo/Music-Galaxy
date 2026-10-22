@@ -18,23 +18,38 @@ import MusicPlayer from './MusicPlayer';
 import { useTheme } from '../contexts/ThemeContext';
 import { MusicEmojis } from './AnimatedIcon';
 import AnimatedCard from './AnimatedCard';
+import { traduzirTipoRelease } from '../utils/tiposRelease';
 
 interface Props {
   release: Release;
   onPress: (release: Release) => void;
 }
 
-// Mapeamento de cores por categoria de tipo de release
-const CORES_CATEGORIA: Record<string, string> = {
-  release_format: '#1DB954',
-  mix_edit:       '#1E90FF',
-  instrumental:   '#9B59B6',
-  playback:       '#E67E22',
-};
+// Cores de destaque por categoria de tipo de versão, resolvidas a partir
+// dos tokens do tema ativo (nada de cores fixas em hexadecimal).
+function corDaCategoria(
+  cores: ReturnType<typeof useTheme>['colors'],
+  categoria?: string
+): string {
+  switch (categoria) {
+    case 'release_format':
+      return cores.success;          // formato de lançamento — verde
+    case 'mix_edit':
+      return cores.auroraSecundaria; // edições e mixes — ciano
+    case 'instrumental':
+      return cores.auroraPrimaria;   // instrumentais — violeta
+    case 'playback':
+      return cores.warning;          // playback — âmbar
+    default:
+      return cores.textSecondary;    // categoria desconhecida
+  }
+}
 
+// Traduz o tipo de versão para exibição em português.
+// Tipos desconhecidos são exibidos exatamente como vieram da fonte.
 function ReleaseCardComponent({ release, onPress }: Props): React.JSX.Element {
   const { colors } = useTheme();
-  const corCategoria = CORES_CATEGORIA[release.release_type_category] ?? '#888';
+  const corCategoria = corDaCategoria(colors, release.release_type_category);
   const [showPlayer, setShowPlayer] = useState(false);
 
   const handlePress = useCallback(() => {
@@ -99,10 +114,10 @@ function ReleaseCardComponent({ release, onPress }: Props): React.JSX.Element {
 
           {/* Linha de metadados: tipo, ano, país */}
           <View style={styles.metadados}>
-            {/* Badge de tipo de release */}
+            {/* Badge de tipo de versão (release), traduzido para exibição */}
             <View style={[styles.badge, { backgroundColor: corCategoria }]}>
-              <Text style={styles.badgeTexto} numberOfLines={1}>
-                {release.release_type}
+              <Text style={[styles.badgeTexto, { color: colors.buttonText }]} numberOfLines={1}>
+                {traduzirTipoRelease(release.release_type)}
               </Text>
             </View>
 
@@ -162,19 +177,21 @@ export default memo(ReleaseCardComponent, (prevProps, nextProps) => {
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: 12,
+    borderRadius: 16,
     marginHorizontal: 16,
     marginVertical: 6,
     overflow: 'hidden',
+    // Contorno e sombra de vidro: a borda e a cor da sombra vêm do
+    // AnimatedCard, que resolve os tokens do tema ativo.
+    borderWidth: 1,
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.25,
+        shadowRadius: 12,
       },
       android: {
-        elevation: 4,
+        elevation: 5,
       },
     }),
   },
@@ -233,8 +250,8 @@ const styles = StyleSheet.create({
   },
   badgeTexto: {
     fontSize: 10,
-    color: '#FFFFFF',
     fontWeight: '600',
+    // A cor do texto do badge vem do tema (colors.buttonText) em linha
   },
   metaTexto: {
     fontSize: 11,
