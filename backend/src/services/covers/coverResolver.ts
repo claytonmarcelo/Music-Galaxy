@@ -201,6 +201,11 @@ export async function preencherCapasPendentes(
   let consultadas = 0;
 
   try {
+    // Sem o token do Discogs nenhuma capa dessa fonte pode ser resolvida: as
+    // linhas ficam fora do lote para não ocupar as vagas nem entrar na lista
+    // de tentativas (com o token configurado, a rodada seguinte as pega).
+    const incluirDiscogs = Boolean(process.env['DISCOGS_TOKEN']);
+
     // Busca mais linhas do que o lote: as referências já tentadas continuam
     // sem capa no banco, e sem essa folga elas ocupariam as primeiras
     // posições em toda rodada e as versões seguintes nunca seriam visitadas.
@@ -210,6 +215,7 @@ export async function preencherCapasPendentes(
          JOIN metadata_sources ms ON ms.id = r.metadata_source_id
         WHERE r.cover_url IS NULL
           AND r.audio_source_url IS NOT NULL
+          ${incluirDiscogs ? '' : "AND ms.name <> 'Discogs'"}
         ORDER BY r.updated_at ASC
         LIMIT ?`,
       [limite * 5]
