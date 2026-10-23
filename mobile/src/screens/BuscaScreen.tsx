@@ -190,7 +190,7 @@ export default function BuscaScreen(): React.JSX.Element {
           } else if (pendentes > 0) {
             // O backend achou versões do termo, mas ainda está resolvendo o
             // áudio delas em sites abertos — avisa em vez de dizer "0 versões"
-            toastInfo(`Localizando fontes de áudio para ${pendentes} versão${pendentes !== 1 ? 'ões' : ''}...`);
+            toastInfo(`Localizando fontes de áudio para ${pendentes} ${pendentes === 1 ? 'versão' : 'versões'}...`);
           }
         }
       }
@@ -330,7 +330,7 @@ export default function BuscaScreen(): React.JSX.Element {
     if (!carregando && releasesFiltrados().length >= total && total > 0) {
       return (
         <Text style={[styles.fimLista, { color: colors.textSecondary }]}>
-          {releasesFiltrados().length} de {total} versão{total !== 1 ? 'ões' : ''}
+          {releasesFiltrados().length} de {total} {total === 1 ? 'versão' : 'versões'}
         </Text>
       );
     }
@@ -572,8 +572,7 @@ export default function BuscaScreen(): React.JSX.Element {
                   Localizando fontes de áudio...
                 </Text>
                 <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
-                  {pendentesAudio} versão{pendentesAudio !== 1 ? 'ões' : ''} encontrada
-                  {pendentesAudio !== 1 ? 's' : ''}, aguardando a descoberta do áudio em sites abertos
+                  {pendentesAudio} {pendentesAudio === 1 ? 'versão encontrada' : 'versões encontradas'}, aguardando a descoberta do áudio em sites abertos
                 </Text>
                 <TouchableOpacity
                   style={[styles.botaoTentar, { backgroundColor: colors.button, marginTop: 16 }]}

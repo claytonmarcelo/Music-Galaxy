@@ -50,7 +50,7 @@ export default function FavoritosScreen({ navigation }: Props): React.JSX.Elemen
       <GlassCard forte style={styles.headerBox}>
         <Text style={[styles.tituloHeader, { color: colors.text }]}>Favoritos</Text>
         <Text style={[styles.subtituloHeader, { color: colors.textSecondary }]}>
-          {favoritos.length} versão{favoritos.length !== 1 ? 'ões' : ''}
+          {favoritos.length} {favoritos.length === 1 ? 'versão' : 'versões'}
         </Text>
       </GlassCard>
 

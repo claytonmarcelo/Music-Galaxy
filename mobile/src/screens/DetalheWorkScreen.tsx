@@ -232,7 +232,7 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
       <GlassCard style={styles.secaoCabecalho}>
         <Text style={[styles.tituloObra, { color: colors.text }]}>{workInfo?.title || 'Obra'}</Text>
         <Text style={[styles.totalReleases, { color: colors.textSecondary }]}>
-          {releases.length} versão{releases.length !== 1 ? 'ões' : ''} encontrada{releases.length !== 1 ? 's' : ''}
+          {releases.length} {releases.length === 1 ? 'versão encontrada' : 'versões encontradas'}
         </Text>
       </GlassCard>
     </Animated.View>

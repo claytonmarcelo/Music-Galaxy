@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (Interface)
+- **Plural de "versão" corrigido** — o app montava o plural como `"versão" + "ões"`, exibindo "versãoões" na tela de busca ("30 versãoões encontradas"), no rodapé da lista, nos detalhes da obra e em Favoritos; agora o texto usa `versão`/`versões` (e `encontrada`/`encontradas`) corretamente. Verificado no app: "30 versões encontradas, aguardando a descoberta do áudio em sites abertos".
+
 ### Changed (Interface)
 - **Espaçamento do card de versão** — `ReleaseCard` com capa de 104px, respiro interno de 14px/12px, gap consistente entre as linhas de informação (artista, versão, álbum, metadados e rodapé), badges maiores (8px/3px) e margens do card alinhadas ao cabeçalho da lista (20px horizontais, 8px verticais). Nenhuma cor fixa: tudo continua vindo dos tokens do tema.
 
