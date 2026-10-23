@@ -186,6 +186,65 @@ supports-screens: 'small' 'normal' 'large' 'xlarge'
 
 **NÃO VERIFICADO:** o APK **não** foi instalado nem executado em aparelho Android físico nesta sessão (não há aparelho disponível), e o download da imagem por baixa de latência do archive.org não foi exercitado no aparelho. A assinatura é a de depuração — a de produção depende do login do usuário no EAS.
 
+### 4-ter. APK recompilado com o código atual (23/10/2026, depois das correções)
+
+O APK anterior era de antes das correções desta rodada. O código do commit `31286e2` foi sincronizado para a árvore de build (`C:/Users/Public/mgbuild/mobile`, fora do repositório porque o Java não grava dentro da árvore do projeto) e o Gradle recompilou o release:
+
+```
+BUILD SUCCESSFUL in 8m 47s
+446 actionable tasks: 75 executed, 371 up-to-date
+```
+
+**Arquivo gerado:**
+
+```
+C:/Users/Public/mgbuild/mobile/android/app/build/outputs/apk/release/app-release.apk
+84.709.935 bytes
+```
+
+São **904.542 bytes a menos** que o APK anterior (85.614.477), porque as cinco dependências que nunca eram importadas deixaram de entrar no pacote.
+
+**Metadados lidos do próprio APK** (`aapt dump badging`):
+
+```
+package: name='com.musicgalaxy.app' versionCode='1' versionName='1.0.0'
+         platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36'
+sdkVersion:'24'
+targetSdkVersion:'36'
+```
+
+**Assinatura conferida** (`apksigner verify --print-certs`):
+
+```
+Signer #1 certificate DN: CN=Android Debug, OU=Android, O=Unknown, L=Unknown, ST=Unknown, C=US
+Signer #1 certificate SHA-256 digest: fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+```
+
+**O código novo está dentro do pacote.** O bundle Hermes embutido (`assets/index.android.bundle`, 1.994.716 bytes) contém as marcas desta rodada:
+
+| Marca no bundle | Origem |
+|---|---|
+| `absoluteFill` | a camada global que coloca o aviso no topo da tela |
+| "Remover do histórico de reproduções?" | o botão novo da aba Histórico da Biblioteca |
+| "Limpar a lista de Explorar?" | o modal de confirmação do botão "Limpar" do Explorar |
+| "Procurar atualizações" / "Você já está usando a versão mais recente." | a busca de atualização pela internet |
+
+**A build na nuvem do EAS foi tentada, e o bloqueio é real (não suposição):**
+
+```
+$ npx eas-cli@latest whoami
+Not logged in
+
+$ npx eas-cli@latest build --platform android --profile preview --non-interactive --no-wait
+An Expo user account is required to proceed.
+Either log in with eas login or set the EXPO_TOKEN environment variable if you're using EAS CLI on CI
+    Error: build command failed.
+```
+
+O `eas.json` está pronto (APK nos três perfis: development, preview, production) e `mobile/app.json` só precisa do `extra.eas.projectId`, que o EAS cria no primeiro `eas build` depois do login. **O que falta é exclusivamente a conta do dono** — não há credencial no ambiente (`EXPO_TOKEN` não definido, `~/.expo/state.json` sem sessão) e não é possível criar conta verificada por e-mail de third party em nome do usuário.
+
+**NÃO VERIFICADO:** o APK não foi instalado nem executado em aparelho Android físico — `adb devices` devolve lista vazia (nenhum aparelho conectado nesta máquina).
+
 ---
 
 ## 5. Ausência de regressões
@@ -264,11 +323,11 @@ A auditoria tinha listado como defeito duas coisas que **já estavam resolvidas 
 
 | Pendência | Quem resolve | Estado |
 |---|---|---|
-| Login na conta EAS e `eas build` (APK assinado de produção) | o usuário | `npx eas-cli login` — o `eas.json` já gera APK nos três perfis |
+| Login na conta EAS e `eas build` (APK assinado de produção) | o usuário | **Bloqueado pela credencial, com evidência real:** `npx eas-cli@latest whoami` → "Not logged in"; `npx eas-cli@latest build --platform android --profile preview --non-interactive --no-wait` → "An Expo user account is required to proceed." O `eas.json` já gera APK nos três perfis; depois do login, `npx eas build --platform android --profile preview` resolve o `extra.eas.projectId` sozinho |
+| APK de release para instalar e testar em aparelho | o usuário | **Pronto:** `C:/Users/Public/mgbuild/mobile/android/app/build/outputs/apk/release/app-release.apk` (84.709.935 bytes, `targetSdk 36`, assinado com o keystore de depuração — instala sem recusa) |
 | Credencial do AudD para o caminho de acerto | o usuário | `AUDD_TOKEN` no `backend/.env` |
-| Teste com microfone em aparelho Android físico | o usuário | aparelho Android 2025+ |
+| Teste com microfone em aparelho Android físico | o usuário | aparelho Android 2025+ (`adb devices` não encontrou aparelho nesta máquina) |
 | Publicar a primeira versão no servidor | o usuário | `APP_VERSAO_PUBLICADA` e `APP_URL_DOWNLOAD` no `backend/.env` — sem isso o aplicativo continua funcionando e apenas não avisa de versão nova |
-| Instalar o APK gerado em aparelho | o usuário | `C:/Users/Public/mgbuild/mobile/android/app/build/outputs/apk/release/app-release.apk` (assinado com keystore de depuração) |
 | Push para o repositório público | o usuário | **nenhum push foi feito nesta sessão** |
 
 ---
@@ -281,4 +340,6 @@ O que está **comprovado**: o backend e o aplicativo compilam sem erro de TypeSc
 
 Nesta rodada os **achados de código** da auditoria foram corrigidos na íntegra (restos de Laravel, `as any[]`, `eslint-disable`, função sem consumidor, dependências não importadas, duplicações, pasta vazia e a duração do toast). Dois **achados novos** apareceram no caminho e também foram resolvidos: o aviso (toast) era desenhado fora da tela — a camada global tinha altura zero, então o aviso renderizava 483 px abaixo do topo de uma janela de 473 px — e o padrão `cache/` do `.gitignore` do backend alcançava `backend/src/services/cache/`, que é código-fonte, e esconderia de qualquer arquivo novo criado ali. Os dois estão documentados em `AGENTS.md`. Dois achados anteriores ("décadas vazias" e "tela do artista sem entrada") foram refutados com execução real e medição no banco: estavam **antigos**, não são defeitos do código atual.
 
-As **ressalvas** (impedem aprovação integral, conforme exigido): o caminho de acerto do reconhecimento não foi exercitado contra o serviço real por falta de credencial; a captura por microfone, a instalação do APK e a instalação do APK indicado pelo botão "Baixar" não foram executadas em aparelho Android físico; e o APK de produção assinado depende do login do usuário no EAS. Nenhuma dessas ressalvas foi escondida por suposição — cada uma está marcada como **NÃO VERIFICADO** acima, com o motivo exato.
+As **ressalvas** (impedem aprovação integral, conforme exigido): o caminho de acerto do reconhecimento não foi exercitado contra o serviço real por falta de credencial; a captura por microfone, a instalação do APK e a instalação do APK indicado pelo botão "Baixar" não foram executadas em aparelho Android físico (`adb devices` não encontrou aparelho); e o APK de produção assinado depende do login do usuário no EAS — bloqueio comprovado pela própria CLI ("An Expo user account is required to proceed."). Nenhuma dessas ressalvas foi escondida por suposição — cada uma está marcada como **NÃO VERIFICADO** acima, com o motivo exato.
+
+**O artefato entregável está em dia com o código:** o APK de release foi recompilado a partir do commit `31286e2` (`BUILD SUCCESSFUL in 8m 47s`, 84.709.935 bytes, `targetSdk 36`, assinatura conferida com `apksigner`) e o bundle Hermes dentro do pacote contém as marcas desta rodada (`absoluteFill`, "Remover do histórico de reproduções?", "Limpar a lista de Explorar?", "Procurar atualizações"). O que falta para fechar a entrega é a ação do dono: entrar na conta Expo, rodar o `eas build` para assinar com a chave de produção e instalar o APK em um aparelho.

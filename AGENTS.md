@@ -235,6 +235,7 @@ npx eas-cli build --platform android --profile preview
 - O `eas.json` gera **APK** (`buildType: "apk"`) nos três perfis (development, preview, production)
 - O backend não está embutido no APK: o usuário informa o endereço na tela de Ajustes (seção "Servidor da API"), salvo no aparelho
 - Ícone do app: `mobile/assets/icon.png` (fundo transparente, canal alfa real)
+- **Sem conta Expo, o APK de release pode ser gerado localmente com Gradle** — o Java não consegue gravar dentro da árvore do projeto (o caminho do perfil do Windows tem acento), então a compilação roda fora do repositório: código sincronizado em `C:/Users/Public/mgbuild/mobile`, `GRADLE_USER_HOME=C:/Users/Public/mg-gradle`, SDK espelhado em `C:/Users/Public/mg-sdk`, temporários em `C:/Users/Public/mg-tmp` e JDK 21. O release sai assinado com o keystore de depuração (instala sem recusa em aparelho de teste) em `C:/Users/Public/mgbuild/mobile/android/app/build/outputs/apk/release/app-release.apk`; a assinatura de produção continua sendo do dono, via EAS
 - **Níveis de API do Android** — o SDK 57 já usa `compileSdk`/`targetSdk` 36 (Android 16, lançado em 2025) e `minSdk` 24, com os padrões do `expo-modules-core`. Não é preciso `expo-build-properties` para atender ao Android 2025+; só se for necessário mudar algum nível, aí sim a dependência entra com avaliação de compatibilidade
 - O projeto nativo (`mobile/android/`) é **gerado** por `npx expo prebuild` e não é versionado; `local.properties` guarda o caminho do SDK da máquina e nunca deve ser commitado
 
