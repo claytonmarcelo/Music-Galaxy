@@ -423,9 +423,10 @@ export default function SettingsScreen(): React.JSX.Element {
                   Desenvolvido por Clayton Marcelo
                 </Text>
                 <Text style={[styles.desenvolvedorTexto, { color: colors.textSecondary }]}>
-                  Projeto idealizado e desenvolvido por Clayton Marcelo para reunir em um só
-                  lugar todas as versões de uma obra — do single ao álbum — com o áudio
-                  disponível em fontes abertas da web.
+                  Idealizado e programado de ponta a ponta — interface, servidor e
+                  catálogo — para reunir em um só lugar todas as versões de uma
+                  obra, do single ao álbum, com o áudio sempre vindo de fontes
+                  abertas da web.
                 </Text>
               </View>
             </View>
