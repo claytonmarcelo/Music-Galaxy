@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { RootStackParamList, Release, Work } from '../types';
 import { BASE_URL } from '../services/api';
@@ -53,6 +54,9 @@ interface RespostaObrasPorDecada {
 
 const DECADAS = [1960, 1970, 1980, 1990, 2000, 2010, 2020];
 
+// Chave que guarda a preferência de deixar a tela Explorar sem lista.
+const CHAVE_EXPLORAR_LIMPO = '@musicgalaxy:explorarLimpo';
+
 const SECOES: Array<{ valor: SecaoAtiva; rotulo: string }> = [
   { valor: 'recentes', rotulo: 'Recentes' },
   { valor: 'decadas', rotulo: 'Por década' },
@@ -60,7 +64,7 @@ const SECOES: Array<{ valor: SecaoAtiva; rotulo: string }> = [
 
 export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
   const { colors } = useTheme();
-  const { abrirErro } = useModal();
+  const { abrirErro, abrirPersonalizado, toastInfo } = useModal();
   const [secaoAtiva, setSecaoAtiva] = useState<SecaoAtiva>('recentes');
   const [carregandoRecentes, setCarregandoRecentes] = useState(true);
   const [releasesRecentes, setReleasesRecentes] = useState<Release[]>([]);
@@ -70,6 +74,12 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
   const [carregandoDecada, setCarregandoDecada] = useState(false);
   const [obrasDecada, setObrasDecada] = useState<Work[]>([]);
   const [erroDecada, setErroDecada] = useState<string | null>(null);
+
+  // Preferência persistida de manter a tela Explorar sem a lista de versões.
+  const [listaLimpa, setListaLimpa] = useState(false);
+  // Só busca as listas depois de ler a preferência, para não aparecer conteúdo
+  // por um instante antes da tela limpa.
+  const [preferenciaCarregada, setPreferenciaCarregada] = useState(false);
 
   const carregarReleasesRecentes = useCallback(async (): Promise<void> => {
     try {
@@ -128,16 +138,86 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
   }, [abrirErro]);
 
   useEffect(() => {
-    void carregarReleasesRecentes();
-  }, [carregarReleasesRecentes]);
+    let ativo = true;
+
+    const carregarPreferencia = async (): Promise<void> => {
+      try {
+        const valor = await AsyncStorage.getItem(CHAVE_EXPLORAR_LIMPO);
+        if (!ativo) return;
+        setListaLimpa(valor === '1');
+      } catch (erro) {
+        console.error('Erro ao ler a preferência da tela Explorar:', erro);
+      } finally {
+        if (ativo) setPreferenciaCarregada(true);
+      }
+    };
+
+    void carregarPreferencia();
+
+    return () => {
+      ativo = false;
+    };
+  }, []);
 
   useEffect(() => {
+    if (!preferenciaCarregada || listaLimpa) return;
+    void carregarReleasesRecentes();
+  }, [carregarReleasesRecentes, preferenciaCarregada, listaLimpa]);
+
+  useEffect(() => {
+    if (!preferenciaCarregada || listaLimpa) return;
     if (secaoAtiva === 'decadas') {
       void carregarObrasPorDecada(decadaSelecionada);
     }
-    // A seleção de década é lida dentro do efeito intencionalmente.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [secaoAtiva, decadaSelecionada]);
+  }, [
+    secaoAtiva,
+    decadaSelecionada,
+    carregarObrasPorDecada,
+    preferenciaCarregada,
+    listaLimpa,
+  ]);
+
+  // Limpa a lista visível de Explorar guardando a preferência no aparelho.
+  // Nada é removido do catálogo: a busca continua funcionando normalmente.
+  const aplicarLimpeza = async (): Promise<void> => {
+    try {
+      await AsyncStorage.setItem(CHAVE_EXPLORAR_LIMPO, '1');
+      setListaLimpa(true);
+      setReleasesRecentes([]);
+      setObrasDecada([]);
+      setErroRecentes(null);
+      setErroDecada(null);
+      toastInfo('Lista de Explorar limpa. Você pode mostrá-la novamente quando quiser.');
+    } catch (erro) {
+      console.error('Erro ao salvar a limpeza da tela Explorar:', erro);
+      abrirErro('Não foi possível limpar', 'Tente novamente em instantes.');
+    }
+  };
+
+  // Devolve a lista de Explorar e remove a preferência salva.
+  const restaurarLista = async (): Promise<void> => {
+    try {
+      await AsyncStorage.removeItem(CHAVE_EXPLORAR_LIMPO);
+      setListaLimpa(false);
+      toastInfo('Lista de Explorar restaurada.');
+    } catch (erro) {
+      console.error('Erro ao restaurar a lista da tela Explorar:', erro);
+      abrirErro('Não foi possível restaurar', 'Tente novamente em instantes.');
+    }
+  };
+
+  // A limpeza é sempre uma decisão do usuário: o modal explica as consequências.
+  const handleSolicitarLimpeza = (): void => {
+    abrirPersonalizado(
+      'confirmacao',
+      'Limpar a lista de Explorar?',
+      'As versões recentes e as obras por década saem desta tela para você navegar com calma. Nada é apagado do catálogo: as versões continuam disponíveis na busca e você pode mostrar a lista novamente quando quiser.',
+      [
+        { texto: 'Manter a lista', onPress: () => {}, estilo: 'secundario' },
+        { texto: 'Limpar a lista', onPress: () => void aplicarLimpeza(), estilo: 'destrutivo' },
+      ]
+    );
+  };
 
   const handleSelecionarRelease = (release: Release): void => {
     navigation.push('DetalheRelease', { release });
@@ -163,6 +243,33 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
       <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>{mensagem}</Text>
       <View style={styles.estadoAcao}>
         <CustomButton title="Tentar novamente" icone="recarregar" size="small" onPress={tentarNovamente} />
+      </View>
+    </GlassCard>
+  );
+
+  // Estado da tela depois que o usuário opta por limpar a lista de Explorar.
+  const renderListaLimpa = (): React.JSX.Element => (
+    <GlassCard style={styles.estadoCard}>
+      <View
+        style={[
+          styles.estadoIcone,
+          { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+        ]}
+      >
+        <Icone nome="lixeira" tamanho={24} cor={colors.textSecondary} />
+      </View>
+      <Text style={[styles.estadoTitulo, { color: colors.text }]}>Lista limpa</Text>
+      <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
+        As versões recentes e as obras por década não estão na tela agora. Nada foi apagado do
+        catálogo: a busca continua funcionando normalmente.
+      </Text>
+      <View style={styles.estadoAcao}>
+        <CustomButton
+          title="Mostrar a lista novamente"
+          icone="recarregar"
+          size="small"
+          onPress={() => void restaurarLista()}
+        />
       </View>
     </GlassCard>
   );
@@ -341,53 +448,83 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
     </View>
   );
 
+  // Só faz sentido limpar quando há algo na tela.
+  const temConteudo = releasesRecentes.length > 0 || obrasDecada.length > 0;
+
   return (
     <FundoAtmosfera>
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         <View style={styles.cabecalho}>
-          <Text style={[styles.etiqueta, { color: colors.textSecondary }]}>DESCOBERTA</Text>
-          <Text style={[styles.titulo, { color: colors.text }]}>Explorar</Text>
+          <View style={styles.cabecalhoLinha}>
+            <View style={styles.cabecalhoTextos}>
+              <Text style={[styles.etiqueta, { color: colors.textSecondary }]}>DESCOBERTA</Text>
+              <Text style={[styles.titulo, { color: colors.text }]}>Explorar</Text>
+            </View>
+
+            {!listaLimpa && temConteudo && (
+              <TouchableOpacity
+                style={[
+                  styles.botaoLimpar,
+                  { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                ]}
+                onPress={handleSolicitarLimpeza}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityLabel="Limpar a lista de Explorar"
+              >
+                <Icone nome="lixeira" tamanho={13} cor={colors.textSecondary} />
+                <Text style={[styles.botaoLimparTexto, { color: colors.textSecondary }]}>Limpar</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
           <Text style={[styles.subtituloHeader, { color: colors.textSecondary }]}>
             Versões recentes e obras por década
           </Text>
         </View>
 
-        {/* Abas em pílulas de vidro */}
-        <View style={styles.containerAbas}>
-          {SECOES.map((secao) => {
-            const ativa = secaoAtiva === secao.valor;
-            return (
-              <TouchableOpacity
-                key={secao.valor}
-                style={[
-                  styles.aba,
-                  {
-                    backgroundColor: ativa ? colors.button : colors.glassCard,
-                    borderColor: ativa ? colors.button : colors.glassBorder,
-                  },
-                ]}
-                onPress={() => setSecaoAtiva(secao.valor)}
-                activeOpacity={0.75}
-                accessibilityState={{ selected: ativa }}
-              >
-                <Icone
-                  nome={secao.valor === 'recentes' ? 'ondas' : 'calendario'}
-                  tamanho={14}
-                  cor={ativa ? colors.buttonText : colors.textSecondary}
-                />
-                <Text style={[styles.textoAba, { color: ativa ? colors.buttonText : colors.text }]}>
-                  {secao.rotulo}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        {/* Abas em pílulas de vidro — escondidas enquanto a lista está limpa */}
+        {!listaLimpa && (
+          <View style={styles.containerAbas}>
+            {SECOES.map((secao) => {
+              const ativa = secaoAtiva === secao.valor;
+              return (
+                <TouchableOpacity
+                  key={secao.valor}
+                  style={[
+                    styles.aba,
+                    {
+                      backgroundColor: ativa ? colors.button : colors.glassCard,
+                      borderColor: ativa ? colors.button : colors.glassBorder,
+                    },
+                  ]}
+                  onPress={() => setSecaoAtiva(secao.valor)}
+                  activeOpacity={0.75}
+                  accessibilityState={{ selected: ativa }}
+                >
+                  <Icone
+                    nome={secao.valor === 'recentes' ? 'ondas' : 'calendario'}
+                    tamanho={14}
+                    cor={ativa ? colors.buttonText : colors.textSecondary}
+                  />
+                  <Text style={[styles.textoAba, { color: ativa ? colors.buttonText : colors.text }]}>
+                    {secao.rotulo}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
 
         <ScrollView
           contentContainerStyle={styles.conteudo}
           showsVerticalScrollIndicator={false}
         >
-          {secaoAtiva === 'recentes' ? renderRecentes() : renderDecadas()}
+          {listaLimpa
+            ? renderListaLimpa()
+            : secaoAtiva === 'recentes'
+              ? renderRecentes()
+              : renderDecadas()}
         </ScrollView>
       </SafeAreaView>
     </FundoAtmosfera>
@@ -402,6 +539,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: Platform.OS === 'web' ? 22 : 8,
     paddingBottom: 10,
+  },
+  cabecalhoLinha: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  cabecalhoTextos: {
+    flex: 1,
+  },
+  botaoLimpar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  botaoLimparTexto: {
+    fontSize: 11.5,
+    fontWeight: '600',
   },
   etiqueta: {
     fontSize: 9,

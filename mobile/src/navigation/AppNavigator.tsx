@@ -21,6 +21,7 @@ import TelaExplorar from '../screens/TelaExplorar';
 import FavoritosScreen from '../screens/FavoritosScreen';
 import FilaDownloadsScreen from '../screens/FilaDownloadsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import TelaManual from '../screens/TelaManual';
 import TelaAdminIngestao from '../screens/TelaAdminIngestao';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -67,6 +68,7 @@ export default function AppNavigator(): React.JSX.Element {
         <Stack.Screen name="Favoritos" component={FavoritosScreen} />
         <Stack.Screen name="FilaDownloads" component={FilaDownloadsScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="Manual" component={TelaManual} />
         <Stack.Screen name="AdminIngestao" component={TelaAdminIngestao} />
       </Stack.Navigator>
       {/* Barra de navegação inferior — acesso direto às áreas principais do app */}

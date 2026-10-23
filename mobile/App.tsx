@@ -2,10 +2,14 @@
 // Renderiza o navegador principal que gerencia todas as telas.
 // Envolve os Providers de contextos globais (Favoritos, Playlists,
 // Históricos, Tema, Modais).
+//
+// A abertura começa pela tela de boas-vindas (3 segundos com o mascote
+// animado) e só depois entrega o lugar ao fluxo de navegação.
 
-import React from 'react';
+import React, { useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
+import TelaBoasVindas from './src/screens/TelaBoasVindas';
 import { FavoritosProvider } from './src/contexts/FavoritosContext';
 import { PlaylistsProvider } from './src/contexts/PlaylistsContext';
 import { HistoricoProvider } from './src/contexts/HistoricoContext';
@@ -20,6 +24,9 @@ import { inicializarApiConfig } from './src/services/api';
 inicializarApiConfig();
 
 export default function App(): React.JSX.Element {
+  // Enquanto verdadeiro, a apresentação de boas-vindas ocupa a tela.
+  const [boasVindasVisivel, setBoasVindasVisivel] = useState(true);
+
   return (
     <SafeAreaProvider>
       <ThemeProvider>
@@ -28,7 +35,11 @@ export default function App(): React.JSX.Element {
             <HistoricoProvider>
               <HistoricoReproducaoProvider>
                 <ModalProvider>
-                  <AppNavigator />
+                  {boasVindasVisivel ? (
+                    <TelaBoasVindas onConcluir={() => setBoasVindasVisivel(false)} />
+                  ) : (
+                    <AppNavigator />
+                  )}
                   <ModalGlobalContainer />
                 </ModalProvider>
               </HistoricoReproducaoProvider>

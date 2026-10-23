@@ -36,20 +36,14 @@ import CustomButton from '../components/CustomButton';
 import FundoAtmosfera from '../components/FundoAtmosfera';
 import GlassCard from '../components/GlassCard';
 import Icone, { NomeIcone } from '../components/Icone';
+import SeletorTema, { Tema } from '../components/SeletorTema';
 import { RootStackParamList } from '../types';
 import { comAlfa } from '../utils/cores';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
-type Tema = 'light' | 'dark' | 'auto';
 
 // Mascote do Music Galaxy, exibido na seção "Sobre".
 const MASCOTE = require('../../assets/mascote.png');
-
-const OPCOES_TEMA: Array<{ valor: Tema; rotulo: string; icone: NomeIcone }> = [
-  { valor: 'light', rotulo: 'Claro', icone: 'sol' },
-  { valor: 'dark', rotulo: 'Escuro', icone: 'lua' },
-  { valor: 'auto', rotulo: 'Sistema', icone: 'sistema' },
-];
 
 export default function SettingsScreen(): React.JSX.Element {
   const { theme, isDark, colors, setTheme } = useTheme();
@@ -182,39 +176,7 @@ export default function SettingsScreen(): React.JSX.Element {
             <SecaoTitulo icone="sol" titulo="Aparência" descricao={descricaoTema} />
 
             <View style={styles.temas}>
-              {OPCOES_TEMA.map((opcao) => {
-                const selecionado = theme === opcao.valor;
-                return (
-                  <TouchableOpacity
-                    key={opcao.valor}
-                    style={[
-                      styles.temaOpcao,
-                      {
-                        backgroundColor: selecionado ? colors.button : colors.glassCard,
-                        borderColor: selecionado ? colors.button : colors.glassBorder,
-                      },
-                    ]}
-                    onPress={() => setTheme(opcao.valor)}
-                    activeOpacity={0.75}
-                    accessibilityState={{ selected: selecionado }}
-                    accessibilityLabel={`Tema ${opcao.rotulo}`}
-                  >
-                    <Icone
-                      nome={opcao.icone}
-                      tamanho={16}
-                      cor={selecionado ? colors.buttonText : colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.temaTexto,
-                        { color: selecionado ? colors.buttonText : colors.text },
-                      ]}
-                    >
-                      {opcao.rotulo}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+              <SeletorTema valor={theme} onChange={setTheme} />
             </View>
           </GlassCard>
 
@@ -404,6 +366,61 @@ export default function SettingsScreen(): React.JSX.Element {
 
             <View style={[styles.sobreDivisor, { backgroundColor: colors.glassBorder }]} />
 
+            {/* Desenvolvedor do projeto */}
+            <View style={styles.desenvolvedorLinha}>
+              <View
+                style={[
+                  styles.desenvolvedorIcone,
+                  { backgroundColor: comAlfa(colors.primary, 0.13), borderColor: comAlfa(colors.primary, 0.24) },
+                ]}
+              >
+                <Icone nome="artista" tamanho={16} cor={colors.primary} />
+              </View>
+              <View style={styles.desenvolvedorTextos}>
+                <Text style={[styles.desenvolvedorTitulo, { color: colors.text }]}>
+                  Desenvolvido por Clayton Marcelo
+                </Text>
+                <Text style={[styles.desenvolvedorTexto, { color: colors.textSecondary }]}>
+                  Projeto idealizado e desenvolvido por Clayton Marcelo para reunir em um só
+                  lugar todas as versões de uma obra — do single ao álbum — com o áudio
+                  disponível em fontes abertas da web.
+                </Text>
+              </View>
+            </View>
+
+            <View style={[styles.sobreDivisor, { backgroundColor: colors.glassBorder }]} />
+
+            <TouchableOpacity
+              style={[
+                styles.atalhoManual,
+                { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+              ]}
+              onPress={() => navigation.navigate('Manual')}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel="Abrir o manual de uso do aplicativo"
+            >
+              <View
+                style={[
+                  styles.atalhoIcone,
+                  { backgroundColor: comAlfa(colors.primary, 0.14) },
+                ]}
+              >
+                <Icone nome="ajuda" tamanho={17} cor={colors.primary} />
+              </View>
+              <View style={styles.atalhoTextos}>
+                <Text style={[styles.atalhoTitulo, { color: colors.text }]}>
+                  Manual do aplicativo
+                </Text>
+                <Text style={[styles.atalhoDescricao, { color: colors.textSecondary }]}>
+                  Passo a passo de tudo, em português simples.
+                </Text>
+              </View>
+              <Icone nome="seta" tamanho={17} cor={colors.textSecondary} />
+            </TouchableOpacity>
+
+            <View style={[styles.sobreDivisor, { backgroundColor: colors.glassBorder }]} />
+
             <View style={styles.sobreRodape}>
               <Icone nome="escudo" tamanho={13} cor={colors.success} />
               <Text style={[styles.sobreRodapeTexto, { color: colors.textSecondary }]}>
@@ -511,21 +528,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   temas: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  temaOpcao: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  temaTexto: {
-    fontSize: 11,
-    fontWeight: '600',
+    marginTop: 2,
   },
   qualidades: {
     flexDirection: 'row',
@@ -665,6 +668,39 @@ const styles = StyleSheet.create({
   sobreDivisor: {
     height: 1,
     marginVertical: 13,
+  },
+  desenvolvedorLinha: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 11,
+  },
+  desenvolvedorIcone: {
+    width: 36,
+    height: 36,
+    borderRadius: 13,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  desenvolvedorTextos: {
+    flex: 1,
+  },
+  desenvolvedorTitulo: {
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
+  desenvolvedorTexto: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  atalhoManual: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    padding: 11,
+    borderRadius: 18,
+    borderWidth: 1,
   },
   sobreRodape: {
     flexDirection: 'row',

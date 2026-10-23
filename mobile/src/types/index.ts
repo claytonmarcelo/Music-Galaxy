@@ -163,6 +163,9 @@ export type RootStackParamList = {
   // Fila de downloads (acessível pelo cabeçalho da busca e por Ajustes)
   FilaDownloads: undefined;
 
+  // Manual de uso do aplicativo (aberto pelos Ajustes)
+  Manual: undefined;
+
   // Playlist local (aberta pela Biblioteca)
   DetalhePlaylist: { playlistId: string };
 
