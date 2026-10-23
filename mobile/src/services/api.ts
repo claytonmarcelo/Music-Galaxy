@@ -151,12 +151,14 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
 // ============================================================
 
 // Busca músicas pelo termo — endpoint principal do app.
+// `leve` pede uma atualização sem ingestão: só o banco local, para a tela
+// se atualizar sozinha enquanto o backend resolve as fontes de áudio.
 export async function buscarMusicas(
   termo: string,
-  opcoes?: { limit?: number; offset?: number; sinal?: AbortSignal }
+  opcoes?: { limit?: number; offset?: number; sinal?: AbortSignal; leve?: boolean }
 ): Promise<RespostaBusca> {
-  const { limit = 50, offset = 0, sinal } = opcoes ?? {};
-  const url = `/api/search?q=${encodeURIComponent(termo)}&limit=${limit}&offset=${offset}`;
+  const { limit = 50, offset = 0, sinal, leve = false } = opcoes ?? {};
+  const url = `/api/search?q=${encodeURIComponent(termo)}&limit=${limit}&offset=${offset}${leve ? '&leve=1' : ''}`;
   return requisicaoComTimeout<RespostaBusca>(url, sinal);
 }
 

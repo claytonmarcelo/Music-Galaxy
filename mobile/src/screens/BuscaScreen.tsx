@@ -52,6 +52,14 @@ const DEBOUNCE_MS = 600;
 const ITENS_POR_PAGINA = 30;
 const MINIMO_LETRAS = 3;
 
+// Atualização automática da lista enquanto o backend procura as fontes de
+// áudio das versões pendentes (Regra 7). O aplicativo reconsulta o banco a
+// cada 10 s com `leve=1`, que NÃO dispara ingestão; o automatismo para
+// sozinho depois de algumas tentativas, para não consultar o servidor
+// indefinidamente quando nenhuma fonte for encontrada.
+const INTERVALO_ATUALIZACAO_MS = 10000;
+const MAXIMO_ATUALIZACOES = 24;
+
 // Sugestões iniciais para quem abre o aplicativo pela primeira vez.
 const SUGESTOES = ['Elvis Presley', 'The Beatles', 'Queen', 'Michael Jackson'];
 
@@ -75,6 +83,11 @@ export default function BuscaScreen(): React.JSX.Element {
   // Versões do termo que ainda aguardam descoberta de fonte de áudio no
   // backend (ficam fora da lista até terem áudio resolvido)
   const [pendentesAudio, setPendentesAudio] = useState(0);
+
+  // A lista se atualiza sozinha enquanto há versões pendentes. O selo do
+  // cabeçalho avisa que isso está acontecendo, para o usuário não achar que
+  // a tela está parada.
+  const [atualizandoSozinho, setAtualizandoSozinho] = useState(false);
   const [focoInput, setFocoInput]   = useState(false);
   const [mostrarFiltros, setMostrarFiltros] = useState(false);
   const [filtros, setFiltros]       = useState<Filtros>({});
@@ -95,6 +108,20 @@ export default function BuscaScreen(): React.JSX.Element {
 
   const timerDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortController = useRef<AbortController | null>(null);
+
+  // Controle da atualização automática:
+  // - `sequenciaBusca` distingue a busca atual de respostas atrasadas (uma
+  //   resposta antiga de atualização não pode sobrescrever a busca do usuário)
+  // - `carregandoRef` e `atualizandoRef` evitam duas consultas ao mesmo tempo
+  // - `tentativasAtualizacao` limita o automatismo quando nenhuma fonte é achada
+  const sequenciaBusca = useRef(0);
+  const carregandoRef = useRef(false);
+  const atualizandoRef = useRef(false);
+  const tentativasAtualizacao = useRef(0);
+  // Termo e contagem de pendentes da rodada anterior do relógio: servem para
+  // devolver o fôlego do automatismo a cada termo novo e a cada progresso.
+  const termoDoRelogio = useRef<string | null>(null);
+  const pendentesAnterior = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -241,6 +268,8 @@ export default function BuscaScreen(): React.JSX.Element {
     acumular: boolean
   ) => {
     if (!termoBusca.trim()) {
+      sequenciaBusca.current += 1;
+      carregandoRef.current = false;
       setReleases([]);
       setTotal(0);
       setErro(null);
@@ -249,6 +278,12 @@ export default function BuscaScreen(): React.JSX.Element {
 
     abortController.current?.abort();
     abortController.current = new AbortController();
+
+    // Cada busca inicia uma sequência nova. Respostas atrasadas — inclusive
+    // da atualização automática — são descartadas antes de tocar na tela.
+    const sequencia = sequenciaBusca.current + 1;
+    sequenciaBusca.current = sequencia;
+    carregandoRef.current = true;
 
     setCarregando(true);
     setErro(null);
@@ -259,6 +294,8 @@ export default function BuscaScreen(): React.JSX.Element {
         offset: paginaOffset,
         sinal:  abortController.current.signal,
       });
+
+      if (sequencia !== sequenciaBusca.current) return;
 
       if (resultado.success) {
         setReleases((prev) => acumular ? [...prev, ...resultado.data.results] : resultado.data.results);
@@ -284,13 +321,95 @@ export default function BuscaScreen(): React.JSX.Element {
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') return;
+      // Erro de uma busca já substituída não aparece na tela.
+      if (sequencia !== sequenciaBusca.current) return;
       const mensagem = err instanceof Error ? err.message : 'Erro ao buscar músicas.';
       setErro(mensagem);
       toastErro(mensagem);
     } finally {
-      setCarregando(false);
+      // Só a busca mais recente devolve a tela ao estado de espera; uma busca
+      // antiga que termina depois não pode apagar o indicador da atual.
+      if (sequencia === sequenciaBusca.current) {
+        carregandoRef.current = false;
+        setCarregando(false);
+      }
     }
   }, [adicionarBusca, toastSucesso, toastErro, toastInfo]);
+
+  // Reconsulta o banco sem ingestão (`leve=1`) para trazer as versões cujo
+  // áudio o backend acabou de resolver. É silenciosa de propósito: não toca
+  // avisos, não grava histórico e nunca sobrescreve uma busca mais nova.
+  const atualizarSilenciosamente = useCallback(async (termoAtual: string) => {
+    if (atualizandoRef.current || carregandoRef.current) return;
+
+    // Guarda a sequência da busca que está na tela: se o usuário buscar outra
+    // coisa enquanto esta consulta viaja, o resultado é descartado.
+    const sequencia = sequenciaBusca.current;
+    atualizandoRef.current = true;
+    setAtualizandoSozinho(true);
+
+    try {
+      const resultado = await buscarMusicas(termoAtual, {
+        limit:  ITENS_POR_PAGINA,
+        offset: 0,
+        leve:   true,
+      });
+
+      if (sequencia !== sequenciaBusca.current) return;
+      if (!resultado.success) return;
+
+      setReleases(resultado.data.results);
+      setTotal(resultado.data.total);
+      setFromCache(resultado.data.fromCache);
+      setPendentesAudio(resultado.data.pendentes_audio ?? 0);
+    } catch {
+      // Atualização de fundo não interrompe o usuário com erro: a lista que
+      // ele já vê continua válida e a busca manual segue funcionando.
+    } finally {
+      atualizandoRef.current = false;
+      setAtualizandoSozinho(false);
+    }
+  }, []);
+
+  // Enquanto houver versões aguardando fonte de áudio, a lista se atualiza
+  // sozinha. O relógio para quando o termo muda, quando tudo foi resolvido,
+  // quando o usuário paginou (a substituição apagaria o que ele carregou) ou
+  // quando o limite de tentativas é atingido — o que evita consultar o
+  // servidor para sempre quando nenhuma fonte aberta for encontrada.
+  //
+  // O limite é por busca, não por sessão: cada termo novo recebe o fôlego
+  // inteiro, e cada queda real de pendentes também devolve o fôlego (sinal de
+  // que o backend está encontrando fontes).
+  useEffect(() => {
+    const termoAtual = termo.trim();
+
+    if (!termoAtual || pendentesAudio <= 0 || offset !== 0) {
+      termoDoRelogio.current = null;
+      pendentesAnterior.current = 0;
+      tentativasAtualizacao.current = 0;
+      return;
+    }
+
+    const mudouDeTermo = termoDoRelogio.current !== termoAtual;
+    const houveProgresso = pendentesAudio < pendentesAnterior.current;
+
+    if (mudouDeTermo || houveProgresso) {
+      tentativasAtualizacao.current = 0;
+    }
+    termoDoRelogio.current = termoAtual;
+    pendentesAnterior.current = pendentesAudio;
+
+    const intervalo = setInterval(() => {
+      if (tentativasAtualizacao.current >= MAXIMO_ATUALIZACOES) {
+        clearInterval(intervalo);
+        return;
+      }
+      tentativasAtualizacao.current += 1;
+      void atualizarSilenciosamente(termoAtual);
+    }, INTERVALO_ATUALIZACAO_MS);
+
+    return () => clearInterval(intervalo);
+  }, [termo, pendentesAudio, offset, atualizarSilenciosamente]);
 
   const aoMudarTermo = useCallback((novoTermo: string) => {
     setTermo(novoTermo);
@@ -302,6 +421,10 @@ export default function BuscaScreen(): React.JSX.Element {
 
     if (!novoTermo.trim()) {
       abortController.current?.abort();
+      // A busca em andamento deixa de valer; a atualização automática que
+      // ainda estiver viajando também é descartada ao chegar.
+      sequenciaBusca.current += 1;
+      carregandoRef.current = false;
       setReleases([]);
       setTotal(0);
       setErro(null);
@@ -347,6 +470,8 @@ export default function BuscaScreen(): React.JSX.Element {
   const limparBusca = useCallback(() => {
     if (timerDebounce.current) clearTimeout(timerDebounce.current);
     abortController.current?.abort();
+    sequenciaBusca.current += 1;
+    carregandoRef.current = false;
     setTermo('');
     setReleases([]);
     setTotal(0);
@@ -480,11 +605,12 @@ export default function BuscaScreen(): React.JSX.Element {
           <Icone nome="relogio" tamanho={14} cor={colors.warning} />
           <Text style={[styles.avisoPendentesTexto, { color: colors.warning }]}>
             {pendentesAudio} {pendentesAudio === 1 ? 'versão aguardando' : 'versões aguardando'} fonte de áudio
+            {atualizandoSozinho ? ' · atualizando a lista…' : ''}
           </Text>
         </View>
       )}
     </View>
-  ), [listaFiltrada.length, colors, fromCache, pendentesAudio]);
+  ), [listaFiltrada.length, colors, fromCache, pendentesAudio, atualizandoSozinho]);
 
   return (
     <FundoAtmosfera>

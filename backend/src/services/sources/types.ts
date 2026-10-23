@@ -14,19 +14,48 @@ export interface AdapterFonteExterna {
   buscarPorTermo(termo: string): Promise<DadosReleaseExterno[]>;
 }
 
+// Crédito de artista do MusicBrainz (aparece em gravações, faixas e releases).
+export interface MusicBrainzArtistCredit {
+  name?: string;
+  joinphrase?: string;
+  artist: {
+    id: string;
+    name: string;
+    'sort-name': string;
+    type?: string;
+    country?: string;
+    area?: { name: string };
+  };
+}
+
 // Estrutura bruta de um recording/release do MusicBrainz (simplificada).
 export interface MusicBrainzRecording {
   id: string;
   title: string;
-  'artist-credit'?: Array<{
-    artist: {
-      id: string;
-      name: string;
-      'sort-name': string;
-      area?: { name: string };
-    };
-  }>;
+  'artist-credit'?: MusicBrainzArtistCredit[];
   releases?: MusicBrainzRelease[];
+}
+
+// Faixa de um release (só vem preenchida quando o browse pede `inc=recordings`).
+export interface MusicBrainzFaixa {
+  id?: string;
+  number?: string;
+  title: string;
+  length?: number | null;
+  'artist-credit'?: MusicBrainzArtistCredit[];
+  recording?: {
+    id: string;
+    title: string;
+    length?: number | null;
+    'first-release-date'?: string;
+    'artist-credit'?: MusicBrainzArtistCredit[];
+  };
+}
+
+export interface MusicBrainzMidia {
+  format?: string;
+  'track-count'?: number;
+  tracks?: MusicBrainzFaixa[];
 }
 
 export interface MusicBrainzRelease {
@@ -35,6 +64,7 @@ export interface MusicBrainzRelease {
   status?: string;
   date?: string;
   country?: string;
+  'artist-credit'?: MusicBrainzArtistCredit[];
   'label-info'?: Array<{
     label?: { name: string };
   }>;
@@ -43,16 +73,33 @@ export interface MusicBrainzRelease {
     'primary-type'?: string;
     'secondary-types'?: string[];
   };
-  media?: Array<{
-    format?: string;
-    'track-count'?: number;
-  }>;
+  media?: MusicBrainzMidia[];
 }
 
 export interface MusicBrainzRespostaBusca {
   recordings?: MusicBrainzRecording[];
   count?: number;
   offset?: number;
+}
+
+// Artista encontrado na busca por nome (usado para montar a discografia).
+export interface MusicBrainzArtista {
+  id: string;
+  name: string;
+  score?: number;
+  type?: string;
+  country?: string;
+  area?: { name?: string };
+}
+
+export interface MusicBrainzRespostaArtista {
+  artists?: MusicBrainzArtista[];
+}
+
+// Lista de releases de um artista (browse), com o total do catálogo.
+export interface MusicBrainzRespostaReleases {
+  releases?: MusicBrainzRelease[];
+  'release-count'?: number;
 }
 
 // Estrutura bruta de um resultado do Discogs (simplificada).

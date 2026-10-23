@@ -22,6 +22,13 @@ const MIN_RELEASES_LOCAL = 1;
 // suave para não disparar proteções anti-bot das fontes.
 const INTERVALO_ENTRE_RESOLUCOES = 8000;
 
+// Quantas resoluções andam em paralelo. Com uma só, cada versão esperava a
+// anterior terminar (8 s de intervalo + até 15 s de descoberta) e a primeira
+// busca por um artista levava minutos para mostrar qualquer música. Três
+// mantêm o ritmo educado em cada fonte e entregam os primeiros resultados
+// em segundos.
+const RESOLUCOES_SIMULTANEAS = 3;
+
 // Fila em memória de releases aguardando descoberta de fonte de áudio.
 // Regra do usuário: o app só exibe versões que têm áudio. As releases sem
 // fonte ficam fora da resposta, mas são resolvidas aqui em segundo plano,
@@ -38,28 +45,46 @@ let processandoFila = false;
 
 // Coloca na fila as releases sem áudio encontradas numa busca.
 // Recebe apenas as que já vêm sem fonte do banco — não é preciso revalidar.
+//
+// As versões do termo RECÉM-BUSCADO entram na frente da fila: sem isso, a
+// primeira busca por um artista ficava atrás de centenas de versões antigas
+// (de buscas anteriores) e o usuário não via resultado nenhum por muito tempo.
+// A ordem dentro do lote é preservada.
 function enfileirarResolucoes(releases: ItemFilaResolucao[]): void {
-  let novas = 0;
+  const novas: ItemFilaResolucao[] = [];
+  const jaNoLote = new Set<number>();
+
   for (const r of releases) {
+    if (jaNoLote.has(r.id)) continue;
     if (filaResolucao.some((item) => item.id === r.id)) continue;
-    filaResolucao.push({
+
+    jaNoLote.add(r.id);
+    novas.push({
       id:           r.id,
       version_name: r.version_name,
       work_title:   r.work_title,
       artist_name:  r.artist_name,
     });
-    novas += 1;
   }
-  if (novas > 0) void processarFilaResolucao();
+
+  if (novas.length === 0) return;
+
+  filaResolucao.unshift(...novas);
+  void processarFilaResolucao();
 }
 
-// Processa a fila em série (uma resolução por vez, com intervalo).
+// Processa a fila com algumas resoluções em paralelo.
+// Cada trabalhador tira o próximo item e, depois de resolver, espera o
+// intervalo antes de pegar outro — o ritmo por fonte continua suave.
 async function processarFilaResolucao(): Promise<void> {
   if (processandoFila) return;
   processandoFila = true;
-  try {
+
+  const trabalhador = async (): Promise<void> => {
     while (filaResolucao.length > 0) {
-      const item = filaResolucao.shift()!;
+      const item = filaResolucao.shift();
+      if (!item) return;
+
       try {
         // Re-checa no banco: se a fonte já foi salva por outro fluxo, pula
         const [linhas] = await pool.execute<RowDataPacket[]>(
@@ -87,6 +112,12 @@ async function processarFilaResolucao(): Promise<void> {
       // Espaçamento para respeitar as fontes abertas consultadas
       await new Promise((resolve) => setTimeout(resolve, INTERVALO_ENTRE_RESOLUCOES));
     }
+  };
+
+  try {
+    await Promise.all(
+      Array.from({ length: RESOLUCOES_SIMULTANEAS }, () => trabalhador())
+    );
   } finally {
     processandoFila = false;
   }
@@ -273,6 +304,13 @@ export async function buscarMusicas(
     const offset = Math.max(parseInt(req.query['offset'] as string || '0',  10), 0);
     const page   = Math.floor(offset / limit) + 1;
 
+    // Atualização leve (`leve=1`): o aplicativo usa isto para reconsultar a
+    // tela enquanto o backend procura as fontes de áudio em segundo plano.
+    // Responde só com o banco local e NÃO dispara ingestão — sem isso, um
+    // atualizador automático chamaria MusicBrainz e Discogs a cada poucos
+    // segundos e estouraria o rate limit das fontes.
+    const leve = req.query['leve'] === '1';
+
     const baseUrl = baseUrlDaRequisicao(req);
 
     // Tenta busca local primeiro (já filtrada pela Regra 7 no SQL)
@@ -283,18 +321,47 @@ export async function buscarMusicas(
     const pendentesLocal = await buscarPendentesAudio(termo, 200);
     enfileirarResolucoes(pendentesLocal.itens);
 
+    // Atualização leve: responde com o estado atual do banco e mantém a fila
+    // de resolução andando, mas não chama as fontes de metadados de novo.
+    // É o caminho usado pela atualização automática da tela de busca.
+    if (leve) {
+      const respostaLeve: RespostaPaginada<ReleaseCompleto> = {
+        success: true,
+        data: {
+          results:         local.releases,
+          total:           local.total,
+          page,
+          per_page:        limit,
+          fromCache:       true,
+          pendentes_audio: pendentesLocal.total,
+        },
+      };
+      res.json(respostaLeve);
+      return;
+    }
+
     // Se há dados locais suficientes, responde direto (do banco local = "cache" natural)
     if (local.total + pendentesLocal.total >= MIN_RELEASES_LOCAL) {
       // Regra do usuário: nunca reutilizar buscas idênticas. Mesmo com dados
       // locais, dispara uma ingestão NOVA em segundo plano (limpa o cache do
       // termo e consulta as fontes externas de novo). A resposta sai rápida
       // do banco local; a atualização fica pronta para as próximas buscas.
-      void ingerirPorTermo(termo).catch((erro) => {
-        console.error(
-          '[SEARCH] Ingestão em segundo plano falhou:',
-          erro instanceof Error ? erro.message : erro
-        );
-      });
+      //
+      // Quando a ingestão termina, as versões que ela acabou de criar (faixas
+      // de discos do artista, por exemplo) entram na FRENTE da fila. Sem
+      // isso, elas só seriam resolvidas na busca seguinte e o usuário ficaria
+      // olhando uma lista vazia mesmo com músicas recém-catalogadas.
+      void ingerirPorTermo(termo)
+        .then(async () => {
+          const recemCatalogadas = await buscarPendentesAudio(termo, 200);
+          enfileirarResolucoes(recemCatalogadas.itens);
+        })
+        .catch((erro) => {
+          console.error(
+            '[SEARCH] Ingestão em segundo plano falhou:',
+            erro instanceof Error ? erro.message : erro
+          );
+        });
 
       const resposta: RespostaPaginada<ReleaseCompleto> = {
         success: true,

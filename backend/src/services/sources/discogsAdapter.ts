@@ -9,6 +9,7 @@ import { DadosReleaseExterno } from '../../types';
 import { AdapterFonteExterna, DiscogsRespostaBusca, DiscogsResultado } from './types';
 import { agendarChamada } from '../rateLimiting/rateLimiter';
 import { emitirEvento } from '../logger/ingestionLogger';
+import { nomeOficialOuNulo } from './nomesOficiais';
 
 const BASE_URL = 'https://api.discogs.com';
 
@@ -43,6 +44,14 @@ const PRIORIDADE_FORMATOS: [string, string][] = [
 export class DiscogsAdapter implements AdapterFonteExterna {
   readonly nomeFonte = 'Discogs';
 
+  // Camada HTTP. Os testes trocam por uma função que devolve JSON fixo para
+  // verificar a Regra 8 sem depender da internet.
+  private readonly requisitar: (url: string) => Promise<string>;
+
+  constructor(requisitar?: (url: string) => Promise<string>) {
+    this.requisitar = requisitar ?? ((url: string) => this.fazerRequisicao(url));
+  }
+
   // Token de autenticação Discogs — configurado via variável de ambiente.
   private get token(): string | null {
     return process.env['DISCOGS_TOKEN'] ?? null;
@@ -67,7 +76,7 @@ export class DiscogsAdapter implements AdapterFonteExterna {
 
     let respostaBruta: string;
     try {
-      respostaBruta = await this.fazerRequisicao(url);
+      respostaBruta = await this.requisitar(url);
     } catch (err) {
       emitirEvento('INGESTION_FAILED', { fonte: this.nomeFonte, termo, erro: String(err) });
       throw err;
@@ -95,12 +104,14 @@ export class DiscogsAdapter implements AdapterFonteExterna {
     const partes = resultado.title.split(' - ');
     if (partes.length < 2) return null;
 
-    const nomeArtista = partes[0]!.trim();
+    // Regra 8: nomes oficiais, apenas sem espaços sobrando. Um resultado sem
+    // artista ou sem título não entra no catálogo — nada de nome inventado.
+    const nomeArtista = nomeOficialOuNulo(partes[0]);
     // O restante após o primeiro " - " é o título (pode conter " - " no nome)
-    const tituloObra = partes.slice(1).join(' - ').trim();
+    const tituloObra = nomeOficialOuNulo(partes.slice(1).join(' - '));
+    if (!nomeArtista || !tituloObra) return null;
 
     const tipoRelease = this.determinarTipoRelease(resultado);
-    const nomeVersao = this.determinarNomeVersao(tituloObra, resultado);
     const gravadora = resultado.label?.[0] ?? null;
 
     // Regra da Capa Oficial: usar cover_image do Discogs apenas quando disponível.
@@ -114,7 +125,9 @@ export class DiscogsAdapter implements AdapterFonteExterna {
       work_title: tituloObra,
       artist_country: resultado.country ?? null,
       original_release_year: null,
-      version_name: nomeVersao,
+      // Regra 8: o nome da versão é o título oficial da obra. "Promo",
+      // "Remastered", "Deluxe" etc. definem o release_type, não o nome.
+      version_name: tituloObra,
       album_name: tituloObra,
       release_year: resultado.year ?? null,
       label: gravadora ? this.limparNomeGravadora(gravadora) : null,
@@ -144,21 +157,6 @@ export class DiscogsAdapter implements AdapterFonteExterna {
     return 'Original Release';
   }
 
-  // Determina o nome de exibição da versão com base nos formatos.
-  private determinarNomeVersao(tituloObra: string, resultado: DiscogsResultado): string {
-    const formatos = resultado.format ?? [];
-
-    // Busca por termos específicos nos formatos que indicam tipo de versão
-    const marcadoresVersao = ['Promo', 'Remastered', 'Reissue', 'Limited Edition', 'Deluxe', 'Remix'];
-    for (const marcador of marcadoresVersao) {
-      if (formatos.some(f => f.includes(marcador))) {
-        return `${tituloObra} (${marcador})`;
-      }
-    }
-
-    return tituloObra;
-  }
-
   // Determina qualidade com base nos formatos Discogs.
   private determinarQualidade(resultado: DiscogsResultado): string | null {
     const formatos = (resultado.format ?? []).map(f => f.toLowerCase());
@@ -170,9 +168,10 @@ export class DiscogsAdapter implements AdapterFonteExterna {
     return null;
   }
 
-  // Remove sufixos desnecessários dos nomes de gravadoras do Discogs.
+  // Remove o numeral de desambiguação do Discogs ("EMI (2)"). Esse numeral é
+  // um código interno do catálogo deles, não faz parte do nome oficial da
+  // gravadora — mantê-lo seria gravar um nome alterado (Regra 8).
   private limparNomeGravadora(nome: string): string {
-    // Discogs adiciona numerais entre parênteses para diferenciar gravadoras homônimas
     return nome.replace(/\s*\(\d+\)$/, '').trim();
   }
 

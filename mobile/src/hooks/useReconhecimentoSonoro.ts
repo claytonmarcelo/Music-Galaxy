@@ -318,11 +318,21 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
       await gravador.prepareToRecordAsync();
       if (geracao.current !== minhaGeracao) return;
 
-      gravador.record({ forDuration: DURACAO_CAPTURA_SEGUNDOS });
+      // Na web, o gravador do expo agenda um `stop()` interno quando recebe
+      // `forDuration`. Se a captura já tiver sido encerrada por nós (fim pelo
+      // temporizador ou cancelamento), esse segundo `stop()` encontra o
+      // gravador já zerado e estoura uma promessa sem tratamento — foi o
+      // "Cannot start an audio recording without initializing a MediaRecorder"
+      // que aparecia no console. Por isso, na web, quem encerra é só o nosso
+      // temporizador; nas plataformas nativas o `forDuration` continua, onde
+      // parar duas vezes é inofensivo.
+      gravador.record(
+        Platform.OS === 'web' ? undefined : { forDuration: DURACAO_CAPTURA_SEGUNDOS }
+      );
 
-      // Rede de segurança: o gravador para sozinho ao chegar na duração,
-      // mas este temporizador (com folga de 1,5 s) garante o encerramento em
-      // qualquer plataforma, sem disputar o fim da gravação com o gravador.
+      // Rede de segurança: nas plataformas nativas o gravador para sozinho ao
+      // chegar na duração e este temporizador só confere. Na web ele é o único
+      // encerramento, então a folga é curta para a amostra não ficar longa.
       temporizadorCaptura.current = setTimeout(() => {
         temporizadorCaptura.current = null;
         void pararGravacao().then(() => {
@@ -343,7 +353,7 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
           arquivoTemporario.current = uri;
           void enviarAmostra(uri, minhaGeracao);
         });
-      }, DURACAO_CAPTURA_SEGUNDOS * 1000 + 1500);
+      }, DURACAO_CAPTURA_SEGUNDOS * 1000 + (Platform.OS === 'web' ? 250 : 1500));
     } catch (erro) {
       console.error('Falha ao iniciar a captura de áudio:', erro);
       if (geracao.current !== minhaGeracao) return;

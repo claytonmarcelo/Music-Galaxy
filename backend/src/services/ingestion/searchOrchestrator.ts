@@ -15,6 +15,7 @@ import { MusicBrainzAdapter } from '../sources/musicBrainzAdapter';
 import { DiscogsAdapter } from '../sources/discogsAdapter';
 import { limparCacheDoTermo, salvarNoCache, buscarIdFonte } from '../cache/externalApiCache';
 import { registrarLogIngestion, emitirEvento } from '../logger/ingestionLogger';
+import { nomeOficialOuNulo } from '../sources/nomesOficiais';
 
 // Controle de concorrência — máximo de fontes consultadas simultaneamente.
 const MAX_CONCORRENCIA = 5;
@@ -42,6 +43,30 @@ function liberarSlot(): void {
 const musicBrainz = new MusicBrainzAdapter();
 const discogs     = new DiscogsAdapter();
 
+// ============================================================
+// Exclusividade das ingestões
+// ============================================================
+// 1. Por termo: o controller dispara a ingestão em toda busca normal, e o
+//    usuário pode enviar o mesmo termo duas vezes (duplo toque, duas abas,
+//    paginação). Sem esta trava, cada envio abria uma consulta nova ao
+//    MusicBrainz e ao Discogs ao mesmo tempo — chamadas repetidas e trabalho
+//    dobrado de gravação. Quem chega enquanto a ingestão do termo está em
+//    curso espera e recebe o mesmo resultado.
+const ingestacoesEmCurso = new Map<string, Promise<ResultadoIngestion>>();
+
+// 2. Na gravação: artista e obra são criados com "SELECT e depois INSERT"
+//    (as tabelas não têm índice único em nome/título). Duas ingestões de
+//    termos diferentes podiam passar pelo mesmo teste ao mesmo tempo e criar
+//    linhas repetidas de artista. A gravação passa a ser uma de cada vez —
+//    o custo é baixo porque a espera real está nas fontes externas.
+let cadeiaGravacao: Promise<unknown> = Promise.resolve();
+
+function gravarComExclusividade<T>(tarefa: () => Promise<T>): Promise<T> {
+  const proxima = cadeiaGravacao.then(tarefa, tarefa);
+  cadeiaGravacao = proxima.catch(() => undefined);
+  return proxima;
+}
+
 export interface ResultadoIngestion {
   worksCreated: number;
   releasesCreated: number;
@@ -50,7 +75,24 @@ export interface ResultadoIngestion {
 }
 
 // Ponto de entrada do orquestrador.
-export async function ingerirPorTermo(termo: string): Promise<ResultadoIngestion> {
+//
+// Uma ingestão por termo por vez: chamadas concorrentes do mesmo termo
+// compartilham a execução em curso e recebem o mesmo resultado.
+export function ingerirPorTermo(termo: string): Promise<ResultadoIngestion> {
+  const chave = termo.toLowerCase().trim();
+
+  const emCurso = ingestacoesEmCurso.get(chave);
+  if (emCurso) return emCurso;
+
+  const execucao = executarIngestao(termo).finally(() => {
+    ingestacoesEmCurso.delete(chave);
+  });
+
+  ingestacoesEmCurso.set(chave, execucao);
+  return execucao;
+}
+
+async function executarIngestao(termo: string): Promise<ResultadoIngestion> {
   const chaveCache    = `search:${termo.toLowerCase().trim()}`;
   const fontesChamadas: string[] = [];
   let worksCreated    = 0;
@@ -84,7 +126,9 @@ export async function ingerirPorTermo(termo: string): Promise<ResultadoIngestion
       fontesChamadas.push(fonte);
 
       if (releases.length > 0) {
-        const contadores = await persistirReleases(releases);
+        // Gravação serializada (ver `gravarComExclusividade`): evita que
+        // duas ingestões criem o mesmo artista/obra em paralelo.
+        const contadores = await gravarComExclusividade(() => persistirReleases(releases));
         worksCreated    += contadores.worksCreated;
         releasesCreated += contadores.releasesCreated;
 
@@ -153,6 +197,21 @@ async function persistirReleases(
 
   for (const release of releases) {
     try {
+      // Regra 8 (última barreira antes do banco): nome de artista, de música e
+      // de versão precisam existir como a fonte oficial publicou. Registro sem
+      // nome não é gravado — melhor faltar no catálogo do que exibir um nome
+      // inexistente. Aqui nada é abreviado, capitalizado ou completado.
+      const nomeArtista = nomeOficialOuNulo(release.artist_name);
+      const tituloObra = nomeOficialOuNulo(release.work_title);
+      const nomeVersao = nomeOficialOuNulo(release.version_name);
+      if (!nomeArtista || !tituloObra || !nomeVersao) {
+        console.warn(
+          '[ORCHESTRATOR] Release descartado por nome ausente (Regra 8):',
+          release.external_id
+        );
+        continue;
+      }
+
       const idMetadataSource = await buscarIdFonte(release.metadata_source_name);
       if (!idMetadataSource) continue;
 
@@ -161,7 +220,7 @@ async function persistirReleases(
       // insere quando o artista ainda não existe.
       const [rowsArtista] = await pool.execute<RowDataPacket[]>(
         `SELECT id FROM artists WHERE name = ? LIMIT 1`,
-        [release.artist_name]
+        [nomeArtista]
       );
       let artistaId: number;
       if (rowsArtista.length > 0) {
@@ -169,7 +228,7 @@ async function persistirReleases(
       } else {
         const [resArtista] = await pool.execute<ResultSetHeader>(
           `INSERT INTO artists (name, country) VALUES (?, ?)`,
-          [release.artist_name, release.artist_country ?? null]
+          [nomeArtista, release.artist_country ?? null]
         );
         artistaId = resArtista.insertId;
       }
@@ -179,7 +238,7 @@ async function persistirReleases(
       // obras duplicadas a cada busca repetida.
       const [rowsWork] = await pool.execute<RowDataPacket[]>(
         `SELECT id FROM works WHERE title = ? AND artist_id = ? LIMIT 1`,
-        [release.work_title, artistaId]
+        [tituloObra, artistaId]
       );
       let workId: number;
       if (rowsWork.length > 0) {
@@ -187,7 +246,7 @@ async function persistirReleases(
       } else {
         const [resWork] = await pool.execute<ResultSetHeader>(
           `INSERT INTO works (title, artist_id, original_release_year) VALUES (?, ?, ?)`,
-          [release.work_title, artistaId, release.original_release_year ?? null]
+          [tituloObra, artistaId, release.original_release_year ?? null]
         );
         workId = resWork.insertId;
         worksCreated++;
@@ -222,8 +281,8 @@ async function persistirReleases(
         [
           workId,
           releaseTypeId,
-          release.version_name,
-          release.album_name         ?? null,
+          nomeVersao,
+          nomeOficialOuNulo(release.album_name),
           release.release_year       ?? null,
           release.label              ?? null,
           release.country            ?? null,

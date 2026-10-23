@@ -581,7 +581,7 @@ const styles = StyleSheet.create({
     marginBottom: 5,
     fontWeight: '600',
     letterSpacing: 0.9,
-    textTransform: 'uppercase',
+    // Regra 8: nome do artista com a grafia oficial, sem caixa alta forçada.
   },
   titulo: {
     fontSize: 23,

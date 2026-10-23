@@ -338,7 +338,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '500',
     letterSpacing: 0.2,
-    textTransform: 'uppercase',
+    // Regra 8: o nome do artista aparece como o estúdio publicou — sem
+    // transformar em caixa alta, que alteraria a grafia oficial (deadmau5).
   },
   versao: {
     fontSize: 15,
