@@ -2,9 +2,14 @@
 // áreas principais do app. A barra fica centralizada, com largura máxima
 // para não esticar em tablets e navegador, e respeita a área segura do
 // aparelho para nunca cobrir os gestos ou botões do sistema.
+//
+// Desenho atual: a aba ativa é marcada por uma bolha circular que desliza
+// por baixo do ícone, e o rótulo acompanha a hierarquia do tema. É a mesma
+// linguagem visual usada no botão de tema do cabeçalho e no seletor de
+// Ajustes — por isso o rodapé não parece mais uma fileira de botões soltos.
 
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, LayoutChangeEvent } from 'react-native';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import type { NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,6 +17,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { RootStackParamList } from '../types';
 import Icone, { NomeIcone } from './Icone';
 import { comAlfa } from '../utils/cores';
+import { USE_NATIVE_DRIVER } from '../utils/animacoes';
 
 // Rotas principais exibidas na barra (telas registradas no navegador).
 type RotaAba = 'Busca' | 'Biblioteca' | 'Explorar' | 'Favoritos' | 'Settings';
@@ -27,7 +33,13 @@ const ABAS: Array<{ rota: RotaAba; rotulo: string; icone: NomeIcone }> = [
 
 // Largura máxima da cápsula: mantém o ritmo visual em telas grandes sem
 // esticar os botões de ponta a ponta.
-const LARGURA_MAXIMA = 520;
+const LARGURA_MAXIMA = 560;
+
+// Diâmetro da bolha que marca a aba ativa (círculo atrás do ícone).
+const TAMANHO_BOLHA = 40;
+
+// Respiro mínimo entre a cápsula e a borda de baixo do aparelho.
+const RESPIRO_MINIMO = 14;
 
 export default function BarraNavegacaoInferior(): React.JSX.Element {
   const { colors } = useTheme();
@@ -47,9 +59,48 @@ export default function BarraNavegacaoInferior(): React.JSX.Element {
     return undefined;
   });
 
+  // Largura medida da fileira de abas: permite posicionar a bolha exatamente
+  // no centro do ícone da aba ativa.
+  const [larguraLinha, setLarguraLinha] = useState(0);
+  const posicaoAnim = useRef(new Animated.Value(0)).current;
+
+  const indiceAtivo = Math.max(
+    0,
+    ABAS.findIndex((aba) => aba.rota === rotaAtual)
+  );
+
+  // Move a bolha até a aba escolhida.
+  useEffect(() => {
+    Animated.spring(posicaoAnim, {
+      toValue: indiceAtivo,
+      stiffness: 190,
+      damping: 18,
+      mass: 0.8,
+      useNativeDriver: USE_NATIVE_DRIVER,
+    }).start();
+  }, [indiceAtivo, posicaoAnim]);
+
+  const medirLinha = (evento: LayoutChangeEvent) => {
+    setLarguraLinha(evento.nativeEvent.layout.width);
+  };
+
+  // Cada aba ocupa a mesma fração da fileira; a bolha fica centrada nela.
+  const larguraItem = larguraLinha > 0 ? larguraLinha / ABAS.length : 0;
+
+  const deslocamentoBolha = useMemo(
+    () =>
+      posicaoAnim.interpolate({
+        inputRange: ABAS.map((_, indice) => indice),
+        outputRange: ABAS.map(
+          (_, indice) => indice * larguraItem + (larguraItem - TAMANHO_BOLHA) / 2
+        ),
+      }),
+    [larguraItem, posicaoAnim]
+  );
+
   // No Android com navegação por gestos a área segura inferior varia de
-  // aparelho para aparelho; o mínimo de 10 px mantém o respiro no web/iOS.
-  const respiroInferior = Math.max(insets.bottom, 10);
+  // aparelho para aparelho; o mínimo evita que a cápsula encoste na borda.
+  const respiroInferior = Math.max(insets.bottom, RESPIRO_MINIMO);
 
   return (
     <View
@@ -72,42 +123,56 @@ export default function BarraNavegacaoInferior(): React.JSX.Element {
           style={[styles.fioDeLuz, { backgroundColor: colors.glassHighlight }]}
         />
 
-        {ABAS.map((aba) => {
-          const ativa = rotaAtual === aba.rota;
-          return (
-            <TouchableOpacity
-              key={aba.rota}
+        <View style={styles.linha} onLayout={medirLinha}>
+          {/* Bolha que desliza por baixo do ícone da aba ativa */}
+          {larguraItem > 0 && (
+            <Animated.View
+              pointerEvents="none"
               style={[
-                styles.aba,
-                ativa && {
-                  backgroundColor: comAlfa(colors.primary, 0.14),
-                  borderColor: comAlfa(colors.primary, 0.26),
+                styles.bolha,
+                {
+                  backgroundColor: comAlfa(colors.primary, 0.16),
+                  borderColor: comAlfa(colors.primary, 0.3),
+                  shadowColor: colors.glassShadow,
+                  transform: [{ translateX: deslocamentoBolha }],
                 },
               ]}
-              onPress={() => navigation.navigate(aba.rota)}
-              activeOpacity={0.72}
-              accessibilityRole="tab"
-              accessibilityLabel={aba.rotulo}
-              accessibilityState={{ selected: ativa }}
-            >
-              <Icone
-                nome={aba.icone}
-                tamanho={18}
-                cor={ativa ? colors.primary : colors.textSecondary}
-              />
-              <Text
-                style={[
-                  styles.rotulo,
-                  { color: ativa ? colors.text : colors.textSecondary },
-                  ativa && styles.rotuloAtiva,
-                ]}
-                numberOfLines={1}
+            />
+          )}
+
+          {ABAS.map((aba) => {
+            const ativa = rotaAtual === aba.rota;
+            return (
+              <TouchableOpacity
+                key={aba.rota}
+                style={styles.aba}
+                onPress={() => navigation.navigate(aba.rota)}
+                activeOpacity={0.7}
+                accessibilityRole="tab"
+                accessibilityLabel={aba.rotulo}
+                accessibilityState={{ selected: ativa }}
               >
-                {aba.rotulo}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+                <View style={styles.iconeArea}>
+                  <Icone
+                    nome={aba.icone}
+                    tamanho={20}
+                    cor={ativa ? colors.primary : colors.textSecondary}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.rotulo,
+                    { color: ativa ? colors.text : colors.textSecondary },
+                    ativa && styles.rotuloAtiva,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {aba.rotulo}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
     </View>
   );
@@ -117,47 +182,63 @@ const styles = StyleSheet.create({
   area: {
     width: '100%',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingTop: 2,
+    paddingHorizontal: 16,
+    paddingTop: 8,
   },
   trilho: {
     width: '100%',
     maxWidth: LARGURA_MAXIMA,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-    paddingVertical: 4,
-    borderRadius: 22,
+    borderRadius: 30,
     borderWidth: 1,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.26,
-    shadowRadius: 16,
-    elevation: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.28,
+    shadowRadius: 18,
+    elevation: 14,
   },
   fioDeLuz: {
     position: 'absolute',
     top: 0,
-    left: 26,
-    right: 26,
+    left: 30,
+    right: 30,
     height: 1,
-    opacity: 0.55,
+    opacity: 0.6,
     borderRadius: 1,
+  },
+  linha: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  bolha: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: TAMANHO_BOLHA,
+    height: TAMANHO_BOLHA,
+    borderRadius: TAMANHO_BOLHA / 2,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 4,
   },
   aba: {
     flex: 1,
     alignItems: 'center',
+    gap: 3,
+  },
+  iconeArea: {
+    width: TAMANHO_BOLHA,
+    height: TAMANHO_BOLHA,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 4,
-    borderRadius: 17,
-    borderWidth: 1,
-    borderColor: 'transparent',
-    gap: 1,
   },
   rotulo: {
-    fontSize: 9,
+    fontSize: 10.5,
     fontWeight: '500',
-    letterSpacing: 0.15,
-    lineHeight: 12,
+    letterSpacing: 0.1,
+    lineHeight: 14,
   },
   rotuloAtiva: {
     fontWeight: '700',

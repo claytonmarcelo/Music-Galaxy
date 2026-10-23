@@ -153,11 +153,24 @@ const ASSUNTOS: Assunto[] = [
     icone: 'download',
     resumo: 'Instalar o arquivo APK no aparelho.',
     passos: [
-      'O aplicativo é compatível com Android 15 (versão de 2025) ou mais nova. Versões anteriores não são suportadas.',
+      'O aplicativo funciona no Android 16 (versão de 2025) ou mais novo. Em Androids anteriores a instalação é recusada pelo próprio sistema, porque o aplicativo usa recursos dessas versões.',
       'Baixe o arquivo APK pelo navegador ou pelo link enviado a você.',
       'Ao abrir o arquivo, o Android pode avisar que o download veio de fora da loja. Toque em "Configurações" e autorize o navegador a instalar aplicativos.',
       'Volte ao aviso de instalação e toque em "Instalar". Espere a instalação terminar e abra o aplicativo pelo ícone que aparecer na tela inicial.',
       'Se o Android recusar a instalação, reinicie o aparelho e tente de novo. O aplicativo não altera o sistema: a instalação é sempre feita por você, na tela do próprio Android.',
+    ],
+  },
+  {
+    id: 'recusa',
+    titulo: 'Quando a instalação é recusada',
+    icone: 'escudo',
+    resumo: 'Entender as recusas mais comuns e o que fazer.',
+    passos: [
+      'O aviso "não é compatível com seu aparelho" significa que o Android é anterior a 2025. Atualize o sistema em Configurações → Sistema → Atualização do sistema.',
+      'O aviso "já existe um aplicativo com o mesmo nome" acontece quando a versão que está no aparelho foi assinada de outra forma. Desinstale a versão antiga — segure o ícone do aplicativo e toque em "Desinstalar" — e instale o arquivo novo.',
+      'O aviso de falta de espaço pede memória livre no armazenamento do aparelho. Libere espaço e tente instalar de novo.',
+      'Se o aplicativo abrir e mostrar um aviso sobre a versão do Android, siga as três telas de instrução que ele mesmo apresenta.',
+      'Instalar por cima da versão anterior não apaga nada: favoritos, playlists, histórico e downloads continuam no aparelho.',
     ],
   },
   {
@@ -169,6 +182,7 @@ const ASSUNTOS: Assunto[] = [
       'O aplicativo procura uma versão nova sozinho ao abrir. Para procurar na mão, vá em Ajustes → Sobre → "Procurar atualizações".',
       'Quando existe versão nova, aparece um aviso com o botão "Baixar". Toque nele para abrir a página de download no navegador do aparelho.',
       'Baixe o arquivo APK atualizado e instale por cima do aplicativo atual.',
+      'Se o Android recusar a versão nova porque ela tem o mesmo número da anterior, desinstale a versão antiga primeiro. Cada versão publicada usa um número maior, justamente para que a atualização seja aceita.',
       'Seus favoritos, playlists, histórico e downloads continuam no aparelho depois da atualização.',
       'A atualização do aplicativo não muda a versão do Android do aparelho. Quando o sistema for atualizado, o aplicativo continua funcionando.',
     ],
@@ -195,7 +209,7 @@ const ASSUNTOS: Assunto[] = [
       'A busca não encontra nada: escreva o nome de outro jeito, com menos palavras, ou use os filtros para ampliar o período.',
       'Aparece "versão aguardando fonte de áudio": o aplicativo está procurando o áudio em sites abertos. É normal e resolve em alguns minutos.',
       'O aplicativo avisa que está sem internet: volte a conectar e puxe a tela para baixo para recarregar.',
-      'A instalação foi recusada: confira se o Android do aparelho é 15 ou mais novo e se há espaço disponível no armazenamento.',
+      'A instalação foi recusada: veja o assunto "Quando a instalação é recusada" — o motivo mais comum é um Android anterior a 2025.',
     ],
   },
 ];

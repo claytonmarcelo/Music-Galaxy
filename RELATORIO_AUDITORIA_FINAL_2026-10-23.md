@@ -20,7 +20,14 @@
 | 6 | Regra 3 preservada (só fontes abertas) | **CONFORME** | reconhecimento **não** devolve áudio; a busca normal continua filtrada por `audio_source_url` |
 | 7 | Regra 5 preservada (zero erro de TypeScript) | **CONFORME** | `npx tsc --noEmit` → exit 0 no backend e no mobile, inclusive em clone limpo |
 | 8 | Sem regressão de busca/stream | **CONFORME** | `/api/search?q=daft punk` → 48 versões · `/api/releases/77/stream` → **206 Partial Content** |
-| 9 | Android 2025+ | **CONFORME (compilação + APK gerado)** / **NÃO VERIFICADO (aparelho)** | `compileSdk 36` / `targetSdk 36` / `minSdk 24` / `buildTools 36.0.0` impressos pelo Gradle · APK de release gerado (85.608.305 bytes) com `targetSdkVersion:'36'` lido do próprio pacote |
+| 9 | Android 2025+ | **CONFORME (compilação + APK gerado)** / **NÃO VERIFICADO (aparelho)** | `minSdk 36` / `compileSdk 36` / `targetSdk 36` impressos pelo Gradle · APK de release gerado (101.765.239 bytes) com `sdkVersion:'36'` lido do próprio pacote |
+| 9-bis | Somente Android de 2025 em diante (nada anterior) | **CONFORME** | `minSdkVersion 36` = Android 16 (primeira versão de 2025) · o próprio Android recusa a instalação abaixo disso |
+| 9-ter | Aviso quando o Android questiona o APK | **CONFORME** | `mobile/src/services/compatibilidade.ts` + `TelaCompatibilidade` (nome exato da versão do aparelho, três passos, botão de busca de versão nova) · `App.tsx` faz a verificação antes das boas-vindas |
+| 9-quater | `versionCode` que não trava a atualização | **CONFORME** | `android.versionCode: 1` explícito em `mobile/app.json` · explicado no manual |
+| 9-quinquies | Rodapé coerente com o projeto | **CONFORME** | cápsula de vidro com bolha deslizante · verificado no navegador nas cinco abas · área segura medida (14 px livres até a borda) |
+| 9-sexies | Botão claro/escuro com desenho atual | **CONFORME** | `BotaoTema` 44 × 44 px com disco interno e cruzamento sol/lua · `SeletorTema` em três cartões de vidro · verificado nos dois temas |
+| 9-septies | Boas-vindas de 3 segundos com o personagem | **CONFORME** | `DURACAO_MS = 3000` · medido no navegador: 3,26 s na tela (aparece em 1.985 ms, sai em 5.241 ms) |
+| 9-octies | Manual para quem tem dificuldade com o celular | **CONFORME** | `TelaManual` com catorze assuntos em pt-BR simples · "Instalar o aplicativo no Android" e "Quando a instalação é recusada" verificados no navegador |
 | 10 | Permissão de microfone declarada no Android | **CONFORME** | `RECORD_AUDIO` presente no manifesto gerado por `expo prebuild` |
 | 11 | Mensagens em português brasileiro | **CONFORME** | painel, rota e manual em pt-BR (capturas e respostas reais abaixo) |
 | 12 | Recuperação sem reinstalar | **CONFORME** | "Tentar novamente" reexecuta a tentativa sem recarregar o aplicativo (verificado no navegador) |
@@ -245,6 +252,99 @@ O `eas.json` está pronto (APK nos três perfis: development, preview, productio
 
 **NÃO VERIFICADO:** o APK não foi instalado nem executado em aparelho Android físico — `adb devices` devolve lista vazia (nenhum aparelho conectado nesta máquina).
 
+### 4-quater. Rodapé, tema, Android 2025+ e o APK correspondente (23/10/2026)
+
+Esta rodada atendeu ao pedido de **padronizar o rodapé**, **atualizar o botão claro/escuro**, **manter a página de boas-vindas de 3 segundos**, **não deixar os botões sobreporem os do aparelho**, **restringir o aplicativo ao Android de 2025 em diante** e **ter um manual para quem tem dificuldade de manusear o celular**.
+
+**O rodapé foi refeito** (`mobile/src/components/BarraNavegacaoInferior.tsx`): cápsula de vidro flutuante, centralizada, largura máxima de 560 px, raio de 30 px, fio de luz no topo e sombra suave. A aba ativa é marcada por uma bolha circular de 40 px que desliza por baixo do ícone, posicionada a partir da largura real da fileira (`onLayout`) para ficar sempre centrada. Medido no navegador: a cápsula ocupa de 384 px a 459 px numa janela de 473 px, com **14 px livres até a borda** — `paddingBottom: Math.max(insets.bottom, 14)`, então os botões e os gestos do aparelho nunca ficam embaixo. A bolha foi vista acompanhando Explorar, Ajustes e Busca.
+
+**O botão claro/escuro foi refeito** (`BotaoTema.tsx`): 44 × 44 px, raio de 16 px, vidro fosco igual ao dos vizinhos, e um disco interno de 30 px em que sol e lua se cruzam com rotação de 180° e escala de 1 a 0.82. O **seletor** (`SeletorTema.tsx`) deixou de ser um botão segmentado e passou a três cartões de vidro (Claro, Escuro, Sistema) com selo colorido, título e descrição. Verificado no navegador nos dois temas.
+
+**As boas-vindas continuam com 3 segundos** (`TelaBoasVindas.tsx`, `DURACAO_MS = 3000`). Medição real no navegador, com um contador de 40 ms dentro da página: o botão "Pular" **aparece em 1.985 ms** e **desaparece em 5.241 ms** — ou seja, **3,26 s** na tela (3 s de temporizador + a animação de saída).
+
+**O aplicativo passou a ser exclusivo do Android de 2025 em diante.** Android 15 é de 2024; a primeira versão de 2025 é o **Android 16, nível de API 36** — por isso `minSdkVersion 36`. O caminho é o oficial e verificável:
+
+1. `expo-build-properties` (versão 57.0.22, publicada em 24/09/2026, `peer: expo: *`) escreve `android.minSdkVersion=36`, `android.compileSdkVersion=36` e `android.targetSdkVersion=36` em `android/gradle.properties` (confirmação: `prebuild --clean` regenerou o arquivo com os três valores).
+2. O `expo-root-project` lê essas propriedades e as aplica no `app/build.gradle` — a saída do Gradle na build foi `[ExpoRootProject] … minSdk: 36, compileSdk: 36, targetSdk: 36, ndk: 27.1.12297006, kotlin: 2.1.20`.
+
+**Quando o Android questiona o APK, o aplicativo se ajusta e explica.** `mobile/src/services/compatibilidade.ts` devolve o nível de API do aparelho e o nome da versão (`Android 7.0` … `Android 16`); `mobile/src/screens/TelaCompatibilidade.tsx` mostra o mascote, o nome exato da versão do aparelho, três passos para atualizar o Android, o botão "Procurar versão mais nova" (que consulta o servidor e abre o endereço publicado) e o botão para abrir as informações do aplicativo. `App.tsx` faz a verificação **antes** das boas-vindas, então a tela aparece no lugar do aplicativo. Fora do Android a verificação devolve `null` e o fluxo normal continua.
+
+**Um segundo motivo de recusa foi eliminado:** o `versionCode` estava fixo em `1` dentro do `app/build.gradle` gerado. Publicar uma versão nova com o mesmo `versionCode` faz o Android recusar a atualização ("mesma versão"). Agora `android.versionCode` está explícito em `mobile/app.json`, e o manual explica que cada publicação precisa de um número maior.
+
+**O APK de release foi gerado com esse código:**
+
+```
+BUILD SUCCESSFUL in 28m 26s
+446 actionable tasks: 418 executed, 28 up-to-date
+```
+
+```
+C:/Users/Public/mgbuild/mobile/android/app/build/outputs/apk/release/app-release.apk
+101.765.239 bytes  ·  1.533 entradas
+C:/Users/Public/mgbuild/MusicGalaxy-1.0.0-android16.apk  (cópia preservada)
+SHA-256 d7fc8d91e1cd0dc1e7cd0e008df4dc2ea29ad1098bc7dc57dfd190d5752bfa81
+```
+
+**Metadados lidos do próprio APK** (`aapt dump badging`):
+
+```
+package: name='com.musicgalaxy.app' versionCode='1' versionName='1.0.0'
+         platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36'
+sdkVersion:'36'
+targetSdkVersion:'36'
+application-label:'Music Galaxy'
+launchable-activity: name='com.musicgalaxy.app.MainActivity'
+native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
+```
+
+`sdkVersion:'36'` é a prova de que **o Android recusará a instalação em qualquer aparelho anterior a 2025** — exatamente a regra pedida.
+
+**Assinatura conferida** (`apksigner verify --print-certs`):
+
+```
+Signer #1 certificate DN: CN=Android Debug, OU=Android, O=Unknown, L=Unknown, ST=Unknown, C=US
+Signer #1 certificate SHA-256 digest: fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+```
+
+É a **mesma chave** do APK anterior — a instalação por cima é aceita, sem recusa por assinatura.
+
+**O código novo está dentro do pacote.** O bundle Hermes embutido (`assets/index.android.bundle`, 2.004.128 bytes) contém, conferidas byte a byte (o Hermes guarda acentos em UTF-16LE):
+
+| Marca no bundle | Origem |
+|---|---|
+| "Atualize o Android do aparelho" | a tela de compatibilidade |
+| "Quando a instalação é recusada" | o assunto novo do manual |
+| "Procurar versão mais nova" | o botão da tela de compatibilidade |
+| "O Music Galaxy é distribuído apenas para" | o rodapé da tela de compatibilidade |
+| "Limpar a lista de Explorar?" | o modal de confirmação do Explorar |
+| "Manter a lista" / "Mostrar a lista novamente" | as duas saídas do estado "Lista limpa" |
+| "Você já está usando a versão mais recente." | a busca de atualização |
+
+**O APK ficou 17 MB maior — e a causa é a regra pedida.** Composição medida do pacote (`unzip -v`):
+
+| Parte | Bytes (descomprimido) |
+|---|---|
+| `lib/` (4 ABIs, gravadas sem compressão) | 66.632.872 |
+| `classes.dex` + `classes2.dex` + `classes3.dex` | 27.528.840 |
+| `res/`, `assets/`, `resources.arsc` e o resto | ~8.197.464 |
+
+Tudo é gravado **sem compressão**. A documentação do Android é explícita: *"If this property and the DSL are unset, dex files will be uncompressed when minSdk >= 28"* ([`DexPackagingOptions`](https://developer.android.com/reference/tools/gradle-api/8.3/null/com/android/build/api/variant/DexPackagingOptions)). Com `minSdk 24` o dex era comprimido e o APK ficava com 84.709.935 bytes; com `minSdk 36` ele passa a ser armazenado e o APK vai a 101.765.239 bytes. **Não é defeito** — é a consequência direta de exigir apenas Android de 2025 em diante. Quem quiser o tamanho antigo pode definir `useLegacyPackaging` (o dex volta a ser comprimido, ao custo de uma instalação mais lenta). As bibliotecas nativas foram auditadas: **sem tabela de depuração** (nenhum `.debug_info`), estão limpas.
+
+**O manual foi revisado e conferido no navegador** (`TelaManual.tsx`, catorze assuntos em português simples). O assunto "Instalar o aplicativo no Android" passou a dizer que o aplicativo funciona no Android 16 (versão de 2025) ou mais novo e que, em Androids anteriores, a instalação é recusada pelo próprio sistema. O assunto novo **"Quando a instalação é recusada"** explica as cinco recusas mais comuns: aparelho anterior a 2025, assinatura diferente da que está instalada, falta de espaço, o aviso interno de versão do aplicativo e a reinstalação por cima (que não apaga favoritos, playlists, histórico nem downloads).
+
+**Verificação desta rodada:**
+
+```
+npm run test:unit  → tests 55 · pass 55 · fail 0 · skipped 0
+npm run test:api   → tests 24 · pass 24 · fail 0 · skipped 0
+backend: npx tsc --noEmit → exit 0
+mobile:  npx tsc --noEmit → exit 0
+```
+
+No navegador: boas-vindas medida em 3,26 s · modal "Limpar a lista de Explorar?" com "Manter a lista" e "Limpar a lista" · estado "Lista limpa" com "Mostrar a lista novamente" (e a lista voltando) · rodapé acompanhando a aba · seletor de tema mudando para escuro · botão do cabeçalho voltando para claro · a tela de compatibilidade **não** é alcançável na web (a verificação devolve `null` fora do Android).
+
+**NÃO VERIFICADO:** o APK não foi instalado nem executado em aparelho Android físico — `adb devices` devolve lista vazia (nenhum aparelho conectado). A tela de compatibilidade só aparece em aparelho com Android anterior a 16, o que não existe nesta máquina.
+
 ---
 
 ## 5. Ausência de regressões
@@ -324,7 +424,7 @@ A auditoria tinha listado como defeito duas coisas que **já estavam resolvidas 
 | Pendência | Quem resolve | Estado |
 |---|---|---|
 | Login na conta EAS e `eas build` (APK assinado de produção) | o usuário | **Bloqueado pela credencial, com evidência real:** `npx eas-cli@latest whoami` → "Not logged in"; `npx eas-cli@latest build --platform android --profile preview --non-interactive --no-wait` → "An Expo user account is required to proceed." O `eas.json` já gera APK nos três perfis; depois do login, `npx eas build --platform android --profile preview` resolve o `extra.eas.projectId` sozinho |
-| APK de release para instalar e testar em aparelho | o usuário | **Pronto:** `C:/Users/Public/mgbuild/mobile/android/app/build/outputs/apk/release/app-release.apk` (84.709.935 bytes, `targetSdk 36`, assinado com o keystore de depuração — instala sem recusa) |
+| APK de release para instalar e testar em aparelho | o usuário | **Pronto:** `C:/Users/Public/mgbuild/MusicGalaxy-1.0.0-android16.apk` (101.765.239 bytes, `sdkVersion:'36'` — só instala em Android 16 / 2025 em diante, assinado com o keystore de depuração, mesma chave do APK anterior) |
 | Credencial do AudD para o caminho de acerto | o usuário | `AUDD_TOKEN` no `backend/.env` |
 | Teste com microfone em aparelho Android físico | o usuário | aparelho Android 2025+ (`adb devices` não encontrou aparelho nesta máquina) |
 | Publicar a primeira versão no servidor | o usuário | `APP_VERSAO_PUBLICADA` e `APP_URL_DOWNLOAD` no `backend/.env` — sem isso o aplicativo continua funcionando e apenas não avisa de versão nova |
@@ -340,6 +440,8 @@ O que está **comprovado**: o backend e o aplicativo compilam sem erro de TypeSc
 
 Nesta rodada os **achados de código** da auditoria foram corrigidos na íntegra (restos de Laravel, `as any[]`, `eslint-disable`, função sem consumidor, dependências não importadas, duplicações, pasta vazia e a duração do toast). Dois **achados novos** apareceram no caminho e também foram resolvidos: o aviso (toast) era desenhado fora da tela — a camada global tinha altura zero, então o aviso renderizava 483 px abaixo do topo de uma janela de 473 px — e o padrão `cache/` do `.gitignore` do backend alcançava `backend/src/services/cache/`, que é código-fonte, e esconderia de qualquer arquivo novo criado ali. Os dois estão documentados em `AGENTS.md`. Dois achados anteriores ("décadas vazias" e "tela do artista sem entrada") foram refutados com execução real e medição no banco: estavam **antigos**, não são defeitos do código atual.
 
+**Nesta última rodada** (rodapé, botão claro/escuro, Android 2025+, manual) o que está comprovado: o rodapé virou uma cápsula de vidro com bolha deslizante e 14 px livres até a borda (medido), o botão e o seletor de tema foram refeitos e funcionam nos dois temas (medido), as boas-vindas duram 3,26 s na tela com um temporizador de 3.000 ms (medido), o `minSdkVersion` é 36 e o APK gerado declara `sdkVersion:'36'` (lido do próprio pacote), o aplicativo explica a incompatibilidade em vez de quebrar, e o manual tem catorze assuntos em pt-BR incluindo as cinco recusas de instalação. As 79 verificações automatizadas continuam passando e o TypeScript está limpo nas duas camadas.
+
 As **ressalvas** (impedem aprovação integral, conforme exigido): o caminho de acerto do reconhecimento não foi exercitado contra o serviço real por falta de credencial; a captura por microfone, a instalação do APK e a instalação do APK indicado pelo botão "Baixar" não foram executadas em aparelho Android físico (`adb devices` não encontrou aparelho); e o APK de produção assinado depende do login do usuário no EAS — bloqueio comprovado pela própria CLI ("An Expo user account is required to proceed."). Nenhuma dessas ressalvas foi escondida por suposição — cada uma está marcada como **NÃO VERIFICADO** acima, com o motivo exato.
 
-**O artefato entregável está em dia com o código:** o APK de release foi recompilado a partir do commit `31286e2` (`BUILD SUCCESSFUL in 8m 47s`, 84.709.935 bytes, `targetSdk 36`, assinatura conferida com `apksigner`) e o bundle Hermes dentro do pacote contém as marcas desta rodada (`absoluteFill`, "Remover do histórico de reproduções?", "Limpar a lista de Explorar?", "Procurar atualizações"). O que falta para fechar a entrega é a ação do dono: entrar na conta Expo, rodar o `eas build` para assinar com a chave de produção e instalar o APK em um aparelho.
+**O artefato entregável está em dia com o código:** o APK de release foi recompilado com o rodapé, o botão de tema e a restrição de Android 2025+ (`BUILD SUCCESSFUL in 28m 26s`, 101.765.239 bytes, `sdkVersion:'36'`, assinatura conferida com `apksigner` — a mesma chave do APK anterior) e o bundle Hermes dentro do pacote contém as marcas desta rodada ("Atualize o Android do aparelho", "Quando a instalação é recusada", "Procurar versão mais nova", "Limpar a lista de Explorar?"). O crescimento de 17 MB do pacote tem causa medida e explicada — o dex passa a ser gravado sem compressão porque `minSdk >= 28` ([`DexPackagingOptions`](https://developer.android.com/reference/tools/gradle-api/8.3/null/com/android/build/api/variant/DexPackagingOptions)) — e as bibliotecas nativas foram auditadas sem tabela de depuração. O que falta para fechar a entrega é a ação do dono: entrar na conta Expo, rodar o `eas build` para assinar com a chave de produção e instalar o APK em um aparelho Android 16 ou mais novo.

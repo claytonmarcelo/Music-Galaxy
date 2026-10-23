@@ -141,6 +141,23 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - **Feedback consistente** — modais de sucesso, erro, aviso, informação e confirmação; toasts com fechamento automático; estados de carregamento e vazio em todas as listas.
 - **Acessibilidade e movimento** — rótulos de acessibilidade nos controles principais, contraste nos dois temas e animações que respeitam a plataforma (`USE_NATIVE_DRIVER`, sem aviso na web).
 
+### Rodapé, Tema e Boas-Vindas
+- **Rodapé em cápsula de vidro** — `BarraNavegacaoInferior` centralizada (largura máxima de 560 px), com uma bolha circular que desliza por baixo do ícone da aba ativa e um fio de luz no topo da cápsula. Respeita a área segura do aparelho (`insets.bottom`, com respiro mínimo de 14 px): nunca cobre os botões nem os gestos do sistema.
+- **Seletor de tema em cartões** — `SeletorTema` deixou de ser um botão segmentado e passou a oferecer três cartões de vidro (Claro, Escuro, Sistema) com selo colorido, título e descrição, no mesmo ritmo visual do seletor de qualidade em Ajustes.
+- **Botão de tema do cabeçalho** — `BotaoTema` tem 44 × 44 px, raio de 16 px e um disco interno de 30 px em que o sol e a lua se cruzam com rotação de 180° e escala.
+- **Boas-vindas animadas** — `TelaBoasVindas` abre o aplicativo com o mascote, o nome e a frase do projeto, um indicador de três pontos e o botão "Pular". A troca para o aplicativo acontece sozinha em **3 segundos** (`DURACAO_MS = 3000`).
+
+### Somente Android de 2025 em diante
+- **Piso de instalação** — `minSdkVersion 36` = **Android 16**, a primeira versão do Android lançada em 2025. O próprio Android recusa a instalação em aparelhos anteriores, como pedido.
+- **Como o valor chega ao build** — o plugin `expo-build-properties` escreve `android.minSdkVersion=36`, `android.compileSdkVersion=36` e `android.targetSdkVersion=36` em `android/gradle.properties`, e o `expo-root-project` lê essas três propriedades ao montar o `app/build.gradle`.
+- **Aviso dentro do aplicativo** — `mobile/src/services/compatibilidade.ts` lê o nível de API do aparelho e `TelaCompatibilidade` explica a situação com o nome exato da versão, três passos para atualizar o Android e o botão para procurar uma versão mais nova.
+- **`versionCode` tem que subir** — toda publicação precisa de um `android.versionCode` maior; com o mesmo número, o Android recusa a atualização ("mesma versão"). O valor está explícito em `mobile/app.json`.
+
+### Manual do Aplicativo
+- **Guia passo a passo** — `TelaManual` (Ajustes → Manual do aplicativo) tem catorze assuntos, do primeiro uso à instalação, cada um com passos curtos, ícones e o mascote. Escrito em português simples, para quem tem dificuldade de manusear o celular.
+- **Assunto "Instalar o aplicativo no Android"** — explica o piso de Android 16 (2025), o download do APK, a autorização do navegador e o que fazer se a instalação for recusada.
+- **Assunto "Quando a instalação é recusada"** — as cinco recusas mais comuns (aparelho antigo, assinatura diferente, falta de espaço, aviso interno de versão e reinstalação por cima) e o que fazer em cada caso.
+
 ---
 
 ## Módulos Implementados

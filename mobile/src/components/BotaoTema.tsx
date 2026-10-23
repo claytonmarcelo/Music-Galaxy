@@ -1,12 +1,18 @@
 // Botão compacto de alternância entre o tema claro e o escuro.
 // Fica no cabeçalho da busca, ao lado dos atalhos de fila e favoritos.
-// O ícone gira ao trocar de tema, o que dá a sensação de um interruptor
-// físico sem inventar cores fora dos tokens do projeto.
+//
+// Desenho atual: o botão mantém a mesma forma dos outros atalhos do
+// cabeçalho, mas traz um disco interno na cor principal onde o sol e a lua
+// trocam de lugar com um giro suave. É o mesmo selo circular usado no
+// rodapé e no seletor de Ajustes, então o controle de tema tem a mesma
+// identidade visual em qualquer tela. Nenhuma cor é fixa: tudo vem dos
+// tokens do tema.
 
 import React, { useEffect, useRef } from 'react';
 import { StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import Icone from './Icone';
+import { comAlfa } from '../utils/cores';
 import { USE_NATIVE_DRIVER } from '../utils/animacoes';
 
 interface Props {
@@ -16,20 +22,37 @@ interface Props {
 export default function BotaoTema({ onAlternar }: Props): React.JSX.Element {
   const { colors, isDark } = useTheme();
 
-  // Gira o ícone 180° a cada troca de tema.
-  const giroAnim = useRef(new Animated.Value(isDark ? 1 : 0)).current;
+  // 0 = tema claro, 1 = tema escuro. O valor dirige o giro e o变故.
+  const trocaAnim = useRef(new Animated.Value(isDark ? 1 : 0)).current;
 
   useEffect(() => {
-    Animated.timing(giroAnim, {
+    Animated.spring(trocaAnim, {
       toValue: isDark ? 1 : 0,
-      duration: 320,
+      stiffness: 180,
+      damping: 17,
+      mass: 0.8,
       useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
-  }, [isDark, giroAnim]);
+  }, [isDark, trocaAnim]);
 
-  const rotacao = giroAnim.interpolate({
+  const opacidadeSol = trocaAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
+
+  const opacidadeLua = trocaAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+
+  const rotacao = trocaAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '180deg'],
+  });
+
+  const escala = trocaAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0.82],
   });
 
   return (
@@ -46,8 +69,22 @@ export default function BotaoTema({ onAlternar }: Props): React.JSX.Element {
         isDark ? 'Mudar para o tema claro' : 'Mudar para o tema escuro'
       }
     >
-      <Animated.View style={{ transform: [{ rotate: rotacao }] }}>
-        <Icone nome={isDark ? 'lua' : 'sol'} tamanho={18} cor={colors.text} />
+      <Animated.View
+        style={[
+          styles.disco,
+          {
+            backgroundColor: comAlfa(colors.primary, 0.14),
+            borderColor: comAlfa(colors.primary, 0.24),
+            transform: [{ rotate: rotacao }, { scale: escala }],
+          },
+        ]}
+      >
+        <Animated.View style={[styles.icone, { opacity: opacidadeSol }]}>
+          <Icone nome="sol" tamanho={17} cor={colors.primary} />
+        </Animated.View>
+        <Animated.View style={[styles.icone, { opacity: opacidadeLua }]}>
+          <Icone nome="lua" tamanho={17} cor={colors.primary} />
+        </Animated.View>
       </Animated.View>
     </TouchableOpacity>
   );
@@ -59,6 +96,19 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 16,
     borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  disco: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  icone: {
+    position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
   },

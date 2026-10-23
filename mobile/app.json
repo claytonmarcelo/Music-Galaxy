@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "com.musicgalaxy.app",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#201816"
@@ -41,6 +42,16 @@
           "microphonePermission": "O Music Galaxy usa o microfone para identificar a música que está tocando. A gravação é temporária e apagada logo após a análise.",
           "recordAudioAndroid": true,
           "enableBackgroundRecording": false
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 36,
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36
+          }
         }
       ]
     ],
