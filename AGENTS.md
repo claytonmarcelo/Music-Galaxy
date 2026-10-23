@@ -185,6 +185,14 @@ Para decisões técnicas não cobertas neste documento:
 - A tela `FilaDownloadsScreen` permite filtrar (todos, baixando, concluídos, com erro), cancelar, tentar novamente, remover e limpar em lote
 - Todo arquivo é gerado pelo backend em `/api/releases/:id/download?format=mp3|flac` a partir de `audio_source_url`, passando pelo guard `auditarUrl()`
 
+### Biblioteca local e reprodução offline
+- Favoritos (`@MusicGalaxy:favoritos`), playlists (`@MusicGalaxy:playlists`), buscas (`@MusicGalaxy:historico`) e reproduções (`@MusicGalaxy:historicoReproducao`) vivem no AsyncStorage do aparelho; nenhum desses dados é enviado ao backend
+- Playlists preservam a ordem de inserção, recusam nome vazio ou repetido e nunca duplicam a mesma versão; excluir playlist ou remover versão não apaga arquivo baixado nem favorito
+- Histórico de reproduções tem limite de 50 versões, sem repetição, e só é gravado quando o áudio realmente começa (`onReproduzir` do `PlayerControls`)
+- `downloadManager.obterArquivoLocal(releaseId)` só devolve um caminho `file://` de download concluído cujo arquivo ainda existe; na web retorna `null` e o player usa o stream
+- O `PlayerControls` prefere o arquivo local, mas volta ao stream com `toastInfo` se o arquivo falhar — nunca esconde a origem real do áudio
+- A tela `TelaBiblioteca` concentra as quatro abas (Resumo, Favoritos, Playlists, Histórico); não criar outra tela de biblioteca para as mesmas funções
+
 ## Comandos de Desenvolvimento
 
 ### Frontend (Mobile)

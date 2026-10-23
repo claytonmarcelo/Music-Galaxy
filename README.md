@@ -26,7 +26,7 @@ O **Music Galaxy** é um aplicativo de busca musical desenvolvido para DJs, cole
 
 Encontrar a versão exata de uma música — um remix específico, uma edição de rádio, uma instrumental, um formato de lançamento raro — costuma exigir consultar várias plataformas diferentes, correndo o risco de encontrar capas incorretas, metadados incompletos ou informações geradas artificialmente.
 
-O Music Galaxy centraliza a busca em fontes de dados confiáveis (MusicBrainz, Cover Art Archive e Discogs), aplicando regras rígidas para garantir que nenhuma capa ou versão seja inventada, aproximada ou substituída.
+O Music Galaxy centraliza a busca em fontes de dados confiáveis (MusicBrainz, Cover Art Archive, Discogs e Internet Archive) e em sites abertos da web, aplicando regras rígidas para garantir que nenhuma capa, versão ou fonte de áudio seja inventada, aproximada ou substituída.
 
 ### Público-alvo
 
@@ -77,49 +77,32 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 ### Obras e Versões (Works & Releases)
 - Cada obra é cadastrada de forma conceitual, independente de suas versões
 - Cada release é um registro independente — nenhuma versão substitui outra
-- Catálogo fixo com mais de 60 tipos de release
+- Catálogo fixo com 99 tipos de release (incluindo CD e DVD)
 
 ### Capas Oficiais
 - Exibição de capa oficial via Cover Art Archive, vinculada ao MusicBrainz
 - Nenhuma capa sintética, aproximada ou de placeholder
 
 ### Player e Download
-- Reprodução e download utilizam exclusivamente a URL original da versão selecionada
-- Nenhum áudio sintético, mock ou de teste no fluxo de reprodução
-- Ordem natural respeitada: streaming, preview e download, quando disponíveis
-- Progresso de download com caminho local persistido no gerenciador de arquivos do Expo
-- Pipeline de download otimizado: cache → deduplicação → yt-dlp (com retry e múltiplas estratégias) → arquivo temporário → FFmpeg (otimizado) → validação → cache → cliente
-- Formatos suportados: FLAC (codec flac, 44100 Hz, stereo, 24 bit) e MP3 (codec libmp3lame, 320k, 44100 Hz, stereo)
-- Validação de assinatura de arquivo antes de enviar ao cliente (FLAC: fLaC, MP3: ID3 ou sync bytes)
-- Validação de decodificação completa via FFmpeg antes de enviar ao cliente
-- Limpeza automática de arquivos temporários após download ou erro
-- MIME types corretos: audio/flac para FLAC, audio/mpeg para MP3
-- Extensões corretas: .flac para FLAC, .mp3 para MP3
-- Download no frontend com rastreamento de progresso em tempo real (Web: fetch com stream reader)
-- Retry inteligente com exponential backoff (1s, 2s) para falhas transitórias
-- Múltiplas estratégias de formato yt-dlp (m4a, mp3, webm, opus, bestaudio) para maximizar compatibilidade
-- Classificação de erros (SOURCE_UNAVAILABLE, FORMAT_UNAVAILABLE, TIMEOUT, etc) para diagnóstico preciso
-- Logs estruturados com medição de tempo por etapa (yt-dlp, FFmpeg, validação) para observabilidade
-- **Cache de downloads**: Arquivos processados são armazenados em cache por 24 horas, evitando processamento repetido
-- **Deduplicação de downloads simultâneos**: Múltiplas requisições da mesma música compartilham o mesmo processo
-- **Timeouts configuráveis**: 5 minutos para yt-dlp, 10 minutos para FFmpeg, 30 segundos para validação
-- **Otimização do FFmpeg**: Detecta formato da fonte e evita conversão desnecessária (MP3→MP3, FLAC→FLAC)
-- **Headers de cache**: Respostas incluem X-Cache (HIT/MISS) para rastreamento de eficiência
+- **Áudio exclusivamente de sites abertos** — todo stream e download nasce de uma fonte da web aberta (blogs, fóruns, sites pessoais, links diretos e Internet Archive), sempre validada pelo guard `auditarUrl()` da Regra 3. YouTube, Spotify, Deezer, Apple Music e qualquer plataforma de música são proibidos e não aparecem no código do fluxo.
+- **Reprodução pelo backend** — o app chama `GET /api/releases/:id/stream`, que faz proxy da fonte aberta e suporta `Range` (`206 Partial Content`); o player mostra tempo, duração, seek e estado real de erro, sem progresso simulado.
+- **Download pelo backend** — `GET /api/releases/:id/download?format=mp3|flac` gera o arquivo a partir de `audio_source_url`.
+- **Pipeline de download** — cache → deduplicação → download da fonte → `ffprobe` → conversão condicional → validação → cache → cliente. Arquivos processados ficam em cache por 24 horas; requisições simultâneas da mesma versão compartilham o mesmo processamento.
+- **Conversão honesta** — a conversão só acontece quando é necessária: MP3 continua MP3 e FLAC continua FLAC. Um MP3 nunca é convertido e chamado de "FLAC sem perdas"; o app informa a qualidade real sem inventar métricas.
+- **Validação antes de entregar** — assinatura do arquivo (FLAC: `fLaC`; MP3: ID3 ou sync bytes), decodificação completa via FFmpeg, MIME type e extensão corretos, limite de tamanho e timeout. Arquivo incompleto nunca é tratado como concluído.
+- **Fila persistente no aparelho** — progresso real por versão, cancelamento, nova tentativa, remoção individual e limpeza em lote. A fila sobrevive ao fechamento do app (`@musicgalaxy:filaDownloads`) e downloads interrompidos voltam como recuperáveis.
+- **Reprodução offline** — quando existe um download concluído no aparelho e o arquivo ainda está presente, o player usa o caminho `file://` antes do stream; se o arquivo falhar, volta ao servidor com aviso claro. Na web não há caminho local e a reprodução é sempre pelo stream.
+- **Preferência de qualidade** — MP3 320 kbps ou FLAC sem perdas, escolhida em Ajustes e persistida em `@musicgalaxy:qualidadeDownload`.
+- **Headers de cache** — respostas incluem `X-Cache` (HIT/MISS) para rastreamento de eficiência.
 
-### Descoberta Global de Fontes de Áudio (Exact Match)
-- **Arquitetura de Providers**: Abstração `IAudioSourceProvider` para múltiplas fontes de áudio (YouTube, futuras integrações)
-- **Exact Match Engine**: Sistema de pontuação (0-100) e classificação (EXACT_MATCH, PROBABLE_MATCH, REJECTED)
-- **Regras de Rejeição Rigorosas**: Cover, remix, live, instrumental, duração incompatível, conteúdo truncado
-- **Source Ranking**: Classificação de fontes por qualidade (codec, bitrate, sample rate), formato e disponibilidade
-- **Busca Paralela**: Múltiplos providers consultados simultaneamente com timeout individual (30s por provider)
-- **Fallback Automático**: Se um provider falha, outro assume sem interromper o fluxo
-- **Validação de Qualidade**: Detecção de FLAC real vs fake (upsampled de MP3), verificação de bitrate adequado
-- **Validação de Integridade**: Assinatura de arquivo, codec, decodificação FFmpeg completa
-- **Detecção de Vinheta**: Heurística para identificar conteúdo extra ou ruído de vinil
-- **Logs Estruturados**: requestId, providerId, operation para rastreamento completo
-- **Classificação de Erros Expandida**: EXACT_MATCH_NOT_CONFIRMED, NO_SUITABLE_SOURCE, ALL_PROVIDERS_FAILED, INVALID_AUDIO, CORRUPTED_AUDIO
-- **Integração Preservada**: Sistema integrado no audioController com fallback para método tradicional (YouTubeAdapter)
-- **Flag de Habilitação**: `ENABLE_SOURCE_ORCHESTRATOR` para ativar/desativar o novo sistema
+### Descoberta de Áudio em Sites Abertos (Exact Match)
+- **Provedores** — `internetArchiveProvider` (APIs públicas do archive.org, sem chave e sem login), `genericWebProvider` (blogs, fóruns e páginas com áudio) e `directLinkProvider` (URLs diretas de arquivos). Nenhum provedor de plataforma de música existe no projeto.
+- **Orquestração** — `SourceOrchestrator` consulta os provedores em paralelo, com orçamento total de 28s, e só aceita candidato classificado como `EXACT_MATCH` (pontuação ≥ 90 no `ExactMatchEngine`).
+- **Identidade pelo arquivo** — nome do arquivo → metadados ID3 → título da página apenas quando a página tem um único áudio. Uma página com vários players nunca empresta sua identidade a uma faixa.
+- **Filtro de versão** — instrumental, remix, live, bootleg e afins só são aceitos quando a própria release pede essa versão; o lançamento original nunca recebe um áudio alternativo por engano.
+- **Ranking de fontes** — qualidade (codec, bitrate, sample rate), formato e disponibilidade ordenam os candidatos.
+- **Guard anti-SSRF** — bloqueia domínios de plataformas, protocolos não HTTP(S), portas e credenciais suspeitas, IPs privados/loopback/link-local/reservados (IPv4 e IPv6), DNS rebinding, redirects para destinos proibidos e respostas acima do limite.
+- **Falha explícita** — quando não há fonte confiável, a versão não é exibida na busca (Regra 7) e permanece na fila de resolução em segundo plano; nunca se inventa uma fonte ou um áudio.
 
 ### Ingestão de Dados Externos
 - Orquestrador de ingestão consulta MusicBrainz, Cover Art Archive e Discogs
@@ -127,16 +110,21 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - Respeito aos limites de taxa de cada API (1 req/seg MusicBrainz, 60 req/min Discogs autenticado)
 - Log de auditoria de todas as operações de ingestão
 
-### Favoritos e Histórico
-- Persistência de favoritos via AsyncStorage
-- Rastreamento de histórico de visualizações
+### Biblioteca Local (favoritos, playlists e históricos)
+- **Favoritos** — persistidos em `@MusicGalaxy:favoritos`, sem duplicar versões; exibem exclusivamente a capa oficial (ou "Sem capa oficial", conforme a Regra 1).
+- **Playlists** — persistidas em `@MusicGalaxy:playlists`, com nome único, ordem de inserção preservada, renomeação, exclusão e adição/remoção de versões. Tudo é confirmado na interface antes de apagar.
+- **Histórico de buscas** — termos recentes em `@MusicGalaxy:historico`, com remoção individual e limpeza confirmada.
+- **Histórico de reproduções** — últimas 50 versões efetivamente iniciadas em `@MusicGalaxy:historicoReproducao`, sem repetir a mesma versão.
+- **Nada é apagado por engano** — excluir playlist, limpar histórico ou remover favorito nunca apaga o arquivo baixado no aparelho.
+- **Tela Biblioteca** — quatro abas (Resumo, Favoritos, Playlists e Histórico), com contagem de favoritos, playlists, reproduções, artistas, obras e tipos.
 
 ### Interface Premium
-- Modais personalizados com animações (sucesso, erro, aviso, informação, confirmação)
-- Sistema de notificações (toast) com fechamento automático e barra de progresso
-- Componentes reutilizáveis: BottomSheet, controles de player, progresso de download, tela de carregamento, alternância de tema
-- Animações globais com timings e curvas de easing padronizados
-- Tema com acento verde (#1DB954)
+- **Identidade de vidro fosco** — paleta taupe quente, vinho/bordô e marfim, com cartões translúcidos, contornos finos e cantos amplos. Todos os componentes leem os tokens do `ThemeContext`; nenhum estilo usa cor hexadecimal fixa.
+- **Tema claro, escuro e automático** — segue o sistema quando configurado como automático e persiste a escolha no aparelho.
+- **Fundo atmosférico em React Native puro** — gradiente em faixas e brilhos suaves (`FundoAtmosfera`), sem `expo-linear-gradient`/`expo-blur`.
+- **Componentes compartilhados** — `GlassCard`, `CustomButton`, `Icone` (traço fino e nomes em pt-BR), `BarraNavegacaoInferior` flutuante e mascote oficial robô DJ.
+- **Feedback consistente** — modais de sucesso, erro, aviso, informação e confirmação; toasts com fechamento automático; estados de carregamento e vazio em todas as listas.
+- **Acessibilidade e movimento** — rótulos de acessibilidade nos controles principais, contraste nos dois temas e animações que respeitam a plataforma (`USE_NATIVE_DRIVER`, sem aviso na web).
 
 ---
 
@@ -152,9 +140,12 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 | Ingestão de dados externos          | ✅      |
 | Cache em MariaDB                     | ✅      |
 | Favoritos                           | ✅      |
-| Histórico de buscas                 | ✅      |
-| Interface premium com animações     | ✅      |
-| Descoberta global de fontes (Exact Match) | ✅      |
+| Playlists locais                    | ✅      |
+| Histórico de buscas e reproduções   | ✅      |
+| Fila de downloads persistente       | ✅      |
+| Reprodução offline de arquivo baixado | ✅ (em aparelho nativo; web usa stream) |
+| Interface de vidro fosco (temas claro/escuro) | ✅ |
+| Descoberta de fontes abertas (Exact Match) | ✅ |
 | Validação de qualidade de áudio    | ✅      |
 
 ---
@@ -167,7 +158,7 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 | React Native  | Framework mobile                  |
 | Expo SDK 57   | Ferramentas e build mobile        |
 | TypeScript    | Tipagem estática                  |
-| AsyncStorage  | Persistência local (favoritos)    |
+| AsyncStorage  | Persistência local (favoritos, playlists, históricos, fila e tema) |
 
 ### Backend
 | Tecnologia    | Finalidade                       |
@@ -191,6 +182,7 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 | MusicBrainz        | Metadados musicais abertos                       |
 | Cover Art Archive   | Capas oficiais vinculadas ao MusicBrainz         |
 | Discogs            | Formatos físicos e variações de lançamento       |
+| Internet Archive   | Áudio em acervo aberto (APIs públicas, sem chave) |
 
 ---
 
@@ -200,12 +192,12 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 musicgalaxy/
 ├── mobile/                    → Aplicativo React Native
 │   ├── src/
-│   │   ├── components/       → Componentes reutilizáveis
+│   │   ├── components/       → Componentes reutilizáveis (vidro fosco, player, cards)
+│   │   ├── contexts/         → Tema, favoritos, playlists, históricos e modais
 │   │   ├── screens/          → Telas do aplicativo
-│   │   ├── services/         → Serviços de API
+│   │   ├── services/         → API, player, downloads e busca
 │   │   ├── types/            → Definições TypeScript
-│   │   ├── navigation/       → Configuração de navegação
-│   │   └── styles/           → Estilos globais
+│   │   └── navigation/       → Configuração de navegação
 │   ├── App.tsx
 │   ├── package.json
 │   └── index.ts
@@ -225,10 +217,10 @@ musicgalaxy/
 │   │   │   │   ├── sourceOrchestrator.ts → Orquestrador de múltiplos providers
 │   │   │   │   ├── audioValidator.ts → Validação rigorosa de arquivos
 │   │   │   │   └── providers/  → Implementações concretas
-│   │   │   │       ├── youtubeProvider.ts → Provider para YouTube
+│   │   │   │       ├── internetArchiveProvider.ts → Áudio no Internet Archive
 │   │   │   │       ├── directLinkProvider.ts → Provider para URLs diretas de áudio
 │   │   │   │       └── genericWebProvider.ts → Provider para crawling de sites/blogs
-│   │   │   ├── audio/           → Serviços de áudio (YouTubeAdapter, etc)
+│   │   │   ├── webAudio.ts      → Guard anti-SSRF e lista de plataformas proibidas
 │   │   │   ├── downloadCache.ts → Cache de downloads processados
 │   │   │   └── downloadDeduplication.ts → Deduplicação de downloads simultâneos
 │   │   ├── types/               → Tipos TypeScript
@@ -308,7 +300,7 @@ O schema é normalizado, com as seguintes tabelas principais:
 - **artists** — Artistas/bandas
 - **works** — Obras musicais (conceituais, independentes de versões)
 - **releases** — Cada versão/lançamento específico de uma obra
-- **release_types** — Catálogo fixo de tipos (60+ tipos)
+- **release_types** — Catálogo fixo de tipos (99 tipos)
 - **metadata_sources** — Fontes de metadados (Discogs, MusicBrainz, etc.)
 - **external_api_cache** — Cache de respostas de APIs externas
 - **ingestion_log** — Auditoria de ingestão de dados externos
@@ -379,10 +371,16 @@ DB_NAME=musicgalaxy
 DB_USER=root
 DB_PASSWORD=
 
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
+CORS_ORIGIN=*
+
 MUSICBRAINZ_USER_AGENT=MusicGalaxy/1.0 (contato: seu-email@exemplo.com)
 DISCOGS_TOKEN=seu_token_pessoal_discogs
 DISCOGS_USER_AGENT=MusicGalaxy/1.0
 ```
+
+O Internet Archive não exige chave nem configuração adicional. O endereço da API usado pelo app não fica fixo no código: ele é informado em Ajustes → Servidor da API e salvo no aparelho.
 
 > **Atenção**: `MUSICBRAINZ_USER_AGENT` precisa conter um e-mail de contato real — o MusicBrainz bloqueia User-Agents genéricos. `DISCOGS_TOKEN` precisa ser um token pessoal real gerado na conta Discogs do projeto; sem ele, o adapter opera no limite de 25 req/min (não autenticado) em vez de 60 req/min, e algumas rotas podem responder 401.
 
@@ -402,7 +400,8 @@ DISCOGS_USER_AGENT=MusicGalaxy/1.0
 - `offset` (opcional) — Offset para paginação (padrão: 0)
 - `category` (opcional) — Filtrar por categoria (release_format, mix_edit, instrumental, playback)
 
-**Resposta:**
+**Resposta:** somente versões com fonte de áudio já resolvida (Regra 7). O filtro é aplicado no SQL antes da paginação; `pendentes_audio` informa quantas versões ainda aguardam descoberta em segundo plano. A busca também dispara a ingestão das fontes externas quando o banco local não tem o termo.
+
 ```json
 {
   "success": true,
@@ -411,7 +410,7 @@ DISCOGS_USER_AGENT=MusicGalaxy/1.0
     "total": 100,
     "page": 1,
     "per_page": 50,
-    "fromCache": true
+    "pendentes_audio": 12
   }
 }
 ```
@@ -436,16 +435,33 @@ Endpoint administrativo/interno, fora do fluxo normal do app. Serve apenas para 
 Detalhes de uma obra específica.
 
 #### `GET /api/works/:id/releases`
-Lista todas as versões/releases de uma obra.
+Lista as versões de uma obra que já têm áudio (Regra 7).
+
+#### `GET /api/works/by-decade/:decade`
+Lista obras de uma década; só aparecem obras com ao menos uma versão com áudio.
 
 #### `GET /api/releases/:id`
-Detalhes de uma versão/release específica.
+Detalhes de uma versão específica.
+
+#### `GET /api/releases/by-date`
+Versões recentes que já têm áudio.
 
 #### `GET /api/release-types`
-Lista o catálogo de tipos de versão disponíveis.
+Lista o catálogo de tipos de versão disponíveis (99 tipos, incluindo CD e DVD).
 
 #### `GET /api/artists`
 Lista e busca artistas cadastrados.
+
+### Áudio (Regra 3)
+
+#### `GET /api/releases/:id/stream`
+Proxy da fonte web aberta com suporte a `Range`/`206`. É a única origem de reprodução do app.
+
+#### `GET /api/releases/:id/download?format=mp3|flac`
+Gera o arquivo de áudio a partir da fonte aberta (cache → deduplicação → download → `ffprobe` → conversão condicional → validação). `format` aceita `mp3` (320 kbps) ou `flac`.
+
+#### `POST /api/releases/:id/audio-source`
+Registra manualmente uma fonte aberta confiável: `{ "url": "https://..." }`. A URL é validada pelo guard `auditarUrl()` antes de ser salva.
 
 ### Sistema
 
@@ -456,25 +472,31 @@ Health check da API.
 
 ## Validação da Integração
 
-TypeScript compilar sem erro não comprova que a lógica funciona. Antes de considerar a integração concluída, é preciso rodar e confirmar:
+TypeScript compilar sem erro não comprova que a lógica funciona. Antes de considerar uma entrega concluída, rode e confirme:
 
 ```bash
-# 1. Busca real de ponta a ponta — deve popular works, releases,
-#    external_api_cache e ingestion_log na primeira chamada.
-curl "http://localhost:3001/api/search?q=One%20More%20Time%20Daft%20Punk"
+# 1. Tipagem nas duas camadas
+cd backend && npx tsc --noEmit
+cd ../mobile && npx tsc --noEmit
 
-# 2. Repetir a mesma busca — deve responder do cache/banco local,
-#    sem gerar nova linha em external_api_cache.
-curl "http://localhost:3001/api/search?q=One%20More%20Time%20Daft%20Punk"
+# 2. Testes automatizados do backend (unitários + API com banco real)
+cd backend && npm test
+npm run test:api
 
-# 3. Confirmar no banco que o cache não duplicou:
-mysql -u root -p -P 3307 musicgalaxy -e \
-  "SELECT request_key, fetched_at, expires_at FROM external_api_cache;"
+# 3. Busca real: só versões com áudio aparecem (Regra 7)
+curl "http://localhost:3001/api/search?q=daft%20punk"
 
-# 4. Confirmar que a auditoria registrou a operação:
-mysql -u root -p -P 3307 musicgalaxy -e \
-  "SELECT metadata_source_id, request_type, status, works_created, releases_created FROM ingestion_log ORDER BY created_at DESC LIMIT 10;"
+# 4. Stream com Range (deve responder 206 e audio/mpeg)
+curl -i -H "Range: bytes=0-2047" \
+  "http://localhost:3001/api/releases/40/stream"
+
+# 5. Download real (deve entregar arquivo com assinatura ID3/fLaC)
+curl -o /tmp/teste.mp3 \
+  "http://localhost:3001/api/releases/40/download?format=mp3"
+file /tmp/teste.mp3
 ```
+
+A validação de UI é feita no Expo web (`cd mobile && npm run web`) percorrendo busca → detalhe → reprodução → download → favorito → playlist → histórico → recarregamento do app.
 
 ---
 
@@ -545,16 +567,18 @@ npm start          # Inicia servidor em produção
 - [x] Implementação das Regras 1 e 2 (capa oficial + busca completa)
 - [x] Integração com MusicBrainz, Cover Art Archive e Discogs
 - [x] Cache em MariaDB com TTL
-- [x] Player e download com URL original da release
-- [x] Interface mobile com design premium e animações
-- [x] Sistema de favoritos e histórico de buscas
+- [x] Player e download exclusivamente de fontes web abertas (Regra 3)
+- [x] Descoberta no Internet Archive e em sites abertos com Exact Match
+- [x] Fila de downloads persistente com progresso e cancelamento
+- [x] Favoritos, playlists e históricos de busca e reprodução
+- [x] Interface de vidro fosco com temas claro, escuro e automático
+- [x] Modo offline com servidor configurável
 
 ### Futuro
-- Tela de detalhes de obra/release com mais informações contextuais
-- Filtros avançados de busca
-- Tema escuro
-- Melhorias de acessibilidade
 - Painel administrativo para gestão de ingestão
+- Migrações versionadas do banco
+- Build e distribuição do APK (requer login no EAS)
+- Melhorias adicionais de acessibilidade
 
 ---
 
