@@ -189,10 +189,23 @@ class PlayerAudio {
     } catch (err) {
       console.error('Erro ao tocar áudio:', err);
 
-      // Erros de mídia do navegador (stream 404, formato não suportado etc.)
-      // viram mensagem amigável em pt-BR, sem expor o texto técnico do HTML5 Audio.
       const nomeErro = (err as { name?: string }).name;
       const mensagemTecnica = err instanceof Error ? err.message : String(err);
+
+      // Política de autoplay do navegador: o play() só é liberado após um
+      // gesto real do usuário. O texto técnico em inglês não deve aparecer
+      // na interface, então trocamos por uma orientação em português.
+      const bloqueioAutoplay = this.isWeb && (
+        nomeErro === 'NotAllowedError' ||
+        /user didn't interact|user gesture|not allowed/i.test(mensagemTecnica)
+      );
+
+      if (bloqueioAutoplay) {
+        throw new Error('O navegador bloqueou o áudio. Toque em Reproduzir novamente.');
+      }
+
+      // Erros de mídia do navegador (stream 404, formato não suportado etc.)
+      // viram mensagem amigável em pt-BR, sem expor o texto técnico do HTML5 Audio.
       const erroDeMidiaWeb = this.isWeb && (
         nomeErro === 'NotSupportedError' ||
         /supported source|no supported|failed to load/i.test(mensagemTecnica) ||
@@ -237,7 +250,9 @@ class PlayerAudio {
     try {
       if (this.isWeb) {
         if (this.audioWeb && this.estado.pausado) {
-          this.audioWeb.play();
+          // O play() da web devolve uma Promise: aguardar garante que um
+          // bloqueio do navegador seja tratado em vez de virar rejeição solta.
+          await this.audioWeb.play();
           this.estado.tocando = true;
           this.estado.pausado = false;
           this.iniciarIntervaloAtualizacao();

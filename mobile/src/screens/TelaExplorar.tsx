@@ -1,6 +1,6 @@
 // Tela de Exploração — versões recentes e obras por década.
-// Funciona como uma vitrine de descoberta para encontrar conteúdo novo.
-// Segue a identidade visual de vidro fosco: fundo com luzes suaves e cartões translúcidos.
+// Uma vitrine de descoberta que respeita a Regra 7: só aparecem versões e
+// obras que já têm áudio resolvido em fontes abertas.
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -9,23 +9,27 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  FlatList,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RootStackParamList, Release, Work } from '../types';
 import { BASE_URL } from '../services/api';
 import { useTheme } from '../contexts/ThemeContext';
 import { useModal } from '../contexts/ModalContext';
-import AuroraBackground from '../components/AuroraBackground';
+import FundoAtmosfera from '../components/FundoAtmosfera';
 import GlassCard from '../components/GlassCard';
+import ReleaseCard from '../components/ReleaseCard';
+import Icone from '../components/Icone';
+import CustomButton from '../components/CustomButton';
+import { comAlfa } from '../utils/cores';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Explorar'>;
 
 type SecaoAtiva = 'recentes' | 'decadas';
 
-// Interface local para resposta de versões recentes
 interface RespostaReleasesRecentes {
   success: boolean;
   data: {
@@ -36,7 +40,6 @@ interface RespostaReleasesRecentes {
   };
 }
 
-// Interface local para resposta de obras por década
 interface RespostaObrasPorDecada {
   success: boolean;
   data: {
@@ -49,6 +52,11 @@ interface RespostaObrasPorDecada {
 }
 
 const DECADAS = [1960, 1970, 1980, 1990, 2000, 2010, 2020];
+
+const SECOES: Array<{ valor: SecaoAtiva; rotulo: string }> = [
+  { valor: 'recentes', rotulo: 'Recentes' },
+  { valor: 'decadas', rotulo: 'Por década' },
+];
 
 export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
   const { colors } = useTheme();
@@ -63,19 +71,6 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
   const [obrasDecada, setObrasDecada] = useState<Work[]>([]);
   const [erroDecada, setErroDecada] = useState<string | null>(null);
 
-  // Carrega versões recentes na primeira renderização
-  useEffect(() => {
-    carregarReleasesRecentes();
-  }, []);
-
-  // Carrega obras da década quando a seleção muda
-  useEffect(() => {
-    if (secaoAtiva === 'decadas') {
-      carregarObrasPorDecada(decadaSelecionada);
-    }
-  }, [decadaSelecionada]);
-
-  // Carrega versões recentes
   const carregarReleasesRecentes = useCallback(async (): Promise<void> => {
     try {
       setCarregandoRecentes(true);
@@ -103,7 +98,6 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
     }
   }, [abrirErro]);
 
-  // Carrega obras de uma década específica
   const carregarObrasPorDecada = useCallback(async (decada: number): Promise<void> => {
     try {
       setCarregandoDecada(true);
@@ -133,419 +127,434 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
     }
   }, [abrirErro]);
 
-  // Navega para detalhes da versão
+  useEffect(() => {
+    void carregarReleasesRecentes();
+  }, [carregarReleasesRecentes]);
+
+  useEffect(() => {
+    if (secaoAtiva === 'decadas') {
+      void carregarObrasPorDecada(decadaSelecionada);
+    }
+    // A seleção de década é lida dentro do efeito intencionalmente.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secaoAtiva, decadaSelecionada]);
+
   const handleSelecionarRelease = (release: Release): void => {
     navigation.push('DetalheRelease', { release });
   };
 
-  // Navega para detalhes da obra
   const handleSelecionarObra = (obra: Work): void => {
     navigation.push('DetalheWork', { workId: obra.id });
   };
 
-  // Renderiza card de versão
-  const renderReleaseCard = (release: Release): React.JSX.Element => (
-    <TouchableOpacity
-      onPress={() => handleSelecionarRelease(release)}
-      activeOpacity={0.7}
-    >
-      <GlassCard style={[styles.cardRelease, { borderLeftColor: colors.primary }]}>
-        <View style={styles.conteudoCardRelease}>
-          <Text style={[styles.versionName, { color: colors.text }]} numberOfLines={2}>
-            {release.version_name}
-          </Text>
-          <Text style={[styles.workArtist, { color: colors.textSecondary }]} numberOfLines={1}>
-            {release.work_title} • {release.artist_name}
-          </Text>
-          <Text style={[styles.releaseInfo, { color: colors.primary }]}>
-            {release.release_year || '?'} • {release.release_type}
-          </Text>
-        </View>
-        <Text style={[styles.seta, { color: colors.primary }]}>→</Text>
-      </GlassCard>
-    </TouchableOpacity>
-  );
-
-  // Renderiza card de obra
-  const renderObraCard = (obra: Work): React.JSX.Element => (
-    <TouchableOpacity
-      onPress={() => handleSelecionarObra(obra)}
-      activeOpacity={0.7}
-    >
-      <GlassCard style={[styles.cardObra, { borderLeftColor: colors.primary }]}>
-        <View style={styles.conteudoCardObra}>
-          <Text style={[styles.tituloObra, { color: colors.text }]} numberOfLines={2}>
-            {obra.title}
-          </Text>
-          <Text style={[styles.artistaObra, { color: colors.textSecondary }]} numberOfLines={1}>
-            {obra.artist.name}
-          </Text>
-          <Text style={[styles.anoObra, { color: colors.primary }]}>
-            {obra.original_release_year || 'Ano desconhecido'}
-          </Text>
-        </View>
-        <Text style={[styles.seta, { color: colors.primary }]}>→</Text>
-      </GlassCard>
-    </TouchableOpacity>
-  );
-
-  // Renderiza botão de década
-  const renderBotaoDecada = (decada: number): React.JSX.Element => {
-    const selecionado = decadaSelecionada === decada;
-    return (
-      <TouchableOpacity
+  const renderErro = (mensagem: string, tentarNovamente: () => void): React.JSX.Element => (
+    <GlassCard style={styles.estadoCard}>
+      <View
         style={[
-          styles.botaoDecada,
-          {
-            backgroundColor: selecionado ? colors.primary : colors.glassCard,
-            borderColor: selecionado ? colors.primary : colors.glassBorder,
-          },
+          styles.estadoIcone,
+          { backgroundColor: comAlfa(colors.error, 0.12), borderColor: comAlfa(colors.error, 0.3) },
         ]}
-        onPress={() => setDecadaSelecionada(decada)}
       >
-        <Text
-          style={[
-            styles.textoDecada,
-            { color: selecionado ? colors.buttonText : colors.textSecondary },
-          ]}
-        >
-          {decada}s
-        </Text>
-      </TouchableOpacity>
+        <Icone nome="erro" tamanho={24} cor={colors.error} />
+      </View>
+      <Text style={[styles.estadoTitulo, { color: colors.text }]}>
+        Não foi possível carregar
+      </Text>
+      <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>{mensagem}</Text>
+      <View style={styles.estadoAcao}>
+        <CustomButton title="Tentar novamente" icone="recarregar" size="small" onPress={tentarNovamente} />
+      </View>
+    </GlassCard>
+  );
+
+  const renderRecentes = (): React.JSX.Element => {
+    if (carregandoRecentes) {
+      return (
+        <View style={styles.containerCarregando}>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={[styles.textoCarregando, { color: colors.textSecondary }]}>
+            Carregando versões recentes...
+          </Text>
+        </View>
+      );
+    }
+
+    if (erroRecentes) {
+      return renderErro(erroRecentes, () => void carregarReleasesRecentes());
+    }
+
+    if (releasesRecentes.length === 0) {
+      return (
+        <GlassCard style={styles.estadoCard}>
+          <View
+            style={[
+              styles.estadoIcone,
+              { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+            ]}
+          >
+            <Icone nome="musica" tamanho={24} cor={colors.textSecondary} />
+          </View>
+          <Text style={[styles.estadoTitulo, { color: colors.text }]}>
+            Nenhuma versão recente
+          </Text>
+          <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
+            Assim que novas versões com áudio forem encontradas, elas aparecem aqui.
+          </Text>
+        </GlassCard>
+      );
+    }
+
+    return (
+      <View>
+        <View style={styles.secaoCabecalho}>
+          <View style={styles.secaoTituloLinha}>
+            <Icone nome="ondas" tamanho={14} cor={colors.primary} />
+            <Text style={[styles.secaoTitulo, { color: colors.text }]}>Versões recentes</Text>
+          </View>
+          <Text style={[styles.secaoContagem, { color: colors.textSecondary }]}>
+            {releasesRecentes.length}
+          </Text>
+        </View>
+
+        {releasesRecentes.map((release) => (
+          <ReleaseCard
+            key={release.id}
+            release={release}
+            onPress={handleSelecionarRelease}
+          />
+        ))}
+      </View>
     );
   };
 
-  // Renderiza seção de recentes
-  const renderRecentes = (): React.JSX.Element => (
-    <View style={styles.conteudoSecao}>
-      <Text style={[styles.tituloSecao, { color: colors.text }]}>🎵 Versões recentes</Text>
-
-      {carregandoRecentes ? (
-        <View style={styles.containerCarregando}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
-      ) : erroRecentes ? (
-        <View style={styles.containerErro}>
-          <Text style={[styles.textoErro, { color: colors.error }]}>{erroRecentes}</Text>
-          <TouchableOpacity
-            style={[styles.botaoTentar, { backgroundColor: colors.button }]}
-            onPress={carregarReleasesRecentes}
-          >
-            <Text style={[styles.textoButton, { color: colors.buttonText }]}>Tentar novamente</Text>
-          </TouchableOpacity>
-        </View>
-      ) : releasesRecentes.length > 0 ? (
-        <FlatList
-          scrollEnabled={false}
-          data={releasesRecentes}
-          keyExtractor={rel => `recente-${rel.id}`}
-          renderItem={({ item }) => renderReleaseCard(item)}
-        />
-      ) : (
-        <View style={styles.containerVazio}>
-          <Text style={[styles.textoVazio, { color: colors.textSecondary }]}>
-            Nenhuma versão encontrada
-          </Text>
-        </View>
-      )}
-    </View>
-  );
-
-  // Renderiza seção de décadas
   const renderDecadas = (): React.JSX.Element => (
-    <View style={styles.conteudoSecao}>
-      <Text style={[styles.tituloSecao, { color: colors.text }]}>📅 Explorar por Década</Text>
+    <View>
+      <View style={styles.secaoCabecalho}>
+        <View style={styles.secaoTituloLinha}>
+          <Icone nome="calendario" tamanho={14} cor={colors.primary} />
+          <Text style={[styles.secaoTitulo, { color: colors.text }]}>Explorar por década</Text>
+        </View>
+      </View>
 
       <View style={styles.containerDecadas}>
-        {DECADAS.map(decada => renderBotaoDecada(decada))}
+        {DECADAS.map((decada) => {
+          const selecionado = decadaSelecionada === decada;
+          return (
+            <TouchableOpacity
+              key={decada}
+              style={[
+                styles.botaoDecada,
+                {
+                  backgroundColor: selecionado ? colors.button : colors.glassCard,
+                  borderColor: selecionado ? colors.button : colors.glassBorder,
+                },
+              ]}
+              onPress={() => setDecadaSelecionada(decada)}
+              activeOpacity={0.75}
+              accessibilityState={{ selected: selecionado }}
+            >
+              <Text
+                style={[
+                  styles.textoDecada,
+                  { color: selecionado ? colors.buttonText : colors.text },
+                ]}
+              >
+                {decada}s
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {carregandoDecada ? (
         <View style={styles.containerCarregando}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={[styles.textoCarregando, { color: colors.textSecondary }]}>
+            Carregando obras dos anos {decadaSelecionada}...
+          </Text>
         </View>
       ) : erroDecada ? (
-        <View style={styles.containerErro}>
-          <Text style={[styles.textoErro, { color: colors.error }]}>{erroDecada}</Text>
-        </View>
-      ) : obrasDecada.length > 0 ? (
-        <>
-          <Text style={[styles.subtitulo, { color: colors.textSecondary }]}>
-            {obrasDecada.length} obra{obrasDecada.length !== 1 ? 's' : ''} dos anos {decadaSelecionada}
+        renderErro(erroDecada, () => void carregarObrasPorDecada(decadaSelecionada))
+      ) : obrasDecada.length === 0 ? (
+        <GlassCard style={styles.estadoCard}>
+          <View
+            style={[
+              styles.estadoIcone,
+              { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+            ]}
+          >
+            <Icone nome="calendario" tamanho={24} cor={colors.textSecondary} />
+          </View>
+          <Text style={[styles.estadoTitulo, { color: colors.text }]}>
+            Nenhuma obra nos anos {decadaSelecionada}
           </Text>
-          <FlatList
-            scrollEnabled={false}
-            data={obrasDecada}
-            keyExtractor={obra => `decada-${obra.id}`}
-            renderItem={({ item }) => renderObraCard(item)}
-          />
-        </>
+          <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
+            Só aparecem obras que tenham ao menos uma versão com áudio disponível.
+          </Text>
+        </GlassCard>
       ) : (
-        <View style={styles.containerVazio}>
-          <Text style={[styles.textoVazio, { color: colors.textSecondary }]}>
-            Nenhuma obra encontrada na década de {decadaSelecionada}
+        <>
+          <Text style={[styles.contagemDecada, { color: colors.textSecondary }]}>
+            {obrasDecada.length} {obrasDecada.length === 1 ? 'obra encontrada' : 'obras encontradas'}
           </Text>
-        </View>
+
+          {obrasDecada.map((obra) => (
+            <TouchableOpacity
+              key={obra.id}
+              style={[
+                styles.cardObra,
+                { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+              ]}
+              onPress={() => handleSelecionarObra(obra)}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel={`Abrir a obra ${obra.title}`}
+            >
+              <View
+                style={[
+                  styles.cardIcone,
+                  { backgroundColor: comAlfa(colors.primary, 0.12) },
+                ]}
+              >
+                <Icone nome="musica" tamanho={16} cor={colors.primary} />
+              </View>
+
+              <View style={styles.conteudoCardObra}>
+                <Text style={[styles.tituloObra, { color: colors.text }]} numberOfLines={2}>
+                  {obra.title}
+                </Text>
+                <Text style={[styles.artistaObra, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {obra.artist.name}
+                </Text>
+                {obra.original_release_year && (
+                  <Text style={[styles.anoObra, { color: colors.primary }]}>
+                    {obra.original_release_year}
+                  </Text>
+                )}
+              </View>
+
+              <Icone nome="seta" tamanho={17} cor={colors.textSecondary} />
+            </TouchableOpacity>
+          ))}
+        </>
       )}
     </View>
   );
 
   return (
-    <AuroraBackground style={styles.container}>
-      {/* Cabeçalho em vidro forte */}
-      <View
-        style={[
-          styles.headerBox,
-          { backgroundColor: colors.glassCardForte, borderBottomColor: colors.glassBorder },
-        ]}
-      >
-        <Text style={[styles.tituloHeader, { color: colors.text }]}>Explorar</Text>
-        <Text style={[styles.subtituloHeader, { color: colors.textSecondary }]}>
-          Descubra novo conteúdo
-        </Text>
-      </View>
-
-      {/* Abas */}
-      <View
-        style={[
-          styles.containerAbas,
-          { backgroundColor: colors.glassCardForte, borderBottomColor: colors.glassBorder },
-        ]}
-      >
-        <TouchableOpacity
-          style={[
-            styles.aba,
-            secaoAtiva === 'recentes' && { borderBottomColor: colors.primary },
-          ]}
-          onPress={() => setSecaoAtiva('recentes')}
-        >
-          <Text
-            style={[
-              styles.textoAba,
-              { color: secaoAtiva === 'recentes' ? colors.primary : colors.textSecondary },
-            ]}
-          >
-            Recentes
+    <FundoAtmosfera>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <View style={styles.cabecalho}>
+          <Text style={[styles.etiqueta, { color: colors.textSecondary }]}>DESCOBERTA</Text>
+          <Text style={[styles.titulo, { color: colors.text }]}>Explorar</Text>
+          <Text style={[styles.subtituloHeader, { color: colors.textSecondary }]}>
+            Versões recentes e obras por década
           </Text>
-        </TouchableOpacity>
+        </View>
 
-        <TouchableOpacity
-          style={[
-            styles.aba,
-            secaoAtiva === 'decadas' && { borderBottomColor: colors.primary },
-          ]}
-          onPress={() => setSecaoAtiva('decadas')}
+        {/* Abas em pílulas de vidro */}
+        <View style={styles.containerAbas}>
+          {SECOES.map((secao) => {
+            const ativa = secaoAtiva === secao.valor;
+            return (
+              <TouchableOpacity
+                key={secao.valor}
+                style={[
+                  styles.aba,
+                  {
+                    backgroundColor: ativa ? colors.button : colors.glassCard,
+                    borderColor: ativa ? colors.button : colors.glassBorder,
+                  },
+                ]}
+                onPress={() => setSecaoAtiva(secao.valor)}
+                activeOpacity={0.75}
+                accessibilityState={{ selected: ativa }}
+              >
+                <Icone
+                  nome={secao.valor === 'recentes' ? 'ondas' : 'calendario'}
+                  tamanho={14}
+                  cor={ativa ? colors.buttonText : colors.textSecondary}
+                />
+                <Text style={[styles.textoAba, { color: ativa ? colors.buttonText : colors.text }]}>
+                  {secao.rotulo}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <ScrollView
+          contentContainerStyle={styles.conteudo}
+          showsVerticalScrollIndicator={false}
         >
-          <Text
-            style={[
-              styles.textoAba,
-              { color: secaoAtiva === 'decadas' ? colors.primary : colors.textSecondary },
-            ]}
-          >
-            Por Década
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Conteúdo */}
-      <ScrollView style={styles.conteudo}>
-        {secaoAtiva === 'recentes' && renderRecentes()}
-        {secaoAtiva === 'decadas' && renderDecadas()}
-
-        {/* Espaço extra no final */}
-        <View style={{ height: 20 }} />
-      </ScrollView>
-    </AuroraBackground>
+          {secaoAtiva === 'recentes' ? renderRecentes() : renderDecadas()}
+        </ScrollView>
+      </SafeAreaView>
+    </FundoAtmosfera>
   );
 }
-
-// ============================================================
-// Estilos
-// As cores vêm do tema (useTheme) e são aplicadas nos componentes;
-// aqui ficam apenas os valores de layout.
-// ============================================================
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-
-  headerBox: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+  cabecalho: {
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'web' ? 22 : 8,
+    paddingBottom: 10,
   },
-
-  tituloHeader: {
-    fontSize: 20,
-    fontWeight: 'bold',
+  etiqueta: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1.8,
     marginBottom: 4,
   },
-
-  subtituloHeader: {
-    fontSize: 13,
+  titulo: {
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
-
+  subtituloHeader: {
+    fontSize: 11.5,
+    marginTop: 3,
+  },
   containerAbas: {
     flexDirection: 'row',
-    borderBottomWidth: 1,
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
   },
-
   aba: {
     flex: 1,
-    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    borderBottomWidth: 3,
-    borderBottomColor: 'transparent',
+    gap: 6,
+    paddingVertical: 11,
+    borderRadius: 999,
+    borderWidth: 1,
   },
-
   textoAba: {
-    fontSize: 14,
+    fontSize: 11.5,
     fontWeight: '600',
   },
-
   conteudo: {
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingTop: 16,
+    paddingTop: 6,
+    paddingBottom: 130,
   },
-
-  conteudoSecao: {
-    paddingBottom: 20,
-  },
-
-  tituloSecao: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 16,
-  },
-
-  subtitulo: {
-    fontSize: 13,
-    marginBottom: 12,
-  },
-
-  cardRelease: {
-    marginBottom: 12,
-    padding: 12,
+  secaoCabecalho: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderLeftWidth: 4,
+    justifyContent: 'space-between',
+    paddingHorizontal: 22,
+    paddingBottom: 8,
   },
-
-  conteudoCardRelease: {
-    flex: 1,
-  },
-
-  versionName: {
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-
-  workArtist: {
-    fontSize: 13,
-    marginBottom: 4,
-  },
-
-  releaseInfo: {
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-
-  cardObra: {
-    marginBottom: 12,
-    padding: 12,
+  secaoTituloLinha: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderLeftWidth: 4,
+    gap: 7,
   },
-
-  conteudoCardObra: {
-    flex: 1,
-  },
-
-  tituloObra: {
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-
-  artistaObra: {
+  secaoTitulo: {
     fontSize: 13,
-    marginBottom: 4,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
-
-  anoObra: {
-    fontSize: 12,
-    fontWeight: 'bold',
+  secaoContagem: {
+    fontSize: 10.5,
+    fontWeight: '600',
   },
-
-  seta: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 12,
-  },
-
   containerDecadas: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginBottom: 20,
-    justifyContent: 'space-between',
+    gap: 8,
+    paddingHorizontal: 20,
+    marginBottom: 14,
   },
-
   botaoDecada: {
-    width: '48%',
-    borderRadius: 16,
-    paddingVertical: 12,
-    marginBottom: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
+    paddingHorizontal: 15,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
   },
-
   textoDecada: {
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 11.5,
+    fontWeight: '700',
   },
-
+  contagemDecada: {
+    fontSize: 10.5,
+    paddingHorizontal: 22,
+    marginBottom: 9,
+  },
+  cardObra: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 20,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  cardIcone: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  conteudoCardObra: {
+    flex: 1,
+  },
+  tituloObra: {
+    fontSize: 13.5,
+    fontWeight: '600',
+    lineHeight: 17,
+  },
+  artistaObra: {
+    fontSize: 10.5,
+    marginTop: 2,
+  },
+  anoObra: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 3,
+  },
   containerCarregando: {
-    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 36,
+    gap: 10,
   },
-
-  containerErro: {
-    justifyContent: 'center',
+  textoCarregando: {
+    fontSize: 11.5,
+  },
+  estadoCard: {
+    marginHorizontal: 20,
+    padding: 22,
+    borderRadius: 24,
     alignItems: 'center',
-    paddingVertical: 40,
   },
-
-  textoErro: {
-    fontSize: 14,
-    marginBottom: 16,
+  estadoIcone: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  estadoTitulo: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
     textAlign: 'center',
   },
-
-  botaoTentar: {
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 12,
+  estadoDica: {
+    fontSize: 11.5,
+    lineHeight: 17,
+    textAlign: 'center',
+    maxWidth: 300,
   },
-
-  textoButton: {
-    fontWeight: 'bold',
-    fontSize: 13,
-  },
-
-  containerVazio: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 48,
-  },
-
-  textoVazio: {
-    fontSize: 14,
+  estadoAcao: {
+    marginTop: 14,
   },
 });

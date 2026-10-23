@@ -1,6 +1,9 @@
 // Tela principal de busca musical.
-// Implementa debounce de 600ms, histórico, favoritos, filtros e o visual
-// de vidro fosco: fundo decorativo com luzes e cartões translúcidos.
+// Reúne a identidade de vidro fosco do projeto: fundo atmosférico, campo
+// de busca em pílula, atalhos de favoritos e fila de downloads, sugestões
+// de histórico e o mascote do Music Galaxy no estado inicial. A busca tem
+// debounce de 600 ms e só dispara a partir de 3 letras, para não gastar a
+// cota das fontes externas com termos parciais.
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -15,6 +18,10 @@ import {
   ListRenderItemInfo,
   Platform,
   Animated,
+  ScrollView,
+  Image,
+  Keyboard,
+  GestureResponderEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -28,22 +35,32 @@ import { useHistorico, ItemHistorico } from '../contexts/HistoricoContext';
 import { useModal } from '../contexts/ModalContext';
 import { useTheme } from '../contexts/ThemeContext';
 import FiltrosModal, { Filtros } from '../components/FiltrosModal';
-import { TIMINGS, EASING, USE_NATIVE_DRIVER } from '../utils/animacoes';
-import { MusicEmojis } from '../components/AnimatedIcon';
-import AuroraBackground from '../components/AuroraBackground';
+import { downloadManager } from '../services/downloadManager';
+import { TIMINGS, USE_NATIVE_DRIVER } from '../utils/animacoes';
+import Icone from '../components/Icone';
+import FundoAtmosfera from '../components/FundoAtmosfera';
 import GlassCard from '../components/GlassCard';
+import CustomButton from '../components/CustomButton';
+import { comAlfa } from '../utils/cores';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Busca'>;
 
 const DEBOUNCE_MS = 600;
 const ITENS_POR_PAGINA = 30;
+const MINIMO_LETRAS = 3;
+
+// Sugestões iniciais para quem abre o aplicativo pela primeira vez.
+const SUGESTOES = ['Elvis Presley', 'The Beatles', 'Queen', 'Michael Jackson'];
+
+// Mascote do Music Galaxy: pequeno explorador musical que segura um disco.
+const MASCOTE = require('../../assets/mascote.png');
 
 export default function BuscaScreen(): React.JSX.Element {
   const navigation = useNavigation<NavProp>();
   const { favoritos } = useFavoritos();
-  const { historico, adicionarBusca, removerBusca } = useHistorico();
+  const { historico, adicionarBusca, removerBusca, limparHistorico } = useHistorico();
   const { toastSucesso, toastErro, toastInfo } = useModal();
-  const { colors, isDark, toggleTheme } = useTheme();
+  const { colors, isDark } = useTheme();
 
   const [termo, setTermo]           = useState('');
   const [releases, setReleases]     = useState<Release[]>([]);
@@ -58,11 +75,11 @@ export default function BuscaScreen(): React.JSX.Element {
   const [focoInput, setFocoInput]   = useState(false);
   const [mostrarFiltros, setMostrarFiltros] = useState(false);
   const [filtros, setFiltros]       = useState<Filtros>({});
+  const [resumoFila, setResumoFila] = useState({ baixando: 0, erros: 0, total: 0 });
 
-  // Animações
-  const scaleHeaderAnim = useRef(new Animated.Value(1)).current;
+  // Animações de entrada da lista e dos estados vazios.
   const fadeListaAnim = useRef(new Animated.Value(0)).current;
-  const slideEstadoAnim = useRef(new Animated.Value(20)).current;
+  const slideEstadoAnim = useRef(new Animated.Value(16)).current;
   const opacidadeEstadoAnim = useRef(new Animated.Value(0)).current;
 
   const timerDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -70,10 +87,32 @@ export default function BuscaScreen(): React.JSX.Element {
 
   useEffect(() => {
     return () => {
-      timerDebounce.current && clearTimeout(timerDebounce.current);
+      if (timerDebounce.current) clearTimeout(timerDebounce.current);
       abortController.current?.abort();
     };
   }, []);
+
+  // Carrega a fila persistida e acompanha o andamento para o distintivo.
+  const atualizarResumoFila = useCallback(() => {
+    const contagem = downloadManager.obterContagem();
+    setResumoFila({
+      baixando: contagem.baixando,
+      erros: contagem.erros,
+      total: contagem.total,
+    });
+  }, []);
+
+  useEffect(() => {
+    let ativo = true;
+    void downloadManager.initialize().then(() => {
+      if (ativo) atualizarResumoFila();
+    });
+    const cancelarInscricao = downloadManager.assinarTodos(atualizarResumoFila);
+    return () => {
+      ativo = false;
+      cancelarInscricao();
+    };
+  }, [atualizarResumoFila]);
 
   // Web: o Chrome pinta o campo de busca de amarelo quando preenche
   // automaticamente (-webkit-autofill), mudando a cor do placeholder para
@@ -103,22 +142,28 @@ export default function BuscaScreen(): React.JSX.Element {
     `;
   }, [colors.text, colors.input]);
 
-  // Anima entrada da lista quando há resultados
-  useEffect(() => {
-    const resultadosFiltrados = releases.filter(r => {
-      let resultado = true;
-      if (filtros.categoria) {
-        resultado = resultado && r.release_type_category === filtros.categoria;
-      }
-      if (filtros.anoMin !== undefined && filtros.anoMax !== undefined) {
-        if (r.release_year) {
-          resultado = resultado && r.release_year >= filtros.anoMin && r.release_year <= filtros.anoMax;
-        }
-      }
-      return resultado;
-    });
+  const releasesFiltrados = useCallback(() => {
+    let resultado = releases;
 
-    if (resultadosFiltrados.length > 0) {
+    if (filtros.categoria) {
+      resultado = resultado.filter((r) => r.release_type_category === filtros.categoria);
+    }
+
+    if (filtros.anoMin !== undefined && filtros.anoMax !== undefined) {
+      resultado = resultado.filter((r) => {
+        if (!r.release_year) return false;
+        return r.release_year >= filtros.anoMin! && r.release_year <= filtros.anoMax!;
+      });
+    }
+
+    return resultado;
+  }, [releases, filtros]);
+
+  const listaFiltrada = releasesFiltrados();
+
+  // Anima a lista sempre que há resultados visíveis.
+  useEffect(() => {
+    if (listaFiltrada.length > 0) {
       Animated.timing(fadeListaAnim, {
         toValue: 1,
         duration: TIMINGS.normal,
@@ -127,11 +172,13 @@ export default function BuscaScreen(): React.JSX.Element {
     } else {
       fadeListaAnim.setValue(0);
     }
-  }, [releases, filtros]);
+  }, [listaFiltrada.length, fadeListaAnim]);
 
-  // Anima estados vazios
+  // Anima os estados vazios (erro, sem resultado, aguardando áudio).
   useEffect(() => {
-    if (releases.length === 0 && !carregando && termo.length > 0) {
+    if (listaFiltrada.length === 0) {
+      slideEstadoAnim.setValue(16);
+      opacidadeEstadoAnim.setValue(0);
       Animated.parallel([
         Animated.timing(slideEstadoAnim, {
           toValue: 0,
@@ -145,7 +192,7 @@ export default function BuscaScreen(): React.JSX.Element {
         }),
       ]).start();
     }
-  }, [releases.length, carregando, termo]);
+  }, [listaFiltrada.length, carregando, erro, termo, slideEstadoAnim, opacidadeEstadoAnim]);
 
   const executarBusca = useCallback(async (
     termoBusca: string,
@@ -173,14 +220,14 @@ export default function BuscaScreen(): React.JSX.Element {
       });
 
       if (resultado.success) {
-        setReleases(prev => acumular ? [...prev, ...resultado.data.results] : resultado.data.results);
+        setReleases((prev) => acumular ? [...prev, ...resultado.data.results] : resultado.data.results);
         setTotal(resultado.data.total);
         setFromCache(resultado.data.fromCache);
         setPendentesAudio(resultado.data.pendentes_audio ?? 0);
 
         if (!acumular && termoBusca.trim()) {
           adicionarBusca(termoBusca.trim());
-          // Mensagem com plural correto em português
+          // Mensagem com plural correto em português.
           const quantidade = resultado.data.results.length;
           const pendentes  = resultado.data.pendentes_audio ?? 0;
           if (quantidade === 1) {
@@ -189,7 +236,7 @@ export default function BuscaScreen(): React.JSX.Element {
             toastSucesso(`Encontradas ${quantidade} versões!`);
           } else if (pendentes > 0) {
             // O backend achou versões do termo, mas ainda está resolvendo o
-            // áudio delas em sites abertos — avisa em vez de dizer "0 versões"
+            // áudio delas em sites abertos — avisa em vez de dizer "0 versões".
             toastInfo(`Localizando fontes de áudio para ${pendentes} ${pendentes === 1 ? 'versão' : 'versões'}...`);
           }
         }
@@ -208,24 +255,10 @@ export default function BuscaScreen(): React.JSX.Element {
     setTermo(novoTermo);
     setOffset(0);
 
-    // Anima header ao focar no input
-    if (novoTermo.length > 0) {
-      Animated.spring(scaleHeaderAnim, {
-        toValue: 0.95,
-        useNativeDriver: USE_NATIVE_DRIVER,
-        ...EASING.suave,
-      }).start();
-    } else {
-      Animated.spring(scaleHeaderAnim, {
-        toValue: 1,
-        useNativeDriver: USE_NATIVE_DRIVER,
-        ...EASING.suave,
-      }).start();
-    }
-
-    timerDebounce.current && clearTimeout(timerDebounce.current);
+    if (timerDebounce.current) clearTimeout(timerDebounce.current);
 
     if (!novoTermo.trim()) {
+      abortController.current?.abort();
       setReleases([]);
       setTotal(0);
       setErro(null);
@@ -236,7 +269,7 @@ export default function BuscaScreen(): React.JSX.Element {
 
     // Evita ingerir termos parciais ("da", "daf") que gastam cota das APIs
     // externas e poluem o banco com buscas sem sentido.
-    if (novoTermo.trim().length < 3) {
+    if (novoTermo.trim().length < MINIMO_LETRAS) {
       setCarregando(false);
       return;
     }
@@ -244,17 +277,31 @@ export default function BuscaScreen(): React.JSX.Element {
     timerDebounce.current = setTimeout(() => {
       executarBusca(novoTermo, 0, false);
     }, DEBOUNCE_MS);
-  }, [executarBusca, scaleHeaderAnim]);
+  }, [executarBusca]);
+
+  const enviarBusca = useCallback(() => {
+    if (termo.trim().length < MINIMO_LETRAS) {
+      if (termo.trim().length > 0) {
+        toastInfo(`Digite pelo menos ${MINIMO_LETRAS} letras para buscar.`);
+      }
+      return;
+    }
+    if (timerDebounce.current) clearTimeout(timerDebounce.current);
+    Keyboard.dismiss();
+    setFocoInput(false);
+    setOffset(0);
+    void executarBusca(termo, 0, false);
+  }, [termo, executarBusca, toastInfo]);
 
   const carregarMais = useCallback(() => {
     if (carregando || releases.length >= total) return;
     const novoOffset = offset + ITENS_POR_PAGINA;
     setOffset(novoOffset);
-    executarBusca(termo, novoOffset, true);
+    void executarBusca(termo, novoOffset, true);
   }, [carregando, releases.length, total, offset, termo, executarBusca]);
 
   const limparBusca = useCallback(() => {
-    timerDebounce.current && clearTimeout(timerDebounce.current);
+    if (timerDebounce.current) clearTimeout(timerDebounce.current);
     abortController.current?.abort();
     setTermo('');
     setReleases([]);
@@ -262,25 +309,21 @@ export default function BuscaScreen(): React.JSX.Element {
     setErro(null);
     setPendentesAudio(0);
     setOffset(0);
-    setFocoInput(false);
-
-    // Reset animations
-    Animated.spring(scaleHeaderAnim, {
-      toValue: 1,
-      useNativeDriver: USE_NATIVE_DRIVER,
-      ...EASING.suave,
-    }).start();
-  }, [scaleHeaderAnim]);
+  }, []);
 
   const selecionarSugestao = useCallback((termoSugerido: string) => {
     setTermo(termoSugerido);
     setFocoInput(false);
+    Keyboard.dismiss();
     setOffset(0);
-    executarBusca(termoSugerido, 0, false);
+    void executarBusca(termoSugerido, 0, false);
   }, [executarBusca]);
 
-  const removerSugestao = useCallback(async (termoRemover: string, e: any) => {
-    e.stopPropagation();
+  const removerSugestao = useCallback(async (
+    termoRemover: string,
+    evento: GestureResponderEvent
+  ) => {
+    evento.stopPropagation();
     await removerBusca(termoRemover);
     toastSucesso(`"${termoRemover}" removido do histórico`);
   }, [removerBusca, toastSucesso]);
@@ -295,24 +338,10 @@ export default function BuscaScreen(): React.JSX.Element {
     toastSucesso('Filtros removidos');
   }, [toastSucesso]);
 
-  const releasesFiltrados = useCallback(() => {
-    let resultado = releases;
+  const contadorFiltros =
+    (filtros.categoria ? 1 : 0) + (filtros.anoMin !== undefined ? 1 : 0);
 
-    if (filtros.categoria) {
-      resultado = resultado.filter(r => r.release_type_category === filtros.categoria);
-    }
-
-    if (filtros.anoMin !== undefined && filtros.anoMax !== undefined) {
-      resultado = resultado.filter(r => {
-        if (!r.release_year) return false;
-        return r.release_year >= filtros.anoMin! && r.release_year <= filtros.anoMax!;
-      });
-    }
-
-    return resultado;
-  }, [releases, filtros]);
-
-  const contadorFiltros = Object.values(filtros).filter(v => v !== undefined).length;
+  const filaEmAndamento = resumoFila.baixando + resumoFila.erros;
 
   const renderItem = useCallback(({ item }: ListRenderItemInfo<Release>) => (
     <ReleaseCard
@@ -327,87 +356,134 @@ export default function BuscaScreen(): React.JSX.Element {
     if (carregando && releases.length > 0) {
       return <ActivityIndicator size="small" color={colors.primary} style={styles.spinner} />;
     }
-    if (!carregando && releasesFiltrados().length >= total && total > 0) {
+    if (!carregando && listaFiltrada.length >= total && total > 0) {
       return (
         <Text style={[styles.fimLista, { color: colors.textSecondary }]}>
-          {releasesFiltrados().length} de {total} {total === 1 ? 'versão' : 'versões'}
+          {listaFiltrada.length} de {total} {total === 1 ? 'versão' : 'versões'}
         </Text>
       );
     }
     return null;
-  }, [carregando, releases.length, releasesFiltrados, total, colors]);
+  }, [carregando, releases.length, listaFiltrada.length, total, colors]);
 
-  const ListHeader = useCallback(() => {
-    if (releases.length === 0) return null;
-    return (
-      <Animated.View
-        style={[
-          styles.headerLista,
-          {
-            opacity: fadeListaAnim,
-          },
-        ]}
-      >
-        <Text style={[styles.headerTexto, { color: colors.textSecondary }]}>
-          {releasesFiltrados().length} resultado{releasesFiltrados().length !== 1 ? 's' : ''}
-          {fromCache ? ' · do banco local' : ' · buscado agora'}
+  const ListHeader = useCallback(() => (
+    <View style={styles.headerLista}>
+      <View style={styles.headerListaLinha}>
+        <Text style={[styles.headerTexto, { color: colors.text }]}>
+          {listaFiltrada.length} {listaFiltrada.length === 1 ? 'versão' : 'versões'}
         </Text>
-      </Animated.View>
-    );
-  }, [releases.length, releasesFiltrados, fromCache, fadeListaAnim, colors]);
+        <View
+          style={[
+            styles.chipFonte,
+            { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+          ]}
+        >
+          <Icone
+            nome={fromCache ? 'banco' : 'ondas'}
+            tamanho={11}
+            cor={colors.textSecondary}
+          />
+          <Text style={[styles.chipFonteTexto, { color: colors.textSecondary }]}>
+            {fromCache ? 'Banco local' : 'Buscado agora'}
+          </Text>
+        </View>
+      </View>
+
+      {pendentesAudio > 0 && (
+        <View
+          style={[
+            styles.avisoPendentes,
+            {
+              backgroundColor: comAlfa(colors.warning, 0.1),
+              borderColor: comAlfa(colors.warning, 0.28),
+            },
+          ]}
+        >
+          <Icone nome="relogio" tamanho={14} cor={colors.warning} />
+          <Text style={[styles.avisoPendentesTexto, { color: colors.warning }]}>
+            {pendentesAudio} {pendentesAudio === 1 ? 'versão aguardando' : 'versões aguardando'} fonte de áudio
+          </Text>
+        </View>
+      )}
+    </View>
+  ), [listaFiltrada.length, colors, fromCache, pendentesAudio]);
 
   return (
-    <AuroraBackground>
+    <FundoAtmosfera>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.background} />
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-        {/* Cabeçalho de vidro com animação de escala */}
-        <Animated.View
-          style={{
-            transform: [{ scale: scaleHeaderAnim }],
-          }}
-        >
-          <GlassCard forte style={styles.header}>
-            <View style={styles.tituloContainer}>
-              <Text style={[styles.titulo, { color: colors.text }]}>Music Galaxy</Text>
-              <Text style={[styles.subtitulo, { color: colors.textSecondary }]}>Busque versões e lançamentos</Text>
+        {/* Cabeçalho da marca e atalhos rápidos */}
+        <View style={styles.cabecalho}>
+          <View style={styles.marca}>
+            <View style={styles.marcaEtiqueta}>
+              <View style={[styles.pontoMarca, { backgroundColor: colors.primary }]} />
+              <Text style={[styles.marcaEtiquetaTexto, { color: colors.textSecondary }]}>
+                UNIVERSO MUSICAL
+              </Text>
             </View>
+            <Text style={[styles.titulo, { color: colors.text }]}>Music Galaxy</Text>
+          </View>
+
+          <View style={styles.acoesCabecalho}>
             <TouchableOpacity
-              style={styles.botaoFavoritos}
-              onPress={() => navigation.navigate('Favoritos')}
-              activeOpacity={0.7}
-              accessibilityLabel="Ver favoritos"
+              style={[
+                styles.botaoCabecalho,
+                { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+              ]}
+              onPress={() => navigation.navigate('FilaDownloads')}
+              activeOpacity={0.75}
+              accessibilityLabel="Abrir fila de downloads"
             >
-              <Text style={styles.botaoFavoritosTexto}>{MusicEmojis.favorite}</Text>
-              {favoritos.length > 0 && (
-                <View style={[styles.badgeContador, { backgroundColor: colors.error }]}>
+              <Icone nome="download" tamanho={19} cor={colors.text} />
+              {filaEmAndamento > 0 && (
+                <View style={[styles.badgeContador, { backgroundColor: colors.primary }]}>
                   <Text style={[styles.badgeContadorTexto, { color: colors.buttonText }]}>
-                    {favoritos.length > 99 ? '99+' : favoritos.length}
+                    {filaEmAndamento > 9 ? '9+' : filaEmAndamento}
                   </Text>
                 </View>
               )}
             </TouchableOpacity>
-          </GlassCard>
-        </Animated.View>
 
-        {/* Campo de busca e filtros */}
+            <TouchableOpacity
+              style={[
+                styles.botaoCabecalho,
+                { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+              ]}
+              onPress={() => navigation.navigate('Favoritos')}
+              activeOpacity={0.75}
+              accessibilityLabel="Ver favoritos"
+            >
+              <Icone nome="favorito" tamanho={19} cor={colors.text} />
+              {favoritos.length > 0 && (
+                <View style={[styles.badgeContador, { backgroundColor: colors.primary }]}>
+                  <Text style={[styles.badgeContadorTexto, { color: colors.buttonText }]}>
+                    {favoritos.length > 9 ? '9+' : favoritos.length}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Campo de busca em pílula e botão de filtros */}
         <View style={styles.campoBuscaContainer}>
           <View
             style={[
               styles.campoBusca,
               {
                 backgroundColor: colors.input,
-                borderColor: focoInput ? colors.primary : colors.border,
+                borderColor: focoInput ? colors.primary : colors.glassBorder,
               },
               focoInput && {
                 shadowColor: colors.primary,
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.2,
-                shadowRadius: 8,
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.18,
+                shadowRadius: 14,
                 elevation: 6,
               },
             ]}
           >
-            <Text style={styles.iconeBusca}>{MusicEmojis.search}</Text>
+            <Icone nome="busca" tamanho={18} cor={focoInput ? colors.primary : colors.textSecondary} />
             {/* O placeholder é um Text próprio sobreposto ao campo: no Android,
                 o autofill do sistema pinta o placeholder nativo de amarelo e
                 ignora o placeholderTextColor. Assim a cor vem SEMPRE do token
@@ -417,6 +493,7 @@ export default function BuscaScreen(): React.JSX.Element {
                 style={[styles.input, { color: colors.text }]}
                 value={termo}
                 onChangeText={aoMudarTermo}
+                onSubmitEditing={enviarBusca}
                 onFocus={() => setFocoInput(true)}
                 onBlur={() => setTimeout(() => setFocoInput(false), 200)}
                 returnKeyType="search"
@@ -437,10 +514,11 @@ export default function BuscaScreen(): React.JSX.Element {
             {termo.length > 0 && (
               <TouchableOpacity
                 onPress={limparBusca}
+                style={styles.botaoLimpar}
                 activeOpacity={0.7}
                 accessibilityLabel="Limpar busca"
               >
-                <Text style={[styles.botaoLimpar, { color: colors.textSecondary }]}>✕</Text>
+                <Icone nome="limpar" tamanho={16} cor={colors.textSecondary} />
               </TouchableOpacity>
             )}
           </View>
@@ -449,68 +527,201 @@ export default function BuscaScreen(): React.JSX.Element {
             style={[
               styles.botaoFiltros,
               {
-                backgroundColor: contadorFiltros > 0 ? colors.accent : colors.card,
-                borderColor: contadorFiltros > 0 ? colors.primary : colors.border,
+                backgroundColor: contadorFiltros > 0 ? comAlfa(colors.primary, 0.16) : colors.glassCard,
+                borderColor: contadorFiltros > 0 ? colors.primary : colors.glassBorder,
               },
             ]}
             onPress={() => setMostrarFiltros(true)}
-            activeOpacity={0.7}
+            activeOpacity={0.75}
             accessibilityLabel="Abrir filtros"
           >
-            <Text style={styles.botaoFiltrosTexto}>⚙️</Text>
+            <Icone
+              nome="filtro"
+              tamanho={19}
+              cor={contadorFiltros > 0 ? colors.primary : colors.text}
+            />
             {contadorFiltros > 0 && (
               <View style={[styles.badgeFiltros, { backgroundColor: colors.primary }]}>
-                <Text style={[styles.badgeFiltrosTexto, { color: colors.buttonText }]}>{contadorFiltros}</Text>
+                <Text style={[styles.badgeFiltrosTexto, { color: colors.buttonText }]}>
+                  {contadorFiltros}
+                </Text>
               </View>
             )}
           </TouchableOpacity>
         </View>
 
-        {/* Sugestões do histórico em cartão de vidro */}
-        {focoInput && termo.trim().length === 0 && historico.length > 0 && (
-          <Animated.View style={{ opacity: fadeListaAnim }}>
-            <GlassCard style={styles.sugestoesContainer}>
-              <View style={[styles.sugestoesCabecalho, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.sugestoesTitulo, { color: colors.textSecondary }]}>🕐 Buscas Recentes</Text>
+        {/* Aviso de mínimo de letras */}
+        {termo.trim().length > 0 && termo.trim().length < MINIMO_LETRAS && (
+          <Text style={[styles.dicaMinimo, { color: colors.textSecondary }]}>
+            Digite pelo menos {MINIMO_LETRAS} letras para buscar.
+          </Text>
+        )}
+
+        {/* Buscas recentes em pílulas removíveis */}
+        {termo.trim().length === 0 && historico.length > 0 && (
+          <View style={styles.historicoContainer}>
+            <View style={styles.historicoCabecalho}>
+              <View style={styles.historicoTituloLinha}>
+                <Icone nome="relogio" tamanho={13} cor={colors.textSecondary} />
+                <Text style={[styles.historicoTitulo, { color: colors.textSecondary }]}>
+                  Buscas recentes
+                </Text>
               </View>
-              {historico.slice(0, 8).map((item: ItemHistorico) => (
+              <TouchableOpacity
+                onPress={() => {
+                  void limparHistorico();
+                  toastSucesso('Histórico de buscas limpo');
+                }}
+                activeOpacity={0.7}
+                accessibilityLabel="Limpar histórico de buscas"
+              >
+                <Text style={[styles.historicoLimpar, { color: colors.primary }]}>Limpar</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.historicoChips}>
+              {historico.slice(0, 6).map((item: ItemHistorico) => (
                 <TouchableOpacity
                   key={item.termo}
-                  style={[styles.sugestaoItem, { borderBottomColor: colors.border }]}
+                  style={[
+                    styles.chipHistorico,
+                    { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                  ]}
                   onPress={() => selecionarSugestao(item.termo)}
-                  activeOpacity={0.6}
+                  activeOpacity={0.7}
                 >
-                  <Text style={[styles.sugestaoTexto, { color: colors.text }]} numberOfLines={1}>
+                  <Text
+                    style={[styles.chipHistoricoTexto, { color: colors.text }]}
+                    numberOfLines={1}
+                  >
                     {item.termo}
                   </Text>
                   <TouchableOpacity
-                    style={styles.botaoRemoverSugestao}
-                    onPress={(e) => removerSugestao(item.termo, e)}
+                    style={styles.chipHistoricoRemover}
+                    onPress={(evento) => removerSugestao(item.termo, evento)}
                     activeOpacity={0.7}
+                    accessibilityLabel={`Remover ${item.termo} do histórico`}
                   >
-                    <Text style={[styles.botaoRemoverTexto, { color: colors.textSecondary }]}>✕</Text>
+                    <Icone nome="limpar" tamanho={11} cor={colors.textSecondary} />
                   </TouchableOpacity>
                 </TouchableOpacity>
               ))}
-            </GlassCard>
-          </Animated.View>
+            </View>
+          </View>
         )}
 
-        {/* Estados com animações */}
-        {carregando && releases.length === 0 && (
-          <Animated.View
-            style={[
-              styles.estadoCentro,
-              {
-                opacity: opacidadeEstadoAnim,
-              },
-            ]}
+        {/* Estado inicial: convite para explorar com o mascote */}
+        {termo.trim().length === 0 && !carregando && !erro && (
+          <ScrollView
+            contentContainerStyle={styles.estadoInicialScroll}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={[styles.estadoTexto, { color: colors.textSecondary }]}>Buscando versões...</Text>
+            <Animated.View
+              style={{
+                opacity: opacidadeEstadoAnim,
+                transform: [{ translateY: slideEstadoAnim }],
+              }}
+            >
+              <GlassCard style={styles.hero}>
+                <View style={styles.heroLinha}>
+                  <View style={styles.heroTexto}>
+                    <View
+                      style={[
+                        styles.heroEtiqueta,
+                        { backgroundColor: comAlfa(colors.primary, 0.14), borderColor: comAlfa(colors.primary, 0.3) },
+                      ]}
+                    >
+                      <Icone nome="ondas" tamanho={11} cor={colors.primary} />
+                      <Text style={[styles.heroEtiquetaTexto, { color: colors.primary }]}>
+                        FONTES ABERTAS
+                      </Text>
+                    </View>
+                    <Text style={[styles.heroTitulo, { color: colors.text }]}>
+                      Explore o universo musical
+                    </Text>
+                    <Text style={[styles.heroSubtitulo, { color: colors.textSecondary }]}>
+                      Encontre todas as versões de uma obra e ouça ou baixe em MP3 e FLAC.
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.mascoteMoldura,
+                      { backgroundColor: colors.glassCardForte, borderColor: colors.glassBorder },
+                    ]}
+                  >
+                    <Image
+                      source={MASCOTE}
+                      style={styles.mascote}
+                      resizeMode="cover"
+                      accessibilityLabel="Mascote do Music Galaxy segurando um disco"
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.heroDivisor, { backgroundColor: colors.glassBorder }]} />
+
+                <Text style={[styles.sugestoesTitulo, { color: colors.textSecondary }]}>
+                  Sugestões para começar
+                </Text>
+                <View style={styles.sugestoesChips}>
+                  {SUGESTOES.map((sugestao) => (
+                    <TouchableOpacity
+                      key={sugestao}
+                      style={[
+                        styles.chipSugestao,
+                        { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                      ]}
+                      onPress={() => selecionarSugestao(sugestao)}
+                      activeOpacity={0.7}
+                    >
+                      <Icone nome="musica" tamanho={12} cor={colors.primary} />
+                      <Text style={[styles.chipSugestaoTexto, { color: colors.text }]}>
+                        {sugestao}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <View style={styles.heroRodape}>
+                  <View style={styles.heroRodapeItem}>
+                    <Icone nome="escudo" tamanho={12} cor={colors.textSecondary} />
+                    <Text style={[styles.heroRodapeTexto, { color: colors.textSecondary }]}>
+                      Somente fontes abertas
+                    </Text>
+                  </View>
+                  <View style={styles.heroRodapeItem}>
+                    <Icone nome="download" tamanho={12} cor={colors.textSecondary} />
+                    <Text style={[styles.heroRodapeTexto, { color: colors.textSecondary }]}>
+                      Baixe em MP3 ou FLAC
+                    </Text>
+                  </View>
+                </View>
+              </GlassCard>
+            </Animated.View>
+          </ScrollView>
+        )}
+
+        {/* Carregando (primeira página) */}
+        {carregando && releases.length === 0 && (
+          <Animated.View style={[styles.estadoCentro, { opacity: opacidadeEstadoAnim }]}>
+            <View
+              style={[
+                styles.estadoIconeCirculo,
+                { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+              ]}
+            >
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+            <Text style={[styles.estadoTitulo, { color: colors.text }]}>Buscando versões</Text>
+            <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
+              Consultando o acervo e os sites abertos de áudio...
+            </Text>
           </Animated.View>
         )}
 
+        {/* Erro */}
         {erro && !carregando && (
           <Animated.View
             style={[
@@ -521,19 +732,28 @@ export default function BuscaScreen(): React.JSX.Element {
               },
             ]}
           >
-            <Text style={styles.erroIcone}>⚠️</Text>
-            <Text style={[styles.erroTexto, { color: colors.error }]}>{erro}</Text>
-            <TouchableOpacity
-              style={[styles.botaoTentar, { backgroundColor: colors.button }]}
-              onPress={() => executarBusca(termo, 0, false)}
-              activeOpacity={0.7}
+            <View
+              style={[
+                styles.estadoIconeCirculo,
+                { backgroundColor: comAlfa(colors.error, 0.12), borderColor: comAlfa(colors.error, 0.3) },
+              ]}
             >
-              <Text style={[styles.botaoTentarTexto, { color: colors.buttonText }]}>Tentar novamente</Text>
-            </TouchableOpacity>
+              <Icone nome="erro" tamanho={26} cor={colors.error} />
+            </View>
+            <Text style={[styles.estadoTitulo, { color: colors.text }]}>Não foi possível buscar</Text>
+            <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>{erro}</Text>
+            <View style={styles.estadoAcao}>
+              <CustomButton
+                title="Tentar novamente"
+                icone="recarregar"
+                onPress={() => void executarBusca(termo, 0, false)}
+              />
+            </View>
           </Animated.View>
         )}
 
-        {!carregando && !erro && termo.trim().length > 0 && releasesFiltrados().length === 0 && releases.length > 0 && (
+        {/* Nenhum resultado com os filtros atuais */}
+        {!carregando && !erro && termo.trim().length > 0 && listaFiltrada.length === 0 && releases.length > 0 && (
           <Animated.View
             style={[
               styles.estadoCentro,
@@ -543,18 +763,32 @@ export default function BuscaScreen(): React.JSX.Element {
               },
             ]}
           >
-            <Text style={styles.estadoIcone}>🔍</Text>
-            <Text style={[styles.estadoTexto, { color: colors.textSecondary }]}>Nenhum resultado com esses filtros</Text>
-            <TouchableOpacity
-              style={[styles.botaoTentar, { backgroundColor: colors.button }]}
-              onPress={limparFiltros}
-              activeOpacity={0.7}
+            <View
+              style={[
+                styles.estadoIconeCirculo,
+                { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+              ]}
             >
-              <Text style={[styles.botaoTentarTexto, { color: colors.buttonText }]}>Limpar filtros</Text>
-            </TouchableOpacity>
+              <Icone nome="filtro" tamanho={24} cor={colors.textSecondary} />
+            </View>
+            <Text style={[styles.estadoTitulo, { color: colors.text }]}>
+              Nenhum resultado com esses filtros
+            </Text>
+            <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
+              Remova os filtros para ver todas as versões encontradas.
+            </Text>
+            <View style={styles.estadoAcao}>
+              <CustomButton
+                title="Limpar filtros"
+                variant="secondary"
+                icone="limpar"
+                onPress={limparFiltros}
+              />
+            </View>
           </Animated.View>
         )}
 
+        {/* Nenhuma versão encontrada (ou aguardando descoberta de áudio) */}
         {!carregando && !erro && termo.trim().length > 0 && releases.length === 0 && (
           <Animated.View
             style={[
@@ -565,63 +799,44 @@ export default function BuscaScreen(): React.JSX.Element {
               },
             ]}
           >
-            {pendentesAudio > 0 ? (
-              <>
-                <Text style={styles.estadoIcone}>🔎</Text>
-                <Text style={[styles.estadoTexto, { color: colors.textSecondary }]}>
-                  Localizando fontes de áudio...
-                </Text>
-                <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
-                  {pendentesAudio} {pendentesAudio === 1 ? 'versão encontrada' : 'versões encontradas'}, aguardando a descoberta do áudio em sites abertos
-                </Text>
-                <TouchableOpacity
-                  style={[styles.botaoTentar, { backgroundColor: colors.button, marginTop: 16 }]}
-                  onPress={() => executarBusca(termo, 0, false)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.botaoTentarTexto, { color: colors.buttonText }]}>Buscar novamente</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <Text style={styles.estadoIcone}>🎵</Text>
-                <Text style={[styles.estadoTexto, { color: colors.textSecondary }]}>Nenhuma versão encontrada</Text>
-                <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>Tente outros termos de busca</Text>
-              </>
+            <View
+              style={[
+                styles.estadoIconeCirculo,
+                { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+              ]}
+            >
+              <Icone
+                nome={pendentesAudio > 0 ? 'ondas' : 'musica'}
+                tamanho={26}
+                cor={pendentesAudio > 0 ? colors.primary : colors.textSecondary}
+              />
+            </View>
+            <Text style={[styles.estadoTitulo, { color: colors.text }]}>
+              {pendentesAudio > 0 ? 'Localizando fontes de áudio' : 'Nenhuma versão encontrada'}
+            </Text>
+            <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
+              {pendentesAudio > 0
+                ? `${pendentesAudio} ${pendentesAudio === 1 ? 'versão encontrada aguarda' : 'versões encontradas aguardam'} a descoberta do áudio em sites abertos.`
+                : 'Tente outro artista, título ou jeito de escrever.'}
+            </Text>
+            {pendentesAudio > 0 && (
+              <View style={styles.estadoAcao}>
+                <CustomButton
+                  title="Buscar novamente"
+                  variant="secondary"
+                  icone="recarregar"
+                  onPress={() => void executarBusca(termo, 0, false)}
+                />
+              </View>
             )}
           </Animated.View>
         )}
 
-        {!carregando && !erro && termo.trim().length === 0 && (
-          <Animated.View
-            style={[
-              styles.estadoCentro,
-              {
-                opacity: opacidadeEstadoAnim,
-                transform: [{ translateY: slideEstadoAnim }],
-              },
-            ]}
-          >
-            <Text style={styles.estadoIcone}>🌌</Text>
-            <Text style={[styles.estadoTexto, { color: colors.textSecondary }]}>Explore o universo musical</Text>
-            <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
-              Busque um artista ou música para ver todas as versões disponíveis
-            </Text>
-          </Animated.View>
-        )}
-
-        {/* Lista com animação */}
-        {releasesFiltrados().length > 0 && (
-          <Animated.View
-            style={[
-              { flex: 1 },
-              {
-                opacity: fadeListaAnim,
-              },
-            ]}
-          >
+        {/* Lista de versões */}
+        {listaFiltrada.length > 0 && (
+          <Animated.View style={{ flex: 1, opacity: fadeListaAnim }}>
             <FlatList
-              data={releasesFiltrados()}
+              data={listaFiltrada}
               renderItem={renderItem}
               keyExtractor={keyExtractor}
               ListHeaderComponent={ListHeader}
@@ -646,7 +861,7 @@ export default function BuscaScreen(): React.JSX.Element {
           onLimpar={limparFiltros}
         />
       </SafeAreaView>
-    </AuroraBackground>
+    </FundoAtmosfera>
   );
 }
 
@@ -654,83 +869,91 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
+  cabecalho: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginHorizontal: 16,
-    marginTop: 8,
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'web' ? 50 : 16,
-    paddingBottom: 16,
-    borderRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'web' ? 20 : 6,
+    paddingBottom: 14,
   },
-  tituloContainer: {
+  marca: {
     flex: 1,
   },
+  marcaEtiqueta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 3,
+  },
+  pontoMarca: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+  },
+  marcaEtiquetaTexto: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1.8,
+  },
   titulo: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.2,
   },
-  subtitulo: {
-    fontSize: 14,
-    marginTop: 2,
+  acoesCabecalho: {
+    flexDirection: 'row',
+    gap: 8,
   },
-  botaoFavoritos: {
-    position: 'relative',
-    width: 48,
-    height: 48,
+  botaoCabecalho: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  botaoFavoritosTexto: {
-    fontSize: 28,
+    position: 'relative',
   },
   badgeContador: {
     position: 'absolute',
-    top: 0,
-    right: 0,
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
+    top: -5,
+    right: -5,
+    borderRadius: 9,
+    minWidth: 18,
+    height: 18,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
   badgeContadorTexto: {
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 9,
+    fontWeight: '800',
   },
   campoBuscaContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 10,
   },
   campoBusca: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    gap: 10,
+    borderRadius: 999,
+    paddingHorizontal: 17,
+    minHeight: 54,
     borderWidth: 1,
   },
-  iconeBusca: {
-    fontSize: 16,
-    marginRight: 8,
+  inputWrapper: {
+    flex: 1,
+    justifyContent: 'center',
   },
   input: {
     flex: 1,
     fontSize: 15,
     paddingVertical: 0,
-  },
-  // Envolve o campo para posicionar o placeholder próprio por cima dele
-  inputWrapper: {
-    flex: 1,
-    justifyContent: 'center',
   },
   placeholderTexto: {
     position: 'absolute',
@@ -739,25 +962,21 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   botaoLimpar: {
-    fontSize: 14,
-    paddingLeft: 8,
+    padding: 4,
   },
   botaoFiltros: {
-    position: 'relative',
-    width: 44,
-    height: 44,
-    borderRadius: 16,
+    width: 54,
+    height: 54,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-  },
-  botaoFiltrosTexto: {
-    fontSize: 20,
+    position: 'relative',
   },
   badgeFiltros: {
     position: 'absolute',
-    top: -4,
-    right: -4,
+    top: 6,
+    right: 6,
     borderRadius: 8,
     minWidth: 16,
     height: 16,
@@ -766,96 +985,248 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   badgeFiltrosTexto: {
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 9,
+    fontWeight: '800',
   },
-  sugestoesContainer: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 16,
-    padding: 0,
+  dicaMinimo: {
+    fontSize: 11,
+    paddingHorizontal: 24,
+    paddingBottom: 4,
   },
-  sugestoesCabecalho: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
+  historicoContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 6,
+    paddingBottom: 4,
   },
-  sugestoesTitulo: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  sugestaoItem: {
+  historicoCabecalho: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    marginBottom: 8,
   },
-  sugestaoTexto: {
+  historicoTituloLinha: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  historicoTitulo: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  historicoLimpar: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  historicoChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chipHistorico: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingLeft: 13,
+    paddingRight: 7,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    maxWidth: '100%',
+  },
+  chipHistoricoTexto: {
+    fontSize: 12,
+    fontWeight: '500',
+    maxWidth: 190,
+  },
+  chipHistoricoRemover: {
+    padding: 3,
+  },
+  estadoInicialScroll: {
+    flexGrow: 1,
+    justifyContent: 'flex-start',
+    paddingBottom: 130,
+    paddingTop: 24,
+  },
+  hero: {
+    marginHorizontal: 20,
+    padding: 20,
+    borderRadius: 30,
+  },
+  heroLinha: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  heroTexto: {
     flex: 1,
-    fontSize: 14,
   },
-  botaoRemoverSugestao: {
-    paddingLeft: 12,
+  heroEtiqueta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginBottom: 10,
   },
-  botaoRemoverTexto: {
-    fontSize: 16,
+  heroEtiquetaTexto: {
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+  },
+  heroTitulo: {
+    fontSize: 24,
+    fontWeight: '800',
+    lineHeight: 29,
+    letterSpacing: 0.1,
+    marginBottom: 6,
+  },
+  heroSubtitulo: {
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  mascoteMoldura: {
+    width: 116,
+    height: 116,
+    borderRadius: 30,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  mascote: {
+    width: '100%',
+    height: '100%',
+  },
+  heroDivisor: {
+    height: 1,
+    marginVertical: 16,
+  },
+  sugestoesTitulo: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+    marginBottom: 10,
+  },
+  sugestoesChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chipSugestao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  chipSugestaoTexto: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  heroRodape: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 14,
+    marginTop: 16,
+  },
+  heroRodapeItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  heroRodapeTexto: {
+    fontSize: 10,
+    fontWeight: '500',
   },
   lista: {
-    paddingBottom: 20,
+    paddingTop: 6,
+    paddingBottom: 130,
   },
   headerLista: {
     paddingHorizontal: 20,
-    paddingVertical: 8,
+    paddingTop: 4,
+    paddingBottom: 6,
+  },
+  headerListaLinha: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   headerTexto: {
-    fontSize: 12,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  chipFonte: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  chipFonteTexto: {
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+  avisoPendentes: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  avisoPendentesTexto: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '500',
   },
   estadoCentro: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: 36,
+    paddingBottom: 110,
   },
-  estadoIcone: {
-    fontSize: 48,
+  estadoIconeCirculo: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 16,
   },
-  estadoTexto: {
-    fontSize: 16,
+  estadoTitulo: {
+    fontSize: 17,
+    fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   estadoDica: {
-    fontSize: 13,
+    fontSize: 12.5,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 19,
+    maxWidth: 320,
   },
-  erroIcone: {
-    fontSize: 40,
-    marginBottom: 12,
-  },
-  erroTexto: {
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  botaoTentar: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  botaoTentarTexto: {
-    fontWeight: '600',
-    fontSize: 14,
+  estadoAcao: {
+    marginTop: 18,
   },
   spinner: {
-    paddingVertical: 16,
+    paddingVertical: 18,
   },
   fimLista: {
     textAlign: 'center',
-    fontSize: 12,
+    fontSize: 11,
     paddingVertical: 16,
   },
 });

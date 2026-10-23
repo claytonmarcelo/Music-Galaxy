@@ -70,10 +70,13 @@ musicgalaxy/
 - Nenhuma. Se uma funcionalidade depender de conteúdo de plataforma de música, ela deve ser redesenhada com fontes web abertas ou removida.
 
 ### Regra 4 — Identidade Visual (Vidro Fosco + Aurora)
-- Todas as telas e componentes usam os tokens do `ThemeContext` (mobile/src/contexts/ThemeContext.tsx) e os componentes compartilhados `AuroraBackground` e `GlassCard`
+- Todas as telas e componentes usam os tokens do `ThemeContext` (mobile/src/contexts/ThemeContext.tsx) e os componentes compartilhados `FundoAtmosfera` (fundo atmosférico em React Native puro, com faixas de gradiente e brilhos suaves) e `GlassCard`
+- Paleta oficial: taupe quente profundo, vinho/bordô, marfim e vidro fosco minimalista; tema claro em marfim/areia, tema escuro em taupe profundo com luz vinho e âmbar. Cartões de vidro, botões-pílula, contornos finos e cantos amplos
 - **Proibido exibir o nome da identidade visual como texto** em qualquer interface, código visível ao usuário ou comentário desnecessário — é apenas um conceito de design
 - **Proibido usar cores hexadecimais fixas** em estilos — sempre tokens do tema (a troca claro/escuro depende disso)
-- Ícone do aplicativo: **fundo transparente obrigatório** (PNG com canal alfa real)
+- Ícones: usar o componente `Icone` (nomes em português brasileiro), com traço fino e coerente com a paleta. A barra inferior flutuante (`BarraNavegacaoInferior`) concentra as cinco áreas principais
+- Mascote oficial: `mobile/assets/mascote.png` (robô DJ com fones e vinil), usado na busca, nos estados vazios e na seção Sobre
+- Ícone do aplicativo: **fundo transparente obrigatório** (PNG com canal alfa real). Assets: `mobile/assets/icon.png`, `mobile/assets/adaptive-icon.png` e `mobile/assets/splash.png`
 - Textos de interface **sempre em português brasileiro correto** (acentos, crase, concordância, plural)
 - Em texto de interface, "release" é "versão" (o termo técnico "release" permanece apenas em código/API/banco)
 
@@ -174,6 +177,13 @@ Para decisões técnicas não cobertas neste documento:
 ### Exceções que Requerem Confirmação Humana
 1. **Mudança na porta 3307 do MariaDB** - Nunca alterar sem autorização explícita
 2. **Flexibilização das Regras 1, 2, 3, 4, 5, 6 ou 7** - Nunca flexibilizar sem autorização explícita
+
+### Fluxo de Downloads (inspirado no deemix, sem plataformas)
+- A experiência de busca, escolha de qualidade e fila segue a lógica de gerenciadores como o deemix, mas **o áudio continua vindo exclusivamente de sites abertos** (Regra 3). O Deezer e qualquer outra plataforma de música não são integrados nem consultados
+- Qualidade padrão persistida em `@musicgalaxy:qualidadeDownload`: MP3 320 kbps ou FLAC sem perdas, escolhida em Ajustes e aplicada ao botão rápido de cada versão (`downloadRelease.ts`)
+- Cada versão tem download rápido com progresso no próprio cartão; a fila sobrevive ao fechamento do app (`@musicgalaxy:filaDownloads`) e fica disponível em Ajustes → Fila de downloads
+- A tela `FilaDownloadsScreen` permite filtrar (todos, baixando, concluídos, com erro), cancelar, tentar novamente, remover e limpar em lote
+- Todo arquivo é gerado pelo backend em `/api/releases/:id/download?format=mp3|flac` a partir de `audio_source_url`, passando pelo guard `auditarUrl()`
 
 ## Comandos de Desenvolvimento
 

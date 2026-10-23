@@ -1,9 +1,9 @@
-// Tela de Configurações
-// Permite mudar o tema, gerenciar downloads, definir o endereço do servidor
-// da API e ver informações do aplicativo.
-// Segue a identidade visual de vidro fosco: fundo com luzes suaves e cartões translúcidos.
+// Tela de ajustes do aplicativo.
+// Reúne aparência, preferência de qualidade dos downloads, acesso à fila,
+// endereço do servidor da API e informações do Music Galaxy. Toda a
+// interface usa os tokens do tema e os componentes de vidro fosco.
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,12 +11,21 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
+  Image,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../contexts/ThemeContext';
 import { useModal } from '../contexts/ModalContext';
-import { MusicEmojis } from '../components/AnimatedIcon';
 import { downloadManager } from '../services/downloadManager';
+import {
+  FormatoDownload,
+  OPCOES_QUALIDADE,
+  obterQualidadePadrao,
+  salvarQualidadePadrao,
+} from '../services/downloadRelease';
 import {
   BASE_URL,
   configurarServidor,
@@ -24,21 +33,31 @@ import {
   testarConexaoServidor,
 } from '../services/api';
 import CustomButton from '../components/CustomButton';
-import AuroraBackground from '../components/AuroraBackground';
+import FundoAtmosfera from '../components/FundoAtmosfera';
 import GlassCard from '../components/GlassCard';
+import Icone, { NomeIcone } from '../components/Icone';
+import { RootStackParamList } from '../types';
+import { comAlfa } from '../utils/cores';
+
+type NavProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
+type Tema = 'light' | 'dark' | 'auto';
+
+// Mascote do Music Galaxy, exibido na seção "Sobre".
+const MASCOTE = require('../../assets/mascote.png');
+
+const OPCOES_TEMA: Array<{ valor: Tema; rotulo: string; icone: NomeIcone }> = [
+  { valor: 'light', rotulo: 'Claro', icone: 'sol' },
+  { valor: 'dark', rotulo: 'Escuro', icone: 'lua' },
+  { valor: 'auto', rotulo: 'Sistema', icone: 'sistema' },
+];
 
 export default function SettingsScreen(): React.JSX.Element {
   const { theme, isDark, colors, setTheme } = useTheme();
+  const navigation = useNavigation<NavProp>();
   const { abrirErro, abrirAviso, toastSucesso, toastInfo } = useModal();
 
-  const [stats, setStats] = useState({
-    total: 0,
-    pending: 0,
-    downloading: 0,
-    completed: 0,
-    error: 0,
-    totalSize: 0,
-  });
+  const [qualidade, setQualidade] = useState<FormatoDownload>('mp3');
+  const [resumo, setResumo] = useState({ total: 0, baixando: 0, concluidos: 0, erros: 0 });
 
   // Endereço do servidor exibido no campo — começa com o valor atual da API.
   const [urlServidor, setUrlServidor] = useState(BASE_URL);
@@ -46,28 +65,39 @@ export default function SettingsScreen(): React.JSX.Element {
   const [salvandoServidor, setSalvandoServidor] = useState(false);
   const [testandoServidor, setTestandoServidor] = useState(false);
 
-  useEffect(() => {
-    downloadManager.initialize();
-    loadStats();
+  const atualizarResumo = useCallback(() => {
+    setResumo(downloadManager.obterContagem());
   }, []);
 
-  const loadStats = () => {
-    const currentStats = downloadManager.getStats();
-    setStats(currentStats);
-  };
+  // Relê preferência e contagens sempre que a tela ganha foco.
+  useFocusEffect(
+    useCallback(() => {
+      let ativo = true;
+      void (async () => {
+        await downloadManager.initialize();
+        const preferida = await obterQualidadePadrao();
+        if (ativo) {
+          setQualidade(preferida);
+          setResumo(downloadManager.obterContagem());
+        }
+      })();
+      return () => {
+        ativo = false;
+      };
+    }, [])
+  );
 
-  const handleThemeChange = (newTheme: 'light' | 'dark' | 'auto') => {
-    setTheme(newTheme);
-  };
+  // Mantém as contagens vivas enquanto a tela está aberta.
+  useEffect(() => downloadManager.assinarTodos(atualizarResumo), [atualizarResumo]);
 
-  const clearCompleted = async () => {
-    await downloadManager.clearCompleted();
-    loadStats();
-  };
-
-  const clearErrors = async () => {
-    await downloadManager.clearErrors();
-    loadStats();
+  const escolherQualidade = async (formato: FormatoDownload) => {
+    setQualidade(formato);
+    await salvarQualidadePadrao(formato);
+    toastSucesso(
+      formato === 'flac'
+        ? 'Qualidade padrão: FLAC sem perdas'
+        : 'Qualidade padrão: MP3 320 kbps'
+    );
   };
 
   // Salva o endereço informado e aplica nas próximas chamadas da API.
@@ -76,7 +106,7 @@ export default function SettingsScreen(): React.JSX.Element {
       setSalvandoServidor(true);
       const normalizado = await configurarServidor(urlServidor);
       setUrlServidor(normalizado);
-      toastSucesso('Servidor salvo!');
+      toastSucesso('Endereço do servidor salvo!');
     } catch (err) {
       const mensagem = err instanceof Error ? err.message : 'Erro desconhecido ao salvar o servidor.';
       abrirErro('Não foi possível salvar', mensagem);
@@ -118,201 +148,309 @@ export default function SettingsScreen(): React.JSX.Element {
     }
   };
 
-  // Estilo reutilizável das linhas de opção (borda com token do tema).
-  const estiloOpcao = [styles.option, { borderBottomColor: colors.border }];
+  const descricaoTema = theme === 'auto'
+    ? `Automático (${isDark ? 'escuro' : 'claro'} agora)`
+    : theme === 'dark'
+      ? 'Sempre escuro'
+      : 'Sempre claro';
+
+  // Texto do atalho da fila: prioriza o que está acontecendo agora.
+  const descricaoFila = resumo.baixando > 0
+    ? `${resumo.baixando} ${resumo.baixando === 1 ? 'download em andamento' : 'downloads em andamento'}`
+    : resumo.erros > 0
+      ? `${resumo.erros} ${resumo.erros === 1 ? 'download com erro' : 'downloads com erro'}`
+      : resumo.total > 0
+        ? `${resumo.total} ${resumo.total === 1 ? 'item na fila' : 'itens na fila'}`
+        : 'Nenhum download ainda';
 
   return (
-    <AuroraBackground style={styles.container}>
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <ScrollView style={styles.scrollView}>
-          {/* Seção de Tema */}
-          <GlassCard style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              {MusicEmojis.settings} Aparência
-            </Text>
+    <FundoAtmosfera>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <View style={styles.cabecalho}>
+          <Text style={[styles.etiqueta, { color: colors.textSecondary }]}>
+            PREFERÊNCIAS DO APLICATIVO
+          </Text>
+          <Text style={[styles.titulo, { color: colors.text }]}>Ajustes</Text>
+        </View>
 
-            <View style={estiloOpcao}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>Tema</Text>
-              <View style={styles.themeButtons}>
-                <TouchableOpacity
-                  style={[
-                    styles.themeButton,
-                    { borderColor: colors.border },
-                    theme === 'light' && { backgroundColor: colors.button },
-                  ]}
-                  onPress={() => handleThemeChange('light')}
-                >
-                  <Text style={[
-                    styles.themeButtonText,
-                    { color: theme === 'light' ? colors.buttonText : colors.text }
-                  ]}>
-                    {MusicEmojis.sun} Claro
-                  </Text>
-                </TouchableOpacity>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Aparência */}
+          <GlassCard style={styles.secao}>
+            <SecaoTitulo icone="sol" titulo="Aparência" descricao={descricaoTema} />
 
-                <TouchableOpacity
-                  style={[
-                    styles.themeButton,
-                    { borderColor: colors.border },
-                    theme === 'dark' && { backgroundColor: colors.button },
-                  ]}
-                  onPress={() => handleThemeChange('dark')}
-                >
-                  <Text style={[
-                    styles.themeButtonText,
-                    { color: theme === 'dark' ? colors.buttonText : colors.text }
-                  ]}>
-                    {MusicEmojis.moon} Escuro
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.themeButton,
-                    { borderColor: colors.border },
-                    theme === 'auto' && { backgroundColor: colors.button },
-                  ]}
-                  onPress={() => handleThemeChange('auto')}
-                >
-                  <Text style={[
-                    styles.themeButtonText,
-                    { color: theme === 'auto' ? colors.buttonText : colors.text }
-                  ]}>
-                    {MusicEmojis.auto} Auto
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={estiloOpcao}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>Tema atual</Text>
-              <Text style={[styles.optionValue, { color: colors.textSecondary }]}>
-                {theme === 'auto' ? (isDark ? 'Escuro (sistema)' : 'Claro (sistema)') : (theme === 'dark' ? 'Escuro' : 'Claro')}
-              </Text>
+            <View style={styles.temas}>
+              {OPCOES_TEMA.map((opcao) => {
+                const selecionado = theme === opcao.valor;
+                return (
+                  <TouchableOpacity
+                    key={opcao.valor}
+                    style={[
+                      styles.temaOpcao,
+                      {
+                        backgroundColor: selecionado ? colors.button : colors.glassCard,
+                        borderColor: selecionado ? colors.button : colors.glassBorder,
+                      },
+                    ]}
+                    onPress={() => setTheme(opcao.valor)}
+                    activeOpacity={0.75}
+                    accessibilityState={{ selected: selecionado }}
+                    accessibilityLabel={`Tema ${opcao.rotulo}`}
+                  >
+                    <Icone
+                      nome={opcao.icone}
+                      tamanho={16}
+                      cor={selecionado ? colors.buttonText : colors.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.temaTexto,
+                        { color: selecionado ? colors.buttonText : colors.text },
+                      ]}
+                    >
+                      {opcao.rotulo}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </GlassCard>
 
-          {/* Seção de Downloads */}
-          <GlassCard style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              {MusicEmojis.download} Downloads
-            </Text>
+          {/* Downloads */}
+          <GlassCard style={styles.secao}>
+            <SecaoTitulo
+              icone="download"
+              titulo="Downloads"
+              descricao="A qualidade escolhida vale para o botão rápido de cada versão."
+            />
 
-            <View style={styles.statsContainer}>
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: colors.button }]}>{stats.total}</Text>
-                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Total</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: colors.success }]}>{stats.completed}</Text>
-                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Concluídos</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: colors.warning }]}>{stats.pending}</Text>
-                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Pendentes</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: colors.error }]}>{stats.error}</Text>
-                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Erros</Text>
-              </View>
+            <View style={styles.qualidades}>
+              {OPCOES_QUALIDADE.map((opcao) => {
+                const selecionada = qualidade === opcao.formato;
+                return (
+                  <TouchableOpacity
+                    key={opcao.formato}
+                    style={[
+                      styles.qualidadeOpcao,
+                      {
+                        backgroundColor: selecionada
+                          ? comAlfa(colors.primary, 0.14)
+                          : colors.glassCard,
+                        borderColor: selecionada ? colors.primary : colors.glassBorder,
+                      },
+                    ]}
+                    onPress={() => void escolherQualidade(opcao.formato)}
+                    activeOpacity={0.75}
+                    accessibilityState={{ selected: selecionada }}
+                    accessibilityLabel={`Qualidade padrão ${opcao.titulo}`}
+                  >
+                    <View style={styles.qualidadeTopo}>
+                      <Icone
+                        nome={selecionada ? 'sucessoCirculo' : 'qualidade'}
+                        tamanho={15}
+                        cor={selecionada ? colors.primary : colors.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.qualidadeTitulo,
+                          { color: selecionada ? colors.primary : colors.text },
+                        ]}
+                      >
+                        {opcao.titulo}
+                      </Text>
+                    </View>
+                    <Text style={[styles.qualidadeDescricao, { color: colors.textSecondary }]}>
+                      {opcao.descricao}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
-            <CustomButton
-              title="Limpar Concluídos"
-              onPress={clearCompleted}
-              variant="outline"
-              size="small"
-              icon={MusicEmojis.success}
-            />
-
-            <CustomButton
-              title="Limpar Erros"
-              onPress={clearErrors}
-              variant="outline"
-              size="small"
-              icon={MusicEmojis.error}
-            />
-          </GlassCard>
-
-          {/* Seção do Servidor da API */}
-          <GlassCard style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              {MusicEmojis.explore} Servidor da API
-            </Text>
-
-            <Text style={[styles.serverDesc, { color: colors.textSecondary }]}>
-              Endereço do servidor que fornece as músicas. Em redes diferentes, ajuste aqui para o aplicativo funcionar.
-            </Text>
-
-            <TextInput
+            <TouchableOpacity
               style={[
-                styles.serverInput,
-                {
-                  backgroundColor: colors.input,
-                  borderColor: colors.glassBorder,
-                  color: colors.text,
-                },
+                styles.atalhoFila,
+                { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
               ]}
-              value={urlServidor}
-              onChangeText={setUrlServidor}
-              placeholder={urlServidor ? undefined : 'http://exemplo.com:3001'}
-              placeholderTextColor={colors.textSecondary}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
+              onPress={() => navigation.navigate('FilaDownloads')}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel="Abrir fila de downloads"
+            >
+              <View
+                style={[
+                  styles.atalhoIcone,
+                  { backgroundColor: comAlfa(colors.primary, 0.14) },
+                ]}
+              >
+                <Icone nome="fila" tamanho={17} cor={colors.primary} />
+              </View>
+              <View style={styles.atalhoTextos}>
+                <Text style={[styles.atalhoTitulo, { color: colors.text }]}>
+                  Fila de downloads
+                </Text>
+                <Text style={[styles.atalhoDescricao, { color: colors.textSecondary }]}>
+                  {descricaoFila}
+                </Text>
+              </View>
+              {resumo.baixando > 0 && (
+                <View style={[styles.seloAtivo, { backgroundColor: colors.primary }]}>
+                  <Text style={[styles.seloAtivoTexto, { color: colors.buttonText }]}>
+                    {resumo.baixando}
+                  </Text>
+                </View>
+              )}
+              <Icone nome="seta" tamanho={17} cor={colors.textSecondary} />
+            </TouchableOpacity>
+          </GlassCard>
+
+          {/* Servidor da API */}
+          <GlassCard style={styles.secao}>
+            <SecaoTitulo
+              icone="servidor"
+              titulo="Servidor da API"
+              descricao="Endereço que fornece o acervo. Em outra rede, ajuste aqui para o aplicativo funcionar."
             />
 
-            <View style={styles.serverBotoesLinha}>
-              <View style={styles.serverBotao}>
+            <View
+              style={[
+                styles.campoServidor,
+                { backgroundColor: colors.input, borderColor: colors.glassBorder },
+              ]}
+            >
+              <Icone nome="servidor" tamanho={16} cor={colors.textSecondary} />
+              <TextInput
+                style={[styles.inputServidor, { color: colors.text }]}
+                value={urlServidor}
+                onChangeText={setUrlServidor}
+                placeholder="http://exemplo.com:3001"
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                accessibilityLabel="Endereço do servidor da API"
+              />
+            </View>
+
+            <View style={styles.botoesLinha}>
+              <View style={styles.botaoMetade}>
                 <CustomButton
                   title="Salvar"
                   onPress={handleSalvarServidor}
                   variant="primary"
                   size="small"
-                  icon={MusicEmojis.success}
+                  icone="sucesso"
                   loading={salvandoServidor}
+                  style={styles.botaoCheio}
                 />
               </View>
-              <View style={styles.serverBotao}>
+              <View style={styles.botaoMetade}>
                 <CustomButton
                   title="Testar conexão"
                   onPress={handleTestarConexao}
-                  variant="outline"
+                  variant="secondary"
                   size="small"
-                  icon={MusicEmojis.search}
+                  icone="wifi"
                   loading={testandoServidor}
+                  style={styles.botaoCheio}
                 />
               </View>
             </View>
 
-            <CustomButton
-              title="Restaurar padrão"
+            <TouchableOpacity
+              style={styles.restaurar}
               onPress={handleRestaurarPadrao}
-              variant="ghost"
-              size="small"
-              icon={MusicEmojis.auto}
-            />
+              activeOpacity={0.7}
+              accessibilityLabel="Restaurar endereço padrão do servidor"
+            >
+              <Icone nome="recarregar" tamanho={13} cor={colors.primary} />
+              <Text style={[styles.restaurarTexto, { color: colors.primary }]}>
+                Restaurar endereço padrão
+              </Text>
+            </TouchableOpacity>
           </GlassCard>
 
-          {/* Seção de Informações */}
-          <GlassCard style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              {MusicEmojis.info} Sobre
-            </Text>
+          {/* Sobre */}
+          <GlassCard style={styles.secao}>
+            <SecaoTitulo icone="info" titulo="Sobre" descricao="Aplicativo de exploração musical" />
 
-            <View style={estiloOpcao}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>Versão</Text>
-              <Text style={[styles.optionValue, { color: colors.textSecondary }]}>1.0.0</Text>
+            <View style={styles.sobreLinha}>
+              <View
+                style={[
+                  styles.mascoteMoldura,
+                  { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                ]}
+              >
+                <Image
+                  source={MASCOTE}
+                  style={styles.mascote}
+                  resizeMode="cover"
+                  accessibilityLabel="Mascote do Music Galaxy"
+                />
+              </View>
+
+              <View style={styles.sobreTextos}>
+                <Text style={[styles.sobreNome, { color: colors.text }]}>Music Galaxy</Text>
+                <Text style={[styles.sobreVersao, { color: colors.textSecondary }]}>
+                  Versão 1.0.0
+                </Text>
+                <Text style={[styles.sobreDescricao, { color: colors.textSecondary }]}>
+                  Todas as versões de uma obra, com áudio de fontes abertas da web.
+                </Text>
+              </View>
             </View>
 
-            <View style={estiloOpcao}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>Nome</Text>
-              <Text style={[styles.optionValue, { color: colors.textSecondary }]}>Music Galaxy</Text>
+            <View style={[styles.sobreDivisor, { backgroundColor: colors.glassBorder }]} />
+
+            <View style={styles.sobreRodape}>
+              <Icone nome="escudo" tamanho={13} cor={colors.success} />
+              <Text style={[styles.sobreRodapeTexto, { color: colors.textSecondary }]}>
+                Somente fontes abertas · capas oficiais
+              </Text>
             </View>
           </GlassCard>
+
+          <Text style={[styles.rodape, { color: colors.textSecondary }]}>
+            Music Galaxy · feito para explorar música em todos os formatos.
+          </Text>
         </ScrollView>
       </SafeAreaView>
-    </AuroraBackground>
+    </FundoAtmosfera>
+  );
+}
+
+// Título de seção com ícone, descrição opcional e linha de destaque.
+function SecaoTitulo({
+  icone,
+  titulo,
+  descricao,
+}: {
+  icone: NomeIcone;
+  titulo: string;
+  descricao?: string;
+}): React.JSX.Element {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.secaoTituloBloco}>
+      <View style={styles.secaoTituloLinha}>
+        <View
+          style={[
+            styles.secaoIcone,
+            { backgroundColor: comAlfa(colors.primary, 0.13), borderColor: comAlfa(colors.primary, 0.24) },
+          ]}
+        >
+          <Icone nome={icone} tamanho={15} cor={colors.primary} />
+        </View>
+        <Text style={[styles.secaoTitulo, { color: colors.text }]}>{titulo}</Text>
+      </View>
+      {!!descricao && (
+        <Text style={[styles.secaoDescricao, { color: colors.textSecondary }]}>
+          {descricao}
+        </Text>
+      )}
+    </View>
   );
 }
 
@@ -320,83 +458,228 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  safeArea: {
-    flex: 1,
+  cabecalho: {
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'web' ? 22 : 8,
+    paddingBottom: 6,
   },
-  scrollView: {
-    flex: 1,
-  },
-  section: {
-    margin: 16,
-  },
-  sectionTitle: {
-    fontSize: 18,
+  etiqueta: {
+    fontSize: 9,
     fontWeight: '700',
-    marginBottom: 16,
+    letterSpacing: 1.8,
+    marginBottom: 4,
   },
-  option: {
+  titulo: {
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  scroll: {
+    paddingTop: 10,
+    paddingBottom: 130,
+  },
+  secao: {
+    marginHorizontal: 20,
+    marginBottom: 14,
+    padding: 18,
+    borderRadius: 26,
+  },
+  secaoTituloBloco: {
+    marginBottom: 14,
+  },
+  secaoTituloLinha: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    gap: 9,
   },
-  optionLabel: {
+  secaoIcone: {
+    width: 32,
+    height: 32,
+    borderRadius: 11,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secaoTitulo: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '700',
+    letterSpacing: 0.1,
   },
-  optionValue: {
-    fontSize: 14,
+  secaoDescricao: {
+    fontSize: 11.5,
+    lineHeight: 17,
+    marginTop: 8,
   },
-  themeButtons: {
+  temas: {
     flexDirection: 'row',
     gap: 8,
   },
-  themeButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+  temaOpcao: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 16,
     borderWidth: 1,
   },
-  themeButtonText: {
-    fontSize: 12,
+  temaTexto: {
+    fontSize: 11,
     fontWeight: '600',
   },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 16,
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: '700',
-  },
-  statLabel: {
-    fontSize: 12,
-    marginTop: 4,
-  },
-  serverDesc: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 12,
-  },
-  serverInput: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-    marginBottom: 16,
-  },
-  serverBotoesLinha: {
+  qualidades: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  serverBotao: {
+  qualidadeOpcao: {
     flex: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    gap: 5,
+  },
+  qualidadeTopo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  qualidadeTitulo: {
+    fontSize: 11,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  qualidadeDescricao: {
+    fontSize: 9.5,
+    lineHeight: 14,
+  },
+  atalhoFila: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    padding: 11,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+  atalhoIcone: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  atalhoTextos: {
+    flex: 1,
+  },
+  atalhoTitulo: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  atalhoDescricao: {
+    fontSize: 10,
+    marginTop: 2,
+  },
+  seloAtivo: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
+  seloAtivoTexto: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  campoServidor: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 13,
+    minHeight: 48,
+    marginBottom: 10,
+  },
+  inputServidor: {
+    flex: 1,
+    fontSize: 12.5,
+    paddingVertical: 0,
+  },
+  botoesLinha: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  botaoMetade: {
+    flex: 1,
+  },
+  botaoCheio: {
+    width: '100%',
+  },
+  restaurar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingTop: 13,
+    paddingBottom: 2,
+  },
+  restaurarTexto: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  sobreLinha: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  mascoteMoldura: {
+    width: 74,
+    height: 74,
+    borderRadius: 22,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  mascote: {
+    width: '100%',
+    height: '100%',
+  },
+  sobreTextos: {
+    flex: 1,
+  },
+  sobreNome: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  sobreVersao: {
+    fontSize: 10.5,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  sobreDescricao: {
+    fontSize: 10.5,
+    lineHeight: 15,
+    marginTop: 5,
+  },
+  sobreDivisor: {
+    height: 1,
+    marginVertical: 13,
+  },
+  sobreRodape: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sobreRodapeTexto: {
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  rodape: {
+    textAlign: 'center',
+    fontSize: 10,
+    lineHeight: 15,
+    paddingHorizontal: 30,
+    marginTop: 2,
   },
 });

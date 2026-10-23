@@ -1,17 +1,16 @@
-// Card Animado com Efeitos Visuais
-// Componente de card com animações de entrada, hover e interação
-// Otimizado com memoização
+// Cartão animado de vidro fosco.
+// Entrada suave (fade + deslocamento/escala) e leve compressão ao toque.
+// A superfície usa os tokens de vidro do tema e mantém o fio de luz no topo.
 
 import React, { useRef, useEffect, memo } from 'react';
 import {
   View,
-  Text,
-  TouchableOpacity,
   StyleSheet,
   Animated,
   ViewStyle,
 } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
+import { USE_NATIVE_DRIVER } from '../utils/animacoes';
 
 interface AnimatedCardProps {
   children: React.ReactNode;
@@ -30,88 +29,90 @@ function AnimatedCardComponent({
 }: AnimatedCardProps): React.JSX.Element {
   const { colors } = useTheme();
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(50)).current;
-  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const slideAnim = useRef(new Animated.Value(24)).current;
+  const scaleAnim = useRef(new Animated.Value(0.96)).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const pressScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    const animations = {
-      fadeIn: () => {
+    const animacoes = {
+      fadeIn: () =>
         Animated.timing(fadeAnim, {
           toValue: 1,
-          duration: 500,
+          duration: 420,
           delay,
-          useNativeDriver: false,
-        }).start();
-      },
-      slideUp: () => {
+          useNativeDriver: USE_NATIVE_DRIVER,
+        }),
+      slideUp: () =>
         Animated.parallel([
           Animated.timing(fadeAnim, {
             toValue: 1,
-            duration: 500,
+            duration: 420,
             delay,
-            useNativeDriver: false,
+            useNativeDriver: USE_NATIVE_DRIVER,
           }),
           Animated.timing(slideAnim, {
             toValue: 0,
-            duration: 500,
+            duration: 460,
             delay,
-            useNativeDriver: false,
+            useNativeDriver: USE_NATIVE_DRIVER,
           }),
-        ]).start();
-      },
-      scale: () => {
+        ]),
+      scale: () =>
         Animated.parallel([
           Animated.timing(fadeAnim, {
             toValue: 1,
-            duration: 500,
+            duration: 320,
             delay,
-            useNativeDriver: false,
+            useNativeDriver: USE_NATIVE_DRIVER,
           }),
           Animated.spring(scaleAnim, {
             toValue: 1,
             delay,
-            useNativeDriver: false,
+            useNativeDriver: USE_NATIVE_DRIVER,
+            tension: 45,
+            friction: 14,
           }),
-        ]).start();
-      },
-      rotate: () => {
+        ]),
+      rotate: () =>
         Animated.parallel([
           Animated.timing(fadeAnim, {
             toValue: 1,
-            duration: 500,
+            duration: 420,
             delay,
-            useNativeDriver: false,
+            useNativeDriver: USE_NATIVE_DRIVER,
           }),
           Animated.timing(rotateAnim, {
             toValue: 1,
-            duration: 500,
+            duration: 460,
             delay,
-            useNativeDriver: false,
+            useNativeDriver: USE_NATIVE_DRIVER,
           }),
-        ]).start();
-      },
+        ]),
     };
 
-    animations[animationType]();
-  }, [delay, animationType]);
+    animacoes[animationType]().start();
+  }, [delay, animationType, fadeAnim, slideAnim, scaleAnim, rotateAnim]);
 
-  const handlePressIn = () => {
+  const aoPressionar = () => {
     Animated.spring(pressScale, {
-      toValue: 0.95,
-      useNativeDriver: false,
+      toValue: 0.985,
+      useNativeDriver: USE_NATIVE_DRIVER,
+      tension: 80,
+      friction: 14,
     }).start();
   };
 
-  const handlePressOut = () => {
+  const aoSoltar = () => {
     Animated.spring(pressScale, {
       toValue: 1,
-      useNativeDriver: false,
+      useNativeDriver: USE_NATIVE_DRIVER,
+      tension: 80,
+      friction: 14,
     }).start();
   };
 
-  const getTransform = () => {
+  const transformar = () => {
     switch (animationType) {
       case 'slideUp':
         return [{ translateY: slideAnim }];
@@ -122,7 +123,7 @@ function AnimatedCardComponent({
           {
             rotate: rotateAnim.interpolate({
               inputRange: [0, 1],
-              outputRange: ['-10deg', '0deg'],
+              outputRange: ['-4deg', '0deg'],
             }),
           },
         ];
@@ -131,53 +132,52 @@ function AnimatedCardComponent({
     }
   };
 
-  const cardContent = (
+  const cartao = (
     <Animated.View
       style={[
         styles.card,
         {
-          // Cartão translúcido com contorno sutil e sombra suave de vidro
           backgroundColor: colors.glassCard,
           borderColor: colors.glassBorder,
           shadowColor: colors.glassShadow,
           opacity: fadeAnim,
-          transform: [...getTransform(), { scale: pressScale }],
+          transform: [...transformar(), { scale: pressScale }],
         },
         style,
       ]}
+      onTouchStart={onPress ? aoPressionar : undefined}
+      onTouchEnd={onPress ? aoSoltar : undefined}
     >
+      <View
+        pointerEvents="none"
+        style={[styles.brilho, { backgroundColor: colors.glassHighlight }]}
+      />
       {children}
     </Animated.View>
   );
 
-  if (onPress) {
-    return (
-      <TouchableOpacity
-        onPress={onPress}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        activeOpacity={1}
-      >
-        {cardContent}
-      </TouchableOpacity>
-    );
-  }
-
-  return cardContent;
+  return cartao;
 }
 
-// Memoizar o componente para evitar re-renders
 export default memo(AnimatedCardComponent);
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 16,
+    borderRadius: 26,
     padding: 16,
     borderWidth: 1,
-    // Sombra suave de vidro (cor vem do tema, definida em linha no componente)
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 5,
+    overflow: 'hidden',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
+    elevation: 4,
+  },
+  brilho: {
+    position: 'absolute',
+    top: 0,
+    left: 28,
+    right: 28,
+    height: 1,
+    opacity: 0.55,
   },
 });

@@ -1,7 +1,7 @@
 // Tela de detalhes de uma obra musical (Work).
-// Exibe a obra conceitual com TODAS as versões/releases agrupadas por tipo.
-// Implementa Regra 2: nunca ocultar ou substituir versões.
-// Visual de vidro fosco: cabeçalho e seções translúcidas sobre o fundo decorativo.
+// Exibe a obra conceitual com TODAS as versões agrupadas por categoria
+// (Regra 2: nunca ocultar ou substituir versões). Cada versão continua
+// sendo um ReleaseCard independente sobre o fundo atmosférico.
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -9,12 +9,13 @@ import {
   Text,
   ScrollView,
   ActivityIndicator,
-  FlatList,
   StyleSheet,
   TouchableOpacity,
   RefreshControl,
   Animated,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RootStackParamList, Release, RespostaReleasesDeWork } from '../types';
@@ -22,13 +23,15 @@ import { buscarReleasesDeWork } from '../services/api';
 import { useModal } from '../contexts/ModalContext';
 import { useTheme } from '../contexts/ThemeContext';
 import ReleaseCard from '../components/ReleaseCard';
-import AuroraBackground from '../components/AuroraBackground';
+import FundoAtmosfera from '../components/FundoAtmosfera';
 import GlassCard from '../components/GlassCard';
+import Icone from '../components/Icone';
+import CustomButton from '../components/CustomButton';
 import { TIMINGS, USE_NATIVE_DRIVER } from '../utils/animacoes';
+import { comAlfa } from '../utils/cores';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DetalheWork'>;
 
-// Agrupador de releases por tipo de categoria (release_format, mix_edit, instrumental, playback)
 interface GrupoReleases {
   categoria: string;
   releases: Release[];
@@ -39,7 +42,6 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
   const { toastErro } = useModal();
   const { colors } = useTheme();
 
-  // Estados
   const [carregando, setCarregando] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -49,13 +51,10 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
   const [pagina, setPagina] = useState(0);
   const [temMais, setTemMais] = useState(true);
 
-  // Animações
-  const scrollY = useRef(new Animated.Value(0)).current;
   const fadeInAnim = useRef(new Animated.Value(0)).current;
 
   const LIMIT = 50;
 
-  // Anima entrada na montagem
   useEffect(() => {
     Animated.timing(fadeInAnim, {
       toValue: 1,
@@ -64,7 +63,24 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
     }).start();
   }, [fadeInAnim]);
 
-  // Carrega releases da obra
+  // Agrupa as versões por categoria, preservando todas as linhas.
+  const agruparPorCategoria = (rels: Release[]): GrupoReleases[] => {
+    const mapa = new Map<string, Release[]>();
+
+    rels.forEach((rel) => {
+      const cat = rel.release_type_category || 'Outros';
+      if (!mapa.has(cat)) {
+        mapa.set(cat, []);
+      }
+      mapa.get(cat)!.push(rel);
+    });
+
+    return Array.from(mapa.entries()).map(([categoria, relsDaCategoria]) => ({
+      categoria,
+      releases: relsDaCategoria,
+    }));
+  };
+
   const carregarReleases = useCallback(
     async (offset = 0, adicionar = false): Promise<void> => {
       try {
@@ -80,19 +96,14 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
         setWorkInfo(work);
 
         if (adicionar) {
-          setReleases(prev => [...prev, ...results]);
+          setReleases((prev) => [...prev, ...results]);
         } else {
           setReleases(results);
         }
 
-        // Verifica se há mais resultados
         setTemMais(offset + LIMIT < total);
         setPagina(Math.floor(offset / LIMIT) + 1);
-
-        // Agrupa releases por categoria
-        const grupos = agruparPorCategoria(adicionar ? [...releases, ...results] : results);
-        setGruposReleases(grupos);
-
+        setGruposReleases(agruparPorCategoria(adicionar ? [...releases, ...results] : results));
         setErro(null);
       } catch (err) {
         const mensagem = err instanceof Error ? err.message : 'Erro desconhecido';
@@ -106,366 +117,384 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
     [workId, releases, toastErro]
   );
 
-  // Agrupa releases por categoria
-  const agruparPorCategoria = (rels: Release[]): GrupoReleases[] => {
-    const mapa = new Map<string, Release[]>();
-
-    rels.forEach(rel => {
-      const cat = rel.release_type_category || 'Outros';
-      if (!mapa.has(cat)) {
-        mapa.set(cat, []);
-      }
-      mapa.get(cat)!.push(rel);
-    });
-
-    return Array.from(mapa.entries()).map(([categoria, rels]) => ({
-      categoria,
-      releases: rels,
-    }));
-  };
-
-  // Carregamento inicial
   useEffect(() => {
-    carregarReleases(0, false);
+    void carregarReleases(0, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workId]);
 
-  // Carrega mais releases (paginação infinita)
   const carregarMais = useCallback((): void => {
     if (!temMais || atualizando || carregando) return;
     setAtualizando(true);
-    carregarReleases(pagina * LIMIT, true);
+    void carregarReleases(pagina * LIMIT, true);
   }, [pagina, temMais, atualizando, carregando, carregarReleases]);
 
-  // Atualiza a lista (pull-to-refresh)
   const handleAtualizacao = useCallback(async (): Promise<void> => {
     setAtualizando(true);
     await carregarReleases(0, false);
   }, [carregarReleases]);
 
-  // Navega para detalhes do release
   const handleSelecionarRelease = (release: Release): void => {
     navigation.push('DetalheRelease', { release });
   };
 
-  // Renderers
+  const barraSuperior = (
+    <View style={styles.header}>
+      <TouchableOpacity
+        style={[
+          styles.botaoCirculo,
+          { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+        ]}
+        onPress={() => navigation.goBack()}
+        activeOpacity={0.75}
+        accessibilityLabel="Voltar"
+      >
+        <Icone nome="voltar" tamanho={19} cor={colors.text} />
+      </TouchableOpacity>
+
+      <View style={styles.headerTextos}>
+        <Text style={[styles.headerTitulo, { color: colors.text }]}>Obra completa</Text>
+        <Text style={[styles.headerSubtitulo, { color: colors.textSecondary }]} numberOfLines={1}>
+          {workInfo?.title ?? 'Carregando...'}
+        </Text>
+      </View>
+
+      <View
+        style={[
+          styles.headerSelo,
+          { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+        ]}
+      >
+        <Icone nome="musica" tamanho={16} cor={colors.primary} />
+      </View>
+    </View>
+  );
+
   if (carregando) {
     return (
-      <AuroraBackground>
-        <View style={styles.containerCentrado}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.textoCentrado, { color: colors.textSecondary }]}>Carregando obra...</Text>
-        </View>
-      </AuroraBackground>
+      <FundoAtmosfera>
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+          {barraSuperior}
+          <View style={styles.containerCentrado}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={[styles.textoCentrado, { color: colors.textSecondary }]}>
+              Carregando versões da obra...
+            </Text>
+          </View>
+        </SafeAreaView>
+      </FundoAtmosfera>
     );
   }
 
   if (erro && releases.length === 0) {
     return (
-      <AuroraBackground>
-        <View style={styles.containerCentrado}>
-          <Text style={[styles.textoErro, { color: colors.error }]}>⚠️ Erro ao carregar</Text>
-          <Text style={[styles.textoErroMsg, { color: colors.textSecondary }]}>{erro}</Text>
-          <TouchableOpacity
-            style={[styles.botaoTentar, { backgroundColor: colors.button }]}
-            onPress={() => carregarReleases(0, false)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.textoButton, { color: colors.buttonText }]}>Tentar novamente</Text>
-          </TouchableOpacity>
-        </View>
-      </AuroraBackground>
+      <FundoAtmosfera>
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+          {barraSuperior}
+          <View style={styles.containerCentrado}>
+            <View
+              style={[
+                styles.estadoIcone,
+                { backgroundColor: comAlfa(colors.error, 0.12), borderColor: comAlfa(colors.error, 0.3) },
+              ]}
+            >
+              <Icone nome="erro" tamanho={26} cor={colors.error} />
+            </View>
+            <Text style={[styles.estadoTitulo, { color: colors.text }]}>
+              Não foi possível carregar
+            </Text>
+            <Text style={[styles.textoCentrado, { color: colors.textSecondary }]}>{erro}</Text>
+            <View style={styles.estadoAcao}>
+              <CustomButton
+                title="Tentar novamente"
+                icone="recarregar"
+                onPress={() => void carregarReleases(0, false)}
+              />
+            </View>
+          </View>
+        </SafeAreaView>
+      </FundoAtmosfera>
     );
   }
 
-  // Renderiza um grupo de releases
-  const renderGrupo = (grupo: GrupoReleases, index: number): React.JSX.Element => (
-    <Animated.View
-      key={index}
-      style={{
-        opacity: fadeInAnim,
-        transform: [
-          {
-            translateY: scrollY.interpolate({
-              inputRange: [0, 200],
-              outputRange: [0, 20],
-              extrapolate: 'clamp',
-            }),
-          },
-        ],
-      }}
-    >
-      <GlassCard style={styles.secaoGrupo}>
-        <Text style={[styles.tituloGrupo, { color: colors.primary }]}>
-          {traduzirCategoria(grupo.categoria)} ({grupo.releases.length})
-        </Text>
-        <FlatList
-          scrollEnabled={false}
-          data={grupo.releases}
-          keyExtractor={rel => `rel-${rel.id}`}
-          renderItem={({ item }) => (
-            <ReleaseCard
-              release={item}
-              onPress={handleSelecionarRelease}
-            />
-          )}
-        />
-      </GlassCard>
-    </Animated.View>
-  );
-
-  // Renderiza o cabeçalho da obra em cartão de vidro
-  const renderCabecalho = (): React.JSX.Element => (
-    <Animated.View
-      style={{
-        opacity: fadeInAnim,
-        transform: [
-          {
-            scale: scrollY.interpolate({
-              inputRange: [-100, 0],
-              outputRange: [1.1, 1],
-              extrapolate: 'clamp',
-            }),
-          },
-        ],
-      }}
-    >
-      <GlassCard style={styles.secaoCabecalho}>
-        <Text style={[styles.tituloObra, { color: colors.text }]}>{workInfo?.title || 'Obra'}</Text>
-        <Text style={[styles.totalReleases, { color: colors.textSecondary }]}>
-          {releases.length} {releases.length === 1 ? 'versão encontrada' : 'versões encontradas'}
-        </Text>
-      </GlassCard>
-    </Animated.View>
-  );
-
-  // Renderiza rodapé de paginação
-  const renderRodape = (): React.JSX.Element | null => {
-    if (!temMais) return null;
-
-    return (
-      <View style={styles.containerCarregarMais}>
-        <TouchableOpacity
-          style={[
-            styles.botaoCarregarMais,
-            { backgroundColor: colors.card, borderColor: colors.primary },
-          ]}
-          onPress={carregarMais}
-          disabled={atualizando}
-          activeOpacity={0.7}
-        >
-          {atualizando ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : (
-            <Text style={[styles.textoCarregarMais, { color: colors.primary }]}>Carregar mais</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
   return (
-    <AuroraBackground>
-      {/* Barra superior de vidro */}
-      <Animated.View
-        style={{
-          opacity: fadeInAnim,
-        }}
-      >
-        <GlassCard forte style={styles.headerBox}>
-          <TouchableOpacity
-            style={styles.botaoVoltar}
-            onPress={() => navigation.goBack()}
-            activeOpacity={0.7}
+    <FundoAtmosfera>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        {barraSuperior}
+
+        <Animated.View style={{ flex: 1, opacity: fadeInAnim }}>
+          <ScrollView
+            contentContainerStyle={styles.conteudo}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={atualizando}
+                onRefresh={handleAtualizacao}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
+              />
+            }
           >
-            <Text style={[styles.textoVoltar, { color: colors.primary }]}>← Voltar</Text>
-          </TouchableOpacity>
-          <Text style={[styles.tituloHeader, { color: colors.text }]}>Obra Completa</Text>
-        </GlassCard>
-      </Animated.View>
+            {/* Cabeçalho da obra */}
+            <GlassCard style={styles.secaoCabecalho}>
+              <View style={styles.obraEtiqueta}>
+                <View style={[styles.obraPonto, { backgroundColor: colors.primary }]} />
+                <Text style={[styles.obraEtiquetaTexto, { color: colors.textSecondary }]}>
+                  OBRA MUSICAL
+                </Text>
+              </View>
+              <Text style={[styles.tituloObra, { color: colors.text }]}>
+                {workInfo?.title || 'Obra'}
+              </Text>
+              <View style={styles.obraRodape}>
+                <View
+                  style={[
+                    styles.chip,
+                    { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                  ]}
+                >
+                  <Icone nome="album" tamanho={12} cor={colors.primary} />
+                  <Text style={[styles.chipTexto, { color: colors.text }]}>
+                    {releases.length} {releases.length === 1 ? 'versão' : 'versões'}
+                  </Text>
+                </View>
+                <Text style={[styles.obraDica, { color: colors.textSecondary }]}>
+                  Todas as versões com áudio disponível
+                </Text>
+              </View>
+            </GlassCard>
 
-      {/* Conteúdo */}
-      <Animated.ScrollView
-        style={styles.conteudo}
-        scrollEventThrottle={16}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: false }
-        )}
-        refreshControl={
-          <RefreshControl
-            refreshing={atualizando}
-            onRefresh={handleAtualizacao}
-            tintColor={colors.primary}
-          />
-        }
-      >
-        {renderCabecalho()}
+            {/* Grupos por categoria — nenhuma versão é ocultada */}
+            {gruposReleases.length > 0 ? (
+              gruposReleases.map((grupo) => (
+                <View key={grupo.categoria} style={styles.grupo}>
+                  <View style={styles.grupoCabecalho}>
+                    <Text style={[styles.tituloGrupo, { color: colors.text }]}>
+                      {traduzirCategoria(grupo.categoria)}
+                    </Text>
+                    <View
+                      style={[
+                        styles.grupoContador,
+                        { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                      ]}
+                    >
+                      <Text style={[styles.grupoContadorTexto, { color: colors.textSecondary }]}>
+                        {grupo.releases.length}
+                      </Text>
+                    </View>
+                  </View>
 
-        {/* Renderiza cada grupo de releases */}
-        {gruposReleases.length > 0 ? (
-          gruposReleases.map((grupo, idx) => renderGrupo(grupo, idx))
-        ) : (
-          <View style={styles.containerSemDados}>
-            <Text style={styles.icone}>🎵</Text>
-            <Text style={[styles.textoSemDados, { color: colors.textSecondary }]}>Nenhuma versão encontrada</Text>
-          </View>
-        )}
+                  {grupo.releases.map((release) => (
+                    <ReleaseCard
+                      key={release.id}
+                      release={release}
+                      onPress={handleSelecionarRelease}
+                    />
+                  ))}
+                </View>
+              ))
+            ) : (
+              <View style={styles.containerSemDados}>
+                <Icone nome="musica" tamanho={30} cor={colors.textSecondary} />
+                <Text style={[styles.textoSemDados, { color: colors.textSecondary }]}>
+                  Nenhuma versão com áudio disponível no momento
+                </Text>
+              </View>
+            )}
 
-        {renderRodape()}
-
-        {/* Espaço extra no final */}
-        <View style={{ height: 20 }} />
-      </Animated.ScrollView>
-    </AuroraBackground>
+            {temMais && (
+              <View style={styles.containerCarregarMais}>
+                <CustomButton
+                  title="Carregar mais versões"
+                  variant="secondary"
+                  icone="setaBaixo"
+                  loading={atualizando}
+                  onPress={carregarMais}
+                />
+              </View>
+            )}
+          </ScrollView>
+        </Animated.View>
+      </SafeAreaView>
+    </FundoAtmosfera>
   );
 }
 
-// ============================================================
-// Funções Auxiliares
-// ============================================================
-
-// Traduz categoria de release_type para português
+// Traduz a categoria técnica para um título legível em pt-BR.
 function traduzirCategoria(categoria: string): string {
   const traducoes: Record<string, string> = {
-    release_format: 'Formatos de Lançamento',
-    mix_edit: 'Edições e Remixes',
+    release_format: 'Formatos de lançamento',
+    mix_edit: 'Edições e remixes',
     instrumental: 'Instrumentais',
     playback: 'Playbacks',
   };
   return traducoes[categoria] || categoria;
 }
 
-// ============================================================
-// Estilos
-// ============================================================
-
 const styles = StyleSheet.create({
-  headerBox: {
+  container: {
+    flex: 1,
+  },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 16,
-    marginTop: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 12,
-    borderRadius: 20,
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'web' ? 18 : 4,
+    paddingBottom: 10,
   },
-
-  botaoVoltar: {
-    padding: 8,
-  },
-
-  textoVoltar: {
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-
-  tituloHeader: {
+  headerTextos: {
     flex: 1,
-    textAlign: 'center',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginRight: 40,
   },
-
+  headerTitulo: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  headerSubtitulo: {
+    fontSize: 10.5,
+    marginTop: 2,
+  },
+  headerSelo: {
+    width: 42,
+    height: 42,
+    borderRadius: 15,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  botaoCirculo: {
+    width: 42,
+    height: 42,
+    borderRadius: 15,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   conteudo: {
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingTop: 16,
+    paddingTop: 6,
+    paddingBottom: 130,
   },
-
   secaoCabecalho: {
-    marginBottom: 24,
-    borderRadius: 16,
+    marginHorizontal: 20,
+    marginBottom: 18,
+    padding: 20,
+    borderRadius: 26,
   },
-
+  obraEtiqueta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  obraPonto: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+  },
+  obraEtiquetaTexto: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1.6,
+  },
   tituloObra: {
-    fontSize: 26,
+    fontSize: 25,
     fontWeight: '800',
-    marginBottom: 8,
-    letterSpacing: 0.5,
+    lineHeight: 30,
+    letterSpacing: 0.1,
   },
-
-  totalReleases: {
-    fontSize: 14,
-    fontWeight: '500',
+  obraRodape: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 14,
   },
-
-  secaoGrupo: {
-    marginBottom: 24,
-    borderRadius: 16,
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
   },
-
-  tituloGrupo: {
-    fontSize: 14,
-    fontWeight: 'bold',
+  chipTexto: {
+    fontSize: 10.5,
+    fontWeight: '700',
+  },
+  obraDica: {
+    fontSize: 10.5,
+    flexShrink: 1,
+  },
+  grupo: {
     marginBottom: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
   },
-
+  grupoCabecalho: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingBottom: 8,
+  },
+  tituloGrupo: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  grupoContador: {
+    minWidth: 24,
+    height: 22,
+    paddingHorizontal: 7,
+    borderRadius: 11,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  grupoContadorTexto: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
   containerCentrado: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 36,
+    paddingBottom: 110,
   },
-
   textoCentrado: {
-    fontSize: 14,
+    fontSize: 12.5,
+    lineHeight: 19,
     marginTop: 12,
-  },
-
-  textoErro: {
-    fontSize: 32,
-    marginBottom: 8,
-  },
-
-  textoErroMsg: {
-    fontSize: 14,
-    marginBottom: 20,
     textAlign: 'center',
   },
-
-  botaoTentar: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
+  estadoIcone: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
   },
-
-  textoButton: {
-    fontWeight: 'bold',
-    fontSize: 14,
+  estadoTitulo: {
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 4,
   },
-
+  estadoAcao: {
+    marginTop: 18,
+  },
   containerSemDados: {
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 48,
+    gap: 12,
   },
-
-  icone: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-
   textoSemDados: {
-    fontSize: 16,
+    fontSize: 13,
+    textAlign: 'center',
   },
-
   containerCarregarMais: {
-    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 20,
-  },
-
-  botaoCarregarMais: {
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 2,
-  },
-
-  textoCarregarMais: {
-    fontWeight: 'bold',
-    fontSize: 14,
+    paddingVertical: 18,
   },
 });

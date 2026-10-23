@@ -18,6 +18,7 @@ import DetalheArtistaScreen from '../screens/DetalheArtistaScreen';
 import TelaBiblioteca from '../screens/TelaBiblioteca';
 import TelaExplorar from '../screens/TelaExplorar';
 import FavoritosScreen from '../screens/FavoritosScreen';
+import FilaDownloadsScreen from '../screens/FilaDownloadsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import TelaAdminIngestao from '../screens/TelaAdminIngestao';
 
@@ -27,7 +28,7 @@ export default function AppNavigator(): React.JSX.Element {
   const { colors, isDark } = useTheme();
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
 
-  // Tema da navegação alinhado à identidade visual Aurora.
+  // Tema da navegação alinhado aos tokens visuais do aplicativo.
   const base = isDark ? DarkTheme : DefaultTheme;
   const temaNavegacao: Theme = {
     ...base,
@@ -62,6 +63,7 @@ export default function AppNavigator(): React.JSX.Element {
         <Stack.Screen name="Biblioteca" component={TelaBiblioteca} />
         <Stack.Screen name="Explorar" component={TelaExplorar} />
         <Stack.Screen name="Favoritos" component={FavoritosScreen} />
+        <Stack.Screen name="FilaDownloads" component={FilaDownloadsScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="AdminIngestao" component={TelaAdminIngestao} />
       </Stack.Navigator>

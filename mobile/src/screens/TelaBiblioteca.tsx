@@ -1,6 +1,6 @@
-// Tela de Biblioteca — estatísticas, favoritos e histórico de buscas.
-// Usa contextos de Favoritos e Histórico para exibir dados persistidos localmente.
-// Segue a identidade visual de vidro fosco: fundo com luzes suaves e cartões translúcidos.
+// Tela de Biblioteca — resumo da coleção, favoritos e histórico de buscas.
+// Todos os dados vêm dos contextos locais (AsyncStorage); nenhuma informação
+// sai do aparelho. A interface usa os cartões de vidro fosco do projeto.
 
 import React, { useState } from 'react';
 import {
@@ -9,8 +9,10 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  FlatList,
+  Image,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RootStackParamList, Release } from '../types';
@@ -18,12 +20,22 @@ import { useFavoritos } from '../contexts/FavoritosContext';
 import { useHistorico } from '../contexts/HistoricoContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useModal } from '../contexts/ModalContext';
-import AuroraBackground from '../components/AuroraBackground';
+import FundoAtmosfera from '../components/FundoAtmosfera';
 import GlassCard from '../components/GlassCard';
+import Icone, { NomeIcone } from '../components/Icone';
+import CustomButton from '../components/CustomButton';
+import { traduzirTipoRelease } from '../utils/tiposRelease';
+import { comAlfa } from '../utils/cores';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Biblioteca'>;
 
 type AbaAtiva = 'estatisticas' | 'favoritos' | 'historico';
+
+const ABAS: Array<{ valor: AbaAtiva; rotulo: string; icone: NomeIcone }> = [
+  { valor: 'estatisticas', rotulo: 'Resumo', icone: 'estatisticas' },
+  { valor: 'favoritos', rotulo: 'Favoritos', icone: 'favorito' },
+  { valor: 'historico', rotulo: 'Histórico', icone: 'relogio' },
+];
 
 export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element {
   const { favoritos, removerFavorito } = useFavoritos();
@@ -32,37 +44,15 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
   const { abrirConfirmacao } = useModal();
   const [abaAtiva, setAbaAtiva] = useState<AbaAtiva>('estatisticas');
 
-  // Calcula estatísticas dos favoritos
-  const calcularEstatisticas = () => {
-    if (favoritos.length === 0) {
-      return {
-        totalFavoritos: 0,
-        artistasUnicos: 0,
-        obrasUnicas: 0,
-        tiposRelease: new Set<string>(),
-      };
-    }
+  // Estatísticas derivadas dos favoritos locais.
+  const artistasUnicos = new Set(favoritos.map((f) => f.artist_name));
+  const obrasUnicas = new Set(favoritos.map((f) => f.work_title));
+  const tiposRelease = new Set(favoritos.map((f) => f.release_type));
 
-    const artistasUnicos = new Set(favoritos.map(f => f.artist_name));
-    const obrasUnicas = new Set(favoritos.map(f => f.work_title));
-    const tiposRelease = new Set(favoritos.map(f => f.release_type));
-
-    return {
-      totalFavoritos: favoritos.length,
-      artistasUnicos: artistasUnicos.size,
-      obrasUnicas: obrasUnicas.size,
-      tiposRelease,
-    };
-  };
-
-  const stats = calcularEstatisticas();
-
-  // Navega para detalhes da versão
   const handleSelecionarRelease = (release: Release): void => {
     navigation.push('DetalheRelease', { release });
   };
 
-  // Remove favorito com confirmação no modal global
   const handleRemoverFavorito = (releaseId: number): void => {
     abrirConfirmacao(
       'Remover dos favoritos?',
@@ -71,7 +61,6 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
     );
   };
 
-  // Limpa histórico com confirmação no modal global
   const handleLimparHistorico = (): void => {
     abrirConfirmacao(
       'Limpar histórico?',
@@ -80,226 +69,283 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
     );
   };
 
-  // Renderiza card de estatística
-  const renderStatCard = (label: string, valor: number | string): React.JSX.Element => (
-    <GlassCard style={[styles.cardStat, { borderLeftColor: colors.primary }]}>
-      <Text style={[styles.valorStat, { color: colors.primary }]}>{valor}</Text>
+  const cardStat = (
+    icone: NomeIcone,
+    valor: number,
+    label: string
+  ): React.JSX.Element => (
+    <GlassCard key={label} style={styles.cardStat} semBrilho>
+      <View
+        style={[
+          styles.statIcone,
+          { backgroundColor: comAlfa(colors.primary, 0.13), borderColor: comAlfa(colors.primary, 0.24) },
+        ]}
+      >
+        <Icone nome={icone} tamanho={16} cor={colors.primary} />
+      </View>
+      <Text style={[styles.valorStat, { color: colors.text }]}>{valor}</Text>
       <Text style={[styles.labelStat, { color: colors.textSecondary }]}>{label}</Text>
     </GlassCard>
   );
 
-  // Renderiza aba de estatísticas
+  const estadoVazio = (icone: NomeIcone, titulo: string, dica: string): React.JSX.Element => (
+    <View style={styles.containerVazio}>
+      <View
+        style={[
+          styles.vazioIcone,
+          { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+        ]}
+      >
+        <Icone nome={icone} tamanho={26} cor={colors.textSecondary} />
+      </View>
+      <Text style={[styles.vazioTitulo, { color: colors.text }]}>{titulo}</Text>
+      <Text style={[styles.vazioDica, { color: colors.textSecondary }]}>{dica}</Text>
+    </View>
+  );
+
   const renderEstatisticas = (): React.JSX.Element => (
     <View style={styles.conteudoAba}>
-      <Text style={[styles.tituloSecao, { color: colors.text }]}>Resumo da Biblioteca</Text>
-
       <View style={styles.gridStats}>
-        {renderStatCard('Favoritos', stats.totalFavoritos)}
-        {renderStatCard('Artistas', stats.artistasUnicos)}
-        {renderStatCard('Obras', stats.obrasUnicas)}
-        {renderStatCard('Tipos', stats.tiposRelease.size)}
+        {cardStat('favorito', favoritos.length, 'Favoritos')}
+        {cardStat('fone', artistasUnicos.size, 'Artistas')}
+        {cardStat('musica', obrasUnicas.size, 'Obras')}
+        {cardStat('album', tiposRelease.size, 'Tipos')}
       </View>
 
-      {stats.totalFavoritos > 0 && (
-        <>
-          <Text style={[styles.tituloSecao, { color: colors.text }]}>Tipos de versão favoritos</Text>
+      {favoritos.length > 0 ? (
+        <GlassCard style={styles.secao}>
+          <View style={styles.secaoTituloLinha}>
+            <Icone nome="album" tamanho={14} cor={colors.primary} />
+            <Text style={[styles.secaoTitulo, { color: colors.text }]}>
+              Tipos de versão favoritos
+            </Text>
+          </View>
           <View style={styles.containerTipos}>
-            {Array.from(stats.tiposRelease).map((tipo, idx) => (
-              <View key={idx} style={[styles.badgeTipo, { backgroundColor: colors.primary }]}>
-                <Text style={[styles.textoTipo, { color: colors.buttonText }]}>{tipo}</Text>
+            {Array.from(tiposRelease).map((tipo) => (
+              <View
+                key={tipo}
+                style={[
+                  styles.badgeTipo,
+                  { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                ]}
+              >
+                <Text style={[styles.textoTipo, { color: colors.text }]}>
+                  {traduzirTipoRelease(tipo)}
+                </Text>
               </View>
             ))}
           </View>
-        </>
-      )}
-
-      {stats.totalFavoritos === 0 && (
-        <View style={styles.containerVazio}>
-          <Text style={[styles.textoVazio, { color: colors.textSecondary }]}>
-            Você não tem favoritos ainda.{'\n'}Comece adicionando versões!
-          </Text>
-        </View>
-      )}
-    </View>
-  );
-
-  // Renderiza card de versão favorita
-  const renderCardRelease = (release: Release): React.JSX.Element => (
-    <GlassCard style={[styles.cardRelease, { borderLeftColor: colors.primary }]}>
-      <TouchableOpacity
-        style={styles.conteudoCardRelease}
-        onPress={() => handleSelecionarRelease(release)}
-        activeOpacity={0.7}
-      >
-        <View style={styles.infoRelease}>
-          <Text style={[styles.tituloRelease, { color: colors.text }]} numberOfLines={2}>
-            {release.version_name}
-          </Text>
-          <Text style={[styles.obreaArtista, { color: colors.textSecondary }]} numberOfLines={1}>
-            {release.work_title} • {release.artist_name}
-          </Text>
-          <Text style={[styles.tipoRelease, { color: colors.primary }]}>{release.release_type}</Text>
-        </View>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.botaoRemover, { backgroundColor: colors.accent }]}
-        onPress={() => handleRemoverFavorito(release.id)}
-      >
-        <Text style={[styles.textoRemover, { color: colors.error }]}>✕</Text>
-      </TouchableOpacity>
-    </GlassCard>
-  );
-
-  // Renderiza aba de favoritos
-  const renderFavoritos = (): React.JSX.Element => (
-    <View style={styles.conteudoAba}>
-      <Text style={[styles.tituloSecao, { color: colors.text }]}>
-        Favoritos ({favoritos.length})
-      </Text>
-
-      {favoritos.length > 0 ? (
-        <FlatList
-          scrollEnabled={false}
-          data={favoritos}
-          keyExtractor={rel => `fav-${rel.id}`}
-          renderItem={({ item }) => renderCardRelease(item)}
-        />
-      ) : (
-        <View style={styles.containerVazio}>
-          <Text style={[styles.textoVazio, { color: colors.textSecondary }]}>
-            Nenhum favorito ainda.{'\n'}Toque no ♡ em uma versão para adicionar!
-          </Text>
-        </View>
-      )}
-    </View>
-  );
-
-  // Renderiza aba de histórico
-  const renderHistorico = (): React.JSX.Element => (
-    <View style={styles.conteudoAba}>
-      <View style={styles.headerHistorico}>
-        <Text style={[styles.tituloSecao, { color: colors.text }]}>
-          Histórico de Buscas ({historico.length})
-        </Text>
-        {historico.length > 0 && (
-          <TouchableOpacity
-            style={[styles.botaoLimpar, { backgroundColor: colors.button }]}
-            onPress={handleLimparHistorico}
-          >
-            <Text style={[styles.textoLimpar, { color: colors.buttonText }]}>Limpar</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {historico.length > 0 ? (
-        <GlassCard style={styles.listaHistorico}>
-          {historico.map((item, idx) => (
-            <View
-              key={idx}
-              style={[styles.itemHistorico, { borderBottomColor: colors.glassBorder }]}
-            >
-              <Text style={[styles.textoHistorico, { color: colors.text }]}>{item.termo}</Text>
-              <Text style={[styles.dataHistorico, { color: colors.textSecondary }]}>
-                {formatarData(new Date(item.timestamp))}
-              </Text>
-            </View>
-          ))}
         </GlassCard>
       ) : (
-        <View style={styles.containerVazio}>
-          <Text style={[styles.textoVazio, { color: colors.textSecondary }]}>
-            Histórico vazio.{'\n'}Suas buscas aparecerão aqui.
-          </Text>
-        </View>
+        estadoVazio(
+          'biblioteca',
+          'Sua biblioteca começa agora',
+          'Adicione versões aos favoritos para acompanhar artistas, obras e formatos.'
+        )
+      )}
+    </View>
+  );
+
+  const renderFavoritos = (): React.JSX.Element => (
+    <View style={styles.conteudoAba}>
+      {favoritos.length > 0 ? (
+        favoritos.map((release) => (
+          <TouchableOpacity
+            key={release.id}
+            style={[
+              styles.cardRelease,
+              { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+            ]}
+            onPress={() => handleSelecionarRelease(release)}
+            activeOpacity={0.78}
+            accessibilityRole="button"
+            accessibilityLabel={`Abrir ${release.version_name}`}
+          >
+            {release.cover_url ? (
+              <Image
+                source={{ uri: release.cover_url }}
+                style={styles.capa}
+                resizeMode="cover"
+                accessibilityLabel={`Capa de ${release.version_name}`}
+              />
+            ) : (
+              <View
+                style={[
+                  styles.capa,
+                  styles.semCapa,
+                  { backgroundColor: colors.input, borderColor: colors.glassBorder },
+                ]}
+              >
+                <Icone nome="album" tamanho={18} cor={colors.textSecondary} />
+              </View>
+            )}
+
+            <View style={styles.infoRelease}>
+              <Text style={[styles.tituloRelease, { color: colors.text }]} numberOfLines={2}>
+                {release.version_name}
+              </Text>
+              <Text style={[styles.subtituloRelease, { color: colors.textSecondary }]} numberOfLines={1}>
+                {release.artist_name} · {release.work_title}
+              </Text>
+              <Text style={[styles.tipoRelease, { color: colors.primary }]} numberOfLines={1}>
+                {traduzirTipoRelease(release.release_type)}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.botaoRemover,
+                { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+              ]}
+              onPress={() => handleRemoverFavorito(release.id)}
+              activeOpacity={0.7}
+              accessibilityLabel={`Remover ${release.version_name} dos favoritos`}
+            >
+              <Icone nome="lixeira" tamanho={14} cor={colors.error} />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        ))
+      ) : (
+        estadoVazio(
+          'favorito',
+          'Nenhum favorito ainda',
+          'Toque no coração de uma versão para guardá-la aqui.'
+        )
+      )}
+    </View>
+  );
+
+  const renderHistorico = (): React.JSX.Element => (
+    <View style={styles.conteudoAba}>
+      {historico.length > 0 ? (
+        <>
+          <View style={styles.headerSecao}>
+            <Text style={[styles.secaoTitulo, { color: colors.text }]}>
+              {historico.length} {historico.length === 1 ? 'busca recente' : 'buscas recentes'}
+            </Text>
+            <TouchableOpacity
+              style={[styles.botaoLimpar, { borderColor: colors.glassBorder }]}
+              onPress={handleLimparHistorico}
+              activeOpacity={0.7}
+              accessibilityLabel="Limpar histórico de buscas"
+            >
+              <Icone nome="lixeira" tamanho={12} cor={colors.error} />
+              <Text style={[styles.textoLimpar, { color: colors.error }]}>Limpar</Text>
+            </TouchableOpacity>
+          </View>
+
+          <GlassCard style={styles.listaHistorico} semBrilho>
+            {historico.map((item, indice) => (
+              <View
+                key={`${item.termo}-${item.timestamp}`}
+                style={[
+                  styles.itemHistorico,
+                  indice < historico.length - 1 && { borderBottomColor: colors.glassBorder, borderBottomWidth: 1 },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.historicoIcone,
+                    { backgroundColor: colors.glassCard },
+                  ]}
+                >
+                  <Icone nome="relogio" tamanho={13} cor={colors.textSecondary} />
+                </View>
+                <Text style={[styles.textoHistorico, { color: colors.text }]} numberOfLines={1}>
+                  {item.termo}
+                </Text>
+                <Text style={[styles.dataHistorico, { color: colors.textSecondary }]}>
+                  {formatarData(new Date(item.timestamp))}
+                </Text>
+              </View>
+            ))}
+          </GlassCard>
+        </>
+      ) : (
+        estadoVazio(
+          'relogio',
+          'Histórico vazio',
+          'As buscas que você fizer aparecem aqui para voltar rapidinho.'
+        )
       )}
     </View>
   );
 
   return (
-    <AuroraBackground style={styles.container}>
-      {/* Cabeçalho em vidro forte */}
-      <View
-        style={[
-          styles.headerBox,
-          { backgroundColor: colors.glassCardForte, borderBottomColor: colors.glassBorder },
-        ]}
-      >
-        <Text style={[styles.tituloHeader, { color: colors.text }]}>Biblioteca</Text>
-      </View>
+    <FundoAtmosfera>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <View style={styles.cabecalho}>
+          <Text style={[styles.etiqueta, { color: colors.textSecondary }]}>SUA COLEÇÃO</Text>
+          <Text style={[styles.titulo, { color: colors.text }]}>Biblioteca</Text>
+        </View>
 
-      {/* Abas */}
-      <View
-        style={[
-          styles.containerAbas,
-          { backgroundColor: colors.glassCardForte, borderBottomColor: colors.glassBorder },
-        ]}
-      >
-        <TouchableOpacity
-          style={[
-            styles.aba,
-            abaAtiva === 'estatisticas' && { borderBottomColor: colors.primary },
-          ]}
-          onPress={() => setAbaAtiva('estatisticas')}
+        {/* Abas em pílulas de vidro */}
+        <View style={styles.containerAbas}>
+          {ABAS.map((aba) => {
+            const ativa = abaAtiva === aba.valor;
+            const contagem =
+              aba.valor === 'favoritos'
+                ? favoritos.length
+                : aba.valor === 'historico'
+                  ? historico.length
+                  : undefined;
+            return (
+              <TouchableOpacity
+                key={aba.valor}
+                style={[
+                  styles.aba,
+                  {
+                    backgroundColor: ativa ? colors.button : colors.glassCard,
+                    borderColor: ativa ? colors.button : colors.glassBorder,
+                  },
+                ]}
+                onPress={() => setAbaAtiva(aba.valor)}
+                activeOpacity={0.75}
+                accessibilityState={{ selected: ativa }}
+              >
+                <Icone
+                  nome={aba.icone}
+                  tamanho={14}
+                  cor={ativa ? colors.buttonText : colors.textSecondary}
+                />
+                <Text
+                  style={[styles.textoAba, { color: ativa ? colors.buttonText : colors.text }]}
+                  numberOfLines={1}
+                >
+                  {aba.rotulo}
+                  {contagem !== undefined && contagem > 0 ? ` (${contagem})` : ''}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <ScrollView
+          contentContainerStyle={styles.conteudo}
+          showsVerticalScrollIndicator={false}
         >
-          <Text
-            style={[
-              styles.textoAba,
-              { color: abaAtiva === 'estatisticas' ? colors.primary : colors.textSecondary },
-            ]}
-          >
-            📊 Estatísticas
-          </Text>
-        </TouchableOpacity>
+          {abaAtiva === 'estatisticas' && renderEstatisticas()}
+          {abaAtiva === 'favoritos' && renderFavoritos()}
+          {abaAtiva === 'historico' && renderHistorico()}
 
-        <TouchableOpacity
-          style={[
-            styles.aba,
-            abaAtiva === 'favoritos' && { borderBottomColor: colors.primary },
-          ]}
-          onPress={() => setAbaAtiva('favoritos')}
-        >
-          <Text
-            style={[
-              styles.textoAba,
-              { color: abaAtiva === 'favoritos' ? colors.primary : colors.textSecondary },
-            ]}
-          >
-            ♡ Favoritos ({favoritos.length})
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.aba,
-            abaAtiva === 'historico' && { borderBottomColor: colors.primary },
-          ]}
-          onPress={() => setAbaAtiva('historico')}
-        >
-          <Text
-            style={[
-              styles.textoAba,
-              { color: abaAtiva === 'historico' ? colors.primary : colors.textSecondary },
-            ]}
-          >
-            🕐 Histórico
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Conteúdo */}
-      <ScrollView style={styles.conteudo}>
-        {abaAtiva === 'estatisticas' && renderEstatisticas()}
-        {abaAtiva === 'favoritos' && renderFavoritos()}
-        {abaAtiva === 'historico' && renderHistorico()}
-      </ScrollView>
-    </AuroraBackground>
+          {abaAtiva === 'favoritos' && favoritos.length > 0 && (
+            <View style={styles.rodapeAcao}>
+              <CustomButton
+                title="Abrir todos os favoritos"
+                variant="secondary"
+                icone="favorito"
+                iconeDireita
+                onPress={() => navigation.navigate('Favoritos')}
+              />
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </FundoAtmosfera>
   );
 }
 
-// ============================================================
-// Funções Auxiliares
-// ============================================================
-
+// Tempo relativo curto em português brasileiro.
 function formatarData(data: Date): string {
   const agora = new Date();
   const diferenca = agora.getTime() - data.getTime();
@@ -308,214 +354,240 @@ function formatarData(data: Date): string {
   const dias = Math.floor(diferenca / 86400000);
 
   if (minutos < 1) return 'Agora';
-  if (minutos < 60) return `${minutos}m atrás`;
-  if (horas < 24) return `${horas}h atrás`;
-  if (dias < 7) return `${dias}d atrás`;
+  if (minutos < 60) return `${minutos} min`;
+  if (horas < 24) return `${horas} h`;
+  if (dias < 7) return `${dias} d`;
 
   return data.toLocaleDateString('pt-BR');
 }
-
-// ============================================================
-// Estilos
-// As cores vêm do tema (useTheme) e são aplicadas nos componentes;
-// aqui ficam apenas os valores de layout.
-// ============================================================
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-
-  headerBox: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+  cabecalho: {
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'web' ? 22 : 8,
+    paddingBottom: 10,
   },
-
-  tituloHeader: {
-    fontSize: 20,
-    fontWeight: 'bold',
+  etiqueta: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1.8,
+    marginBottom: 4,
   },
-
+  titulo: {
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
   containerAbas: {
     flexDirection: 'row',
-    borderBottomWidth: 1,
+    gap: 7,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
   },
-
   aba: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 3,
-    borderBottomColor: 'transparent',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    borderRadius: 999,
+    borderWidth: 1,
   },
-
   textoAba: {
-    fontSize: 13,
+    fontSize: 10.5,
     fontWeight: '600',
-    textAlign: 'center',
   },
-
   conteudo: {
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingTop: 16,
+    paddingTop: 6,
+    paddingBottom: 130,
+    paddingHorizontal: 20,
   },
-
   conteudoAba: {
-    paddingBottom: 20,
+    paddingBottom: 8,
   },
-
-  tituloSecao: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 16,
-  },
-
   gridStats: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    gap: 10,
+    marginBottom: 14,
   },
-
   cardStat: {
     width: '48%',
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    justifyContent: 'center',
+    padding: 15,
+    borderRadius: 22,
+    marginBottom: 2,
+  },
+  statIcone: {
+    width: 32,
+    height: 32,
+    borderRadius: 11,
+    borderWidth: 1,
     alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
   },
-
   valorStat: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 4,
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
-
   labelStat: {
-    fontSize: 13,
-    textAlign: 'center',
+    fontSize: 10.5,
+    marginTop: 2,
+    fontWeight: '500',
   },
-
+  secao: {
+    padding: 16,
+    borderRadius: 22,
+  },
+  secaoTituloLinha: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginBottom: 11,
+  },
+  secaoTitulo: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
   containerTipos: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginBottom: 20,
+    gap: 7,
   },
-
   badgeTipo: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 11,
     paddingVertical: 6,
-    borderRadius: 16,
-    marginRight: 8,
-    marginBottom: 8,
+    borderRadius: 999,
+    borderWidth: 1,
   },
-
   textoTipo: {
-    fontSize: 12,
-    fontWeight: 'bold',
+    fontSize: 10,
+    fontWeight: '600',
   },
-
   cardRelease: {
-    marginBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 0,
-    paddingRight: 8,
-    borderLeftWidth: 4,
+    gap: 12,
+    padding: 11,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginBottom: 8,
   },
-
-  conteudoCardRelease: {
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+  capa: {
+    width: 54,
+    height: 54,
+    borderRadius: 14,
   },
-
+  semCapa: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
   infoRelease: {
     flex: 1,
   },
-
   tituloRelease: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    marginBottom: 4,
+    lineHeight: 17,
   },
-
-  obreaArtista: {
-    fontSize: 12,
-    marginBottom: 4,
+  subtituloRelease: {
+    fontSize: 10,
+    marginTop: 2,
   },
-
   tipoRelease: {
-    fontSize: 11,
-    fontWeight: 'bold',
+    fontSize: 9.5,
+    fontWeight: '600',
+    marginTop: 3,
   },
-
   botaoRemover: {
-    width: 32,
-    height: 32,
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 16,
   },
-
-  textoRemover: {
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-
-  headerHistorico: {
+  headerSecao: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    justifyContent: 'space-between',
+    marginBottom: 10,
   },
-
   botaoLimpar: {
-    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 11,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 999,
+    borderWidth: 1,
   },
-
   textoLimpar: {
-    fontSize: 12,
-    fontWeight: 'bold',
+    fontSize: 10.5,
+    fontWeight: '600',
   },
-
   listaHistorico: {
-    padding: 0,
+    padding: 4,
+    borderRadius: 22,
   },
-
   itemHistorico: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 10,
     paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    paddingVertical: 11,
   },
-
+  historicoIcone: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   textoHistorico: {
-    fontSize: 14,
+    flex: 1,
+    fontSize: 12.5,
     fontWeight: '500',
   },
-
   dataHistorico: {
-    fontSize: 12,
+    fontSize: 9.5,
   },
-
   containerVazio: {
-    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 48,
+    paddingVertical: 36,
+    paddingHorizontal: 20,
   },
-
-  textoVazio: {
-    fontSize: 14,
+  vazioIcone: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  vazioTitulo: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 5,
     textAlign: 'center',
-    lineHeight: 20,
+  },
+  vazioDica: {
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+    maxWidth: 300,
+  },
+  rodapeAcao: {
+    alignItems: 'center',
+    marginTop: 12,
   },
 });

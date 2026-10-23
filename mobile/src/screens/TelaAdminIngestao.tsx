@@ -1,38 +1,48 @@
-// Tela Administrativa de Ingestão.
-// Permite forçar ingestão manual de termos a partir de fontes externas (MusicBrainz, Discogs).
-// Endpoint: POST /api/search/ingest
-// Segue a identidade visual de vidro fosco: fundo com luzes suaves e cartões translúcidos.
+// Tela administrativa de ingestão manual.
+// Força a sincronização de um termo nas fontes externas (MusicBrainz,
+// Discogs e Cover Art Archive) e mostra o resumo da execução. É uma tela
+// de manutenção, acessível fora do fluxo normal de busca do aplicativo.
 
 import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   TextInput,
   ScrollView,
-  ActivityIndicator,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-import { RootStackParamList } from '../types';
+import { RootStackParamList, ResultadoIngestao } from '../types';
 import { forcarIngestao } from '../services/api';
 import { useTheme } from '../contexts/ThemeContext';
 import { useModal } from '../contexts/ModalContext';
-import AuroraBackground from '../components/AuroraBackground';
+import FundoAtmosfera from '../components/FundoAtmosfera';
 import GlassCard from '../components/GlassCard';
+import Icone, { NomeIcone } from '../components/Icone';
+import CustomButton from '../components/CustomButton';
+import { comAlfa } from '../utils/cores';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AdminIngestao'>;
+
+// Etapas explicadas no cartão "Como funciona".
+const ETAPAS = [
+  'O termo é enviado às fontes externas (MusicBrainz e Discogs).',
+  'Novas obras e versões são criadas ou atualizadas no banco local.',
+  'As capas oficiais são buscadas na Cover Art Archive.',
+  'O cache é atualizado para as próximas buscas serem mais rápidas.',
+];
 
 export default function TelaAdminIngestao({ navigation }: Props): React.JSX.Element {
   const { colors } = useTheme();
   const { abrirErro, abrirAviso, toastSucesso } = useModal();
   const [termo, setTermo] = useState('');
   const [carregando, setCarregando] = useState(false);
-  const [resultado, setResultado] = useState<any>(null);
+  const [resultado, setResultado] = useState<ResultadoIngestao | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
-  // Executa ingestão
   const handleForcarIngestao = async (): Promise<void> => {
     if (!termo.trim()) {
       abrirAviso('Termo vazio', 'Digite um termo para fazer a ingestão.');
@@ -49,8 +59,7 @@ export default function TelaAdminIngestao({ navigation }: Props): React.JSX.Elem
       if (resposta.success && resposta.data) {
         setResultado(resposta.data);
         toastSucesso('Ingestão concluída com sucesso!');
-        // Regra do usuário: após uma busca bem-sucedida, o usuário volta
-        // automaticamente para a página inicial e continua suas buscas.
+        // Após uma ingestão bem-sucedida, o usuário volta à busca.
         navigation.navigate('Busca');
       } else {
         const mensagem = resposta.error || 'Erro na ingestão';
@@ -66,389 +75,410 @@ export default function TelaAdminIngestao({ navigation }: Props): React.JSX.Elem
     }
   };
 
-  // Limpa formulário
   const handleLimpar = (): void => {
     setTermo('');
     setResultado(null);
     setErro(null);
   };
 
-  return (
-    <AuroraBackground style={styles.container}>
-      {/* Cabeçalho em vidro forte */}
+  const linhaResultado = (
+    label: string,
+    valor: string | number | undefined,
+    ultima = false
+  ): React.JSX.Element | null => {
+    if (valor === undefined || valor === null) return null;
+    return (
       <View
         style={[
-          styles.headerBox,
-          { backgroundColor: colors.glassCardForte, borderBottomColor: colors.glassBorder },
+          styles.linhaResultado,
+          !ultima && { borderBottomWidth: 1, borderBottomColor: colors.glassBorder },
         ]}
       >
-        <TouchableOpacity
-          style={styles.botaoVoltar}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={[styles.textoVoltar, { color: colors.primary }]}>← Voltar</Text>
-        </TouchableOpacity>
-        <Text style={[styles.tituloHeader, { color: colors.text }]}>Admin: Ingestão</Text>
+        <Text style={[styles.labelResultado, { color: colors.textSecondary }]}>{label}</Text>
+        <Text style={[styles.valorResultado, { color: colors.text }]}>{valor}</Text>
       </View>
+    );
+  };
 
-      {/* Conteúdo */}
-      <ScrollView style={styles.conteudo} showsVerticalScrollIndicator={false}>
-        <View style={styles.secao}>
-          <Text style={[styles.tituloSecao, { color: colors.primary }]}>⚙️ Forçar Ingestão Manual</Text>
-          <Text style={[styles.descricao, { color: colors.textSecondary }]}>
-            Use este painel para forçar a busca de um termo nas fontes externas (MusicBrainz, Discogs, Cover Art Archive) e sincronizar os dados com o banco local.
-          </Text>
+  return (
+    <FundoAtmosfera>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <View style={styles.header}>
+          <View
+            style={[
+              styles.botaoCirculo,
+              { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+            ]}
+          >
+            <Icone nome="banco" tamanho={18} cor={colors.primary} />
+          </View>
+
+          <View style={styles.headerTextos}>
+            <Text style={[styles.headerTitulo, { color: colors.text }]}>Administração</Text>
+            <Text style={[styles.headerSubtitulo, { color: colors.textSecondary }]}>
+              Ingestão manual de metadados
+            </Text>
+          </View>
+
+          <CustomButton
+            title="Voltar"
+            variant="secondary"
+            size="small"
+            icone="voltar"
+            onPress={() => navigation.goBack()}
+          />
         </View>
 
-        {/* Form de Ingestão */}
-        <GlassCard style={[styles.card, { borderLeftColor: colors.primary }]}>
-          <Text style={[styles.labelInput, { color: colors.text }]}>Termo de Busca</Text>
-          <TextInput
-            style={[
-              styles.input,
-              { backgroundColor: colors.input, borderColor: colors.glassBorder, color: colors.text },
-            ]}
-            placeholder="Ex: Daft Punk, One More Time"
-            placeholderTextColor={colors.textSecondary}
-            value={termo}
-            onChangeText={setTermo}
-            editable={!carregando}
-          />
+        <ScrollView
+          contentContainerStyle={styles.conteudo}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Explicação */}
+          <GlassCard style={styles.card}>
+            <View style={styles.tituloLinha}>
+              <View
+                style={[
+                  styles.iconeSelo,
+                  { backgroundColor: comAlfa(colors.primary, 0.13), borderColor: comAlfa(colors.primary, 0.26) },
+                ]}
+              >
+                <Icone nome="recarregar" tamanho={16} cor={colors.primary} />
+              </View>
+              <Text style={[styles.cardTitulo, { color: colors.text }]}>
+                Forçar ingestão manual
+              </Text>
+            </View>
+            <Text style={[styles.descricao, { color: colors.textSecondary }]}>
+              Painel de manutenção: busca um termo nas fontes externas e sincroniza os
+              metadados com o banco local. O fluxo normal do aplicativo já faz isso
+              automaticamente em segundo plano.
+            </Text>
+          </GlassCard>
 
-          {/* Botões */}
-          <View style={styles.containerBotoes}>
-            <TouchableOpacity
+          {/* Formulário */}
+          <GlassCard style={styles.card}>
+            <Text style={[styles.labelInput, { color: colors.text }]}>Termo de busca</Text>
+            <View
               style={[
-                styles.botao,
-                styles.botaoPrimario,
-                { backgroundColor: colors.button },
-                carregando && styles.botaoDisabilitado,
+                styles.campo,
+                { backgroundColor: colors.input, borderColor: colors.glassBorder },
               ]}
-              onPress={handleForcarIngestao}
-              disabled={carregando}
             >
-              {carregando ? (
-                <ActivityIndicator size="small" color={colors.buttonText} />
-              ) : (
-                <Text style={[styles.textoBotaoPrimario, { color: colors.buttonText }]}>
-                  🔄 Iniciar Ingestão
+              <Icone nome="busca" tamanho={16} cor={colors.textSecondary} />
+              <TextInput
+                style={[styles.input, { color: colors.text }]}
+                placeholder="Ex.: Daft Punk, One More Time"
+                placeholderTextColor={colors.textSecondary}
+                value={termo}
+                onChangeText={setTermo}
+                editable={!carregando}
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel="Termo para ingestão manual"
+              />
+              {termo.length > 0 && !carregando && (
+                <Text
+                  style={[styles.limparCampo, { color: colors.textSecondary }]}
+                  onPress={() => setTermo('')}
+                  accessibilityLabel="Limpar termo"
+                >
+                  Limpar
                 </Text>
               )}
-            </TouchableOpacity>
+            </View>
 
-            <TouchableOpacity
-              style={[styles.botao, styles.botaoSecundario, { borderColor: colors.primary }]}
-              onPress={handleLimpar}
-              disabled={carregando}
-            >
-              <Text style={[styles.textoBotaoSecundario, { color: colors.primary }]}>Limpar</Text>
-            </TouchableOpacity>
-          </View>
-        </GlassCard>
-
-        {/* Resultado da Ingestão */}
-        {resultado && (
-          <GlassCard style={[styles.card, { borderLeftColor: colors.success }]}>
-            <Text style={[styles.tituloResultado, { color: colors.success }]}>
-              ✅ Resultado da Ingestão
-            </Text>
-
-            {resultado.works_created !== undefined && (
-              <View style={[styles.itemResultado, { borderBottomColor: colors.glassBorder }]}>
-                <Text style={[styles.labelResultado, { color: colors.textSecondary }]}>
-                  Obras criadas:
-                </Text>
-                <Text style={[styles.valorResultado, { color: colors.success }]}>
-                  {resultado.works_created}
-                </Text>
+            <View style={styles.containerBotoes}>
+              <View style={styles.botaoMetade}>
+                <CustomButton
+                  title="Iniciar ingestão"
+                  icone="recarregar"
+                  loading={carregando}
+                  onPress={handleForcarIngestao}
+                  style={styles.botaoCheio}
+                />
               </View>
-            )}
-
-            {resultado.releases_created !== undefined && (
-              <View style={[styles.itemResultado, { borderBottomColor: colors.glassBorder }]}>
-                <Text style={[styles.labelResultado, { color: colors.textSecondary }]}>
-                  Versões criadas:
-                </Text>
-                <Text style={[styles.valorResultado, { color: colors.success }]}>
-                  {resultado.releases_created}
-                </Text>
+              <View style={styles.botaoMetade}>
+                <CustomButton
+                  title="Limpar"
+                  variant="secondary"
+                  icone="limpar"
+                  disabled={carregando}
+                  onPress={handleLimpar}
+                  style={styles.botaoCheio}
+                />
               </View>
-            )}
-
-            {resultado.metadata_source && (
-              <View style={[styles.itemResultado, { borderBottomColor: colors.glassBorder }]}>
-                <Text style={[styles.labelResultado, { color: colors.textSecondary }]}>
-                  Fonte de Metadados:
-                </Text>
-                <Text style={[styles.valorResultado, { color: colors.success }]}>
-                  {resultado.metadata_source}
-                </Text>
-              </View>
-            )}
-
-            {resultado.timestamp && (
-              <View style={styles.itemResultado}>
-                <Text style={[styles.labelResultado, { color: colors.textSecondary }]}>
-                  Executado em:
-                </Text>
-                <Text style={[styles.valorResultado, { color: colors.success }]}>
-                  {new Date(resultado.timestamp).toLocaleString('pt-BR')}
-                </Text>
-              </View>
-            )}
+            </View>
           </GlassCard>
-        )}
 
-        {/* Erro */}
-        {erro && (
-          <GlassCard style={[styles.card, { borderLeftColor: colors.error }]}>
-            <Text style={[styles.tituloErro, { color: colors.error }]}>❌ Erro</Text>
-            <Text style={[styles.textoErro, { color: colors.textSecondary }]}>{erro}</Text>
+          {/* Resultado */}
+          {resultado && (
+            <GlassCard style={styles.card}>
+              <View style={styles.tituloLinha}>
+                <View
+                  style={[
+                    styles.iconeSelo,
+                    { backgroundColor: comAlfa(colors.success, 0.13), borderColor: comAlfa(colors.success, 0.28) },
+                  ]}
+                >
+                  <Icone nome="sucessoCirculo" tamanho={16} cor={colors.success} />
+                </View>
+                <Text style={[styles.cardTitulo, { color: colors.success }]}>
+                  Ingestão concluída
+                </Text>
+              </View>
+
+              {linhaResultado('Obras criadas', resultado.works_created)}
+              {linhaResultado('Versões criadas', resultado.releases_created)}
+              {linhaResultado('Fonte dos metadados', resultado.metadata_source)}
+              {linhaResultado(
+                'Executado em',
+                resultado.timestamp ? new Date(resultado.timestamp).toLocaleString('pt-BR') : undefined,
+                true
+              )}
+            </GlassCard>
+          )}
+
+          {/* Erro */}
+          {erro && (
+            <GlassCard style={styles.card}>
+              <View style={styles.tituloLinha}>
+                <View
+                  style={[
+                    styles.iconeSelo,
+                    { backgroundColor: comAlfa(colors.error, 0.13), borderColor: comAlfa(colors.error, 0.28) },
+                  ]}
+                >
+                  <Icone nome="erro" tamanho={16} cor={colors.error} />
+                </View>
+                <Text style={[styles.cardTitulo, { color: colors.error }]}>
+                  Falha na ingestão
+                </Text>
+              </View>
+              <Text style={[styles.textoErro, { color: colors.textSecondary }]}>{erro}</Text>
+            </GlassCard>
+          )}
+
+          {/* Como funciona */}
+          <GlassCard style={styles.card}>
+            <View style={styles.tituloLinha}>
+              <View
+                style={[
+                  styles.iconeSelo,
+                  { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                ]}
+              >
+                <Icone nome="info" tamanho={16} cor={colors.textSecondary} />
+              </View>
+              <Text style={[styles.cardTitulo, { color: colors.text }]}>Como funciona</Text>
+            </View>
+
+            {ETAPAS.map((etapa, indice) => (
+              <View key={etapa} style={styles.etapa}>
+                <View
+                  style={[
+                    styles.numero,
+                    { backgroundColor: comAlfa(colors.primary, 0.14), borderColor: comAlfa(colors.primary, 0.3) },
+                  ]}
+                >
+                  <Text style={[styles.numeroTexto, { color: colors.primary }]}>
+                    {indice + 1}
+                  </Text>
+                </View>
+                <Text style={[styles.textoLista, { color: colors.textSecondary }]}>
+                  {etapa}
+                </Text>
+              </View>
+            ))}
           </GlassCard>
-        )}
 
-        {/* Informações */}
-        <GlassCard style={[styles.card, { borderLeftColor: colors.primary }]}>
-          <Text style={[styles.tituloSecao, { color: colors.primary }]}>📝 Como Funciona</Text>
-          <Text style={[styles.textoInfo, { color: colors.textSecondary }]}>
-            Quando você realiza uma ingestão manual:
-          </Text>
-
-          <View style={styles.listaItems}>
-            <View style={styles.itemLista}>
-              <Text style={[styles.numeroBala, { color: colors.primary }]}>1</Text>
-              <Text style={[styles.textoLista, { color: colors.textSecondary }]}>
-                O termo é enviado para as APIs externas (MusicBrainz, Discogs)
+          {/* Limites das fontes */}
+          <GlassCard style={styles.card}>
+            <View style={styles.tituloLinha}>
+              <View
+                style={[
+                  styles.iconeSelo,
+                  { backgroundColor: comAlfa(colors.warning, 0.13), borderColor: comAlfa(colors.warning, 0.28) },
+                ]}
+              >
+                <Icone nome="aviso" tamanho={16} cor={colors.warning} />
+              </View>
+              <Text style={[styles.cardTitulo, { color: colors.text }]}>
+                Limites das fontes
               </Text>
             </View>
 
-            <View style={styles.itemLista}>
-              <Text style={[styles.numeroBala, { color: colors.primary }]}>2</Text>
-              <Text style={[styles.textoLista, { color: colors.textSecondary }]}>
-                Novas obras e versões são criadas/atualizadas no banco de dados
-              </Text>
-            </View>
-
-            <View style={styles.itemLista}>
-              <Text style={[styles.numeroBala, { color: colors.primary }]}>3</Text>
-              <Text style={[styles.textoLista, { color: colors.textSecondary }]}>
-                Capas oficiais são buscadas na Cover Art Archive
-              </Text>
-            </View>
-
-            <View style={styles.itemLista}>
-              <Text style={[styles.numeroBala, { color: colors.primary }]}>4</Text>
-              <Text style={[styles.textoLista, { color: colors.textSecondary }]}>
-                O cache é atualizado para próximas buscas serem mais rápidas
-              </Text>
-            </View>
-          </View>
-        </GlassCard>
-
-        {/* Respeito a Rate Limiting */}
-        <GlassCard style={[styles.card, { borderLeftColor: colors.warning }]}>
-          <Text style={[styles.tituloAviso, { color: colors.warning }]}>
-            ⚠️ Respeito a Rate Limiting
-          </Text>
-          <Text style={[styles.textoAviso, { color: colors.textSecondary }]}>
-            • MusicBrainz: 1 requisição por segundo{'\n'}
-            • Discogs: 60 requisições por minuto (autenticado){'\n'}
-            • Ingestões são enfileiradas para respeitar estes limites
-          </Text>
-        </GlassCard>
-
-        {/* Espaço extra */}
-        <View style={{ height: 40 }} />
-      </ScrollView>
-    </AuroraBackground>
+            <LinhaAviso icone="relogio" texto="MusicBrainz: 1 requisição por segundo" />
+            <LinhaAviso icone="escudo" texto="Discogs: 60 requisições por minuto (autenticado)" />
+            <LinhaAviso icone="fila" texto="Ingestões são enfileiradas para respeitar os limites" />
+          </GlassCard>
+        </ScrollView>
+      </SafeAreaView>
+    </FundoAtmosfera>
   );
 }
 
-// ============================================================
-// Estilos
-// As cores vêm do tema (useTheme) e são aplicadas nos componentes;
-// aqui ficam apenas os valores de layout.
-// ============================================================
+// Linha de aviso com ícone, usada no cartão de limites.
+function LinhaAviso({ icone, texto }: { icone: NomeIcone; texto: string }): React.JSX.Element {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.linhaAviso}>
+      <Icone nome={icone} tamanho={13} cor={colors.textSecondary} />
+      <Text style={[styles.textoAviso, { color: colors.textSecondary }]}>{texto}</Text>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-
-  headerBox: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'web' ? 18 : 4,
+    paddingBottom: 10,
   },
-
-  botaoVoltar: {
-    padding: 8,
+  botaoCirculo: {
+    width: 42,
+    height: 42,
+    borderRadius: 15,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  textoVoltar: {
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-
-  tituloHeader: {
+  headerTextos: {
     flex: 1,
-    textAlign: 'center',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginRight: 40,
   },
-
+  headerTitulo: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  headerSubtitulo: {
+    fontSize: 10.5,
+    marginTop: 2,
+  },
   conteudo: {
+    paddingTop: 6,
+    paddingBottom: 130,
+  },
+  card: {
+    marginHorizontal: 20,
+    marginBottom: 14,
+    padding: 18,
+    borderRadius: 24,
+  },
+  tituloLinha: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  iconeSelo: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardTitulo: {
+    fontSize: 15,
+    fontWeight: '700',
     flex: 1,
-    paddingHorizontal: 12,
-    paddingTop: 16,
   },
-
-  secao: {
-    marginBottom: 20,
-  },
-
-  tituloSecao: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-
   descricao: {
-    fontSize: 13,
+    fontSize: 12,
     lineHeight: 18,
   },
-
-  card: {
-    padding: 12,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-  },
-
   labelInput: {
-    fontSize: 14,
+    fontSize: 12.5,
     fontWeight: '600',
     marginBottom: 8,
   },
-
-  input: {
+  campo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    marginBottom: 16,
+    borderRadius: 16,
+    paddingHorizontal: 13,
+    minHeight: 48,
+    marginBottom: 12,
   },
-
+  input: {
+    flex: 1,
+    fontSize: 12.5,
+    paddingVertical: 0,
+  },
+  limparCampo: {
+    fontSize: 10.5,
+    fontWeight: '600',
+  },
   containerBotoes: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
   },
-
-  botao: {
+  botaoMetade: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
-
-  botaoPrimario: {
-    justifyContent: 'center',
-    alignItems: 'center',
+  botaoCheio: {
+    width: '100%',
   },
-
-  botaoSecundario: {
-    borderWidth: 2,
-  },
-
-  botaoDisabilitado: {
-    opacity: 0.5,
-  },
-
-  textoBotaoPrimario: {
-    fontWeight: 'bold',
-    fontSize: 13,
-  },
-
-  textoBotaoSecundario: {
-    fontWeight: 'bold',
-    fontSize: 13,
-  },
-
-  tituloResultado: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    marginBottom: 12,
-  },
-
-  itemResultado: {
+  linhaResultado: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
   },
-
   labelResultado: {
-    fontSize: 13,
+    fontSize: 12,
   },
-
   valorResultado: {
-    fontSize: 13,
-    fontWeight: 'bold',
+    fontSize: 12,
+    fontWeight: '600',
+    flexShrink: 1,
+    textAlign: 'right',
   },
-
-  tituloErro: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-
   textoErro: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-
-  textoInfo: {
-    fontSize: 13,
-    marginBottom: 12,
-    lineHeight: 18,
-  },
-
-  listaItems: {
-    marginTop: 12,
-  },
-
-  itemLista: {
-    flexDirection: 'row',
-    marginBottom: 12,
-  },
-
-  numeroBala: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginRight: 12,
-    minWidth: 20,
-  },
-
-  textoLista: {
-    fontSize: 13,
-    lineHeight: 18,
-    flex: 1,
-  },
-
-  tituloAviso: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-
-  textoAviso: {
     fontSize: 12,
     lineHeight: 18,
+  },
+  etapa: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 11,
+  },
+  numero: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  numeroTexto: {
+    fontSize: 10.5,
+    fontWeight: '800',
+  },
+  textoLista: {
+    flex: 1,
+    fontSize: 11.5,
+    lineHeight: 17,
+    paddingTop: 3,
+  },
+  linhaAviso: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 5,
+  },
+  textoAviso: {
+    flex: 1,
+    fontSize: 11.5,
+    lineHeight: 17,
   },
 });

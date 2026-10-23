@@ -6,7 +6,7 @@
 // Ajustes (ver services/apiConfig.ts). Ao iniciar o aplicativo, o endereço
 // salvo é carregado; sem configuração em produção, o app funciona offline.
 
-import { RespostaBusca, Release, Work, RespostaWork, RespostaReleasesDeWork, Artista, RespostaArtista, RespostaObrasArtista } from '../types';
+import { RespostaBusca, Release, Work, RespostaWork, RespostaReleasesDeWork, Artista, RespostaArtista, RespostaObrasArtista, ResultadoIngestao } from '../types';
 import { urlBasePadrao, obterUrlSalva, normalizarUrlServidor, definirUrlServidor, testarConexaoServidor } from './apiConfig';
 
 // ============================================================
@@ -213,7 +213,7 @@ export async function buscarObrasArtista(
 export async function forcarIngestao(
   termo: string,
   sinal?: AbortSignal
-): Promise<{ success: boolean; data?: any; error?: string }> {
+): Promise<{ success: boolean; data?: ResultadoIngestao; error?: string }> {
   await garantirConfiguracao();
 
   if (!BASE_URL) {

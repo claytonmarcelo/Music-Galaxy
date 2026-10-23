@@ -1,513 +1,491 @@
-// Componente de progresso de download.
-// Exibe barra de progresso animada, percentual, tamanho e botões de controle.
-// Visual premium com vidro fosco, animações suaves e feedback visual,
-// sempre com as cores resolvidas pelos tokens do tema ativo.
+// Painel de download de uma versão.
+// Segue o fluxo de um gerenciador de downloads moderno: a qualidade é
+// escolhida e lembrada, o progresso real aparece na hora e o arquivo pode
+// ser cancelado, removido ou baixado de novo.
+// Regra 3: o arquivo SEMPRE vem do endpoint do backend, que resolve a fonte
+// em sites abertos da web — nunca de plataformas de música.
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   Platform,
-  Animated,
 } from 'react-native';
-import { downloadManager, EstadoDownload } from '../services/downloadManager';
-import { useModal } from '../contexts/ModalContext';
+import { Release } from '../types';
 import { useTheme } from '../contexts/ThemeContext';
-import { TIMINGS, EASING, USE_NATIVE_DRIVER } from '../utils/animacoes';
+import { useModal } from '../contexts/ModalContext';
+import { downloadManager, EstadoDownload } from '../services/downloadManager';
+import {
+  FormatoDownload,
+  OPCOES_QUALIDADE,
+  QUALIDADE_PADRAO,
+  obterQualidadePadrao,
+  salvarQualidadePadrao,
+  urlDownloadRelease,
+  nomeBaseArquivoRelease,
+  rotuloQualidade,
+} from '../services/downloadRelease';
+import { comAlfa } from '../utils/cores';
+import Icone from './Icone';
 
 interface Props {
-  url: string;
-  titulo: string;
-  artista: string;
-  onDownloadConcluido?: (caminhoLocal: string) => void;
+  release: Release;
 }
 
-export default function DownloadProgress({
-  url,
-  titulo,
-  artista,
-  onDownloadConcluido,
-}: Props): React.JSX.Element | null {
-  const [estado, setEstado] = useState<EstadoDownload | null>(
-    downloadManager.obterEstado(url)
-  );
-  const [iniciarDownload, setIniciarDownload] = useState(false);
+// Formata bytes em uma medida legível.
+function formatarTamanho(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  const unidades = ['B', 'KB', 'MB', 'GB'];
+  const indice = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), unidades.length - 1);
+  const valor = bytes / Math.pow(1024, indice);
+  return `${valor.toFixed(valor >= 10 || indice === 0 ? 0 : 1)} ${unidades[indice]}`;
+}
+
+export default function DownloadProgress({ release }: Props): React.JSX.Element {
   const { colors } = useTheme();
-  const { abrirConfirmacao, toastErro, toastSucesso } = useModal();
+  const { toastSucesso, toastErro } = useModal();
 
-  // Animações
-  const fadeInAnim = useRef(new Animated.Value(0)).current;
-  const progressAnim = useRef(new Animated.Value(0)).current;
-  const scaleCheckmarkAnim = useRef(new Animated.Value(0)).current;
+  const [qualidade, setQualidade] = useState<FormatoDownload>(QUALIDADE_PADRAO);
+  const [estado, setEstado] = useState<EstadoDownload | null>(null);
+  const [iniciando, setIniciando] = useState(false);
 
-  // Inscreve para atualizações de progresso
+  const url = urlDownloadRelease(release.id, qualidade);
+
+  // Carrega a preferência de qualidade e recupera a fila salva no aparelho.
   useEffect(() => {
-    if (!iniciarDownload && !estado?.baixando && !estado?.concluido) {
-      return;
-    }
+    let ativo = true;
+    (async () => {
+      await downloadManager.initialize();
+      const preferida = await obterQualidadePadrao();
+      if (ativo) setQualidade(preferida);
+    })();
+    return () => {
+      ativo = false;
+    };
+  }, []);
 
-    // Anima entrada
-    Animated.timing(fadeInAnim, {
-      toValue: 1,
-      duration: TIMINGS.normal,
-      useNativeDriver: USE_NATIVE_DRIVER,
-    }).start();
+  // Acompanha o progresso da URL correspondente à qualidade escolhida.
+  useEffect(() => {
+    setEstado(downloadManager.obterEstado(url));
+    return downloadManager.subscribe(url, setEstado);
+  }, [url]);
 
-    const unsubscribe = downloadManager.subscribe(url, (novoEstado) => {
-      setEstado(novoEstado);
+  const escolherQualidade = async (formato: FormatoDownload) => {
+    setQualidade(formato);
+    await salvarQualidadePadrao(formato);
+  };
 
-      // Anima progresso
-      if (novoEstado.baixando) {
-        const progresso = novoEstado.progresso ?? 0;
-        Animated.timing(progressAnim, {
-          toValue: progresso,
-          duration: 300,
-          useNativeDriver: false,
-        }).start();
-      }
-
-      // Notifica quando concluído
-      if (novoEstado.concluido && novoEstado.caminhoLocal) {
-        toastSucesso('Download concluído! O arquivo foi salvo.');
-        
-        // Anima checkmark
-        Animated.spring(scaleCheckmarkAnim, {
-          toValue: 1,
-          useNativeDriver: USE_NATIVE_DRIVER,
-          ...EASING.suave,
-        }).start();
-
-        if (onDownloadConcluido) {
-          onDownloadConcluido(novoEstado.caminhoLocal);
-        }
-      }
-    });
-
-    return () => unsubscribe();
-  }, [url, iniciarDownload, onDownloadConcluido, fadeInAnim, progressAnim, scaleCheckmarkAnim, toastSucesso]);
-
-  const handleIniciarDownload = async () => {
+  const iniciarDownload = async () => {
+    if (iniciando || estado?.baixando) return;
+    setIniciando(true);
     try {
-      setIniciarDownload(true);
-      const caminhoLocal = await downloadManager.baixar(url, titulo);
-      if (onDownloadConcluido) {
-        onDownloadConcluido(caminhoLocal);
-      }
-    } catch (err) {
-      const mensagem = err instanceof Error ? err.message : 'Erro ao baixar';
+      await downloadManager.baixar(url, nomeBaseArquivoRelease(release));
+      toastSucesso(`Download em ${rotuloQualidade(qualidade)} concluído!`);
+    } catch (falha) {
+      const mensagem = falha instanceof Error ? falha.message : 'Não foi possível baixar o arquivo.';
       toastErro(mensagem);
-      setIniciarDownload(false);
+    } finally {
+      setIniciando(false);
     }
   };
 
-  const handleCancelar = async () => {
+  const cancelarDownload = async () => {
     try {
       await downloadManager.cancelar(url);
-      setIniciarDownload(false);
-      toastSucesso('Download cancelado');
-    } catch (err) {
-      console.error('Erro ao cancelar:', err);
+      toastSucesso('Download cancelado.');
+    } catch {
+      toastErro('Não foi possível cancelar o download.');
     }
   };
 
-  const handleDeletar = () => {
-    abrirConfirmacao(
-      'Remover download',
-      'Tem certeza de que deseja remover este arquivo?',
-      async () => {
-        try {
-          await downloadManager.deletar(url);
-          setEstado(null);
-          toastSucesso('Arquivo removido');
-        } catch (err) {
-          toastErro('Não foi possível remover o arquivo.');
-        }
-      }
-    );
+  const removerArquivo = async () => {
+    try {
+      await downloadManager.deletar(url);
+      setEstado(null);
+      toastSucesso('Download removido.');
+    } catch {
+      toastErro('Não foi possível remover o download.');
+    }
   };
 
-  const formatarTamanho = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
-  };
+  const baixando = iniciando || estado?.baixando === true;
+  const concluido = estado?.concluido === true;
+  const mensagemErro = estado?.erro;
+  const percentual = Math.min(Math.round((estado?.progresso ?? 0) * 100), 100);
+  const opcaoAtual = OPCOES_QUALIDADE.find((opcao) => opcao.formato === qualidade);
 
-  const percentual = Math.round((estado?.progresso ?? 0) * 100);
-
-  // Se não iniciou e não há download prévio, mostra botão para iniciar
-  if (!estado && !iniciarDownload) {
-    return (
-      <Animated.View
-        style={[
-          styles.container,
-          {
-            opacity: fadeInAnim,
-            // Painel em vidro mais opaco, com contorno e sombra do tema
-            backgroundColor: colors.glassCardForte,
-            borderColor: colors.glassBorder,
-            shadowColor: colors.glassShadow,
-          },
-        ]}
-      >
-        <View style={styles.infoDownload}>
-          <Text style={[styles.titulo, { color: colors.text }]} numberOfLines={1}>
-            💾 {titulo}
-          </Text>
-          <Text style={[styles.artista, { color: colors.textSecondary }]} numberOfLines={1}>
-            {artista}
-          </Text>
-        </View>
-        <TouchableOpacity
+  return (
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: colors.glassCardForte,
+          borderColor: colors.glassBorder,
+          shadowColor: colors.glassShadow,
+        },
+      ]}
+    >
+      {/* Cabeçalho */}
+      <View style={styles.cabecalho}>
+        <View
           style={[
-            styles.botaoBaixar,
-            { backgroundColor: colors.button, shadowColor: colors.glassShadow },
+            styles.selo,
+            {
+              backgroundColor: comAlfa(colors.primary, 0.14),
+              borderColor: comAlfa(colors.primary, 0.28),
+            },
           ]}
-          onPress={handleIniciarDownload}
-          activeOpacity={0.7}
         >
-          <Text style={[styles.botaoTexto, { color: colors.buttonText }]}>⬇️ Baixar</Text>
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  }
-
-  // Enquanto está baixando
-  if (estado?.baixando) {
-    const progressWidth = progressAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: ['0%', '100%'],
-    });
-
-    return (
-      <Animated.View
-        style={[
-          styles.container,
-          {
-            opacity: fadeInAnim,
-            // Painel em vidro mais opaco, com contorno e sombra do tema
-            backgroundColor: colors.glassCardForte,
-            borderColor: colors.glassBorder,
-            shadowColor: colors.glassShadow,
-          },
-        ]}
-      >
-        <View style={styles.infoDownload}>
-          <Text style={[styles.titulo, { color: colors.text }]} numberOfLines={1}>
-            💾 {titulo}
-          </Text>
-          <Text style={[styles.artista, { color: colors.textSecondary }]} numberOfLines={1}>
-            {artista}
+          <Icone nome="download" tamanho={18} cor={colors.primary} />
+        </View>
+        <View style={styles.cabecalhoTextos}>
+          <Text style={[styles.titulo, { color: colors.text }]}>Baixar esta versão</Text>
+          <Text style={[styles.descricao, { color: colors.textSecondary }]}>
+            O arquivo é gerado a partir de uma fonte aberta da web.
           </Text>
         </View>
+      </View>
 
-        {/* Barra de progresso animada */}
-        <View style={styles.progressoContainer}>
-          <View style={[styles.barraFundo, { backgroundColor: colors.border }]}>
-            <Animated.View
+      {/* Escolha de qualidade */}
+      <View style={styles.opcoes}>
+        {OPCOES_QUALIDADE.map((opcao) => {
+          const selecionada = opcao.formato === qualidade;
+          return (
+            <TouchableOpacity
+              key={opcao.formato}
               style={[
-                styles.barraProgresso,
-                { width: progressWidth, backgroundColor: colors.primary },
+                styles.opcao,
+                {
+                  backgroundColor: selecionada
+                    ? comAlfa(colors.primary, 0.14)
+                    : colors.glassCard,
+                  borderColor: selecionada ? colors.primary : colors.glassBorder,
+                },
+              ]}
+              onPress={() => void escolherQualidade(opcao.formato)}
+              disabled={baixando}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityState={{ selected: selecionada }}
+              accessibilityLabel={`Qualidade ${opcao.titulo}`}
+            >
+              <View style={styles.opcaoTopo}>
+                <Icone
+                  nome={selecionada ? 'sucessoCirculo' : 'qualidade'}
+                  tamanho={14}
+                  cor={selecionada ? colors.primary : colors.textSecondary}
+                />
+                <Text
+                  style={[
+                    styles.opcaoTitulo,
+                    { color: selecionada ? colors.primary : colors.text },
+                  ]}
+                >
+                  {opcao.titulo}
+                </Text>
+              </View>
+              <Text style={[styles.opcaoDescricao, { color: colors.textSecondary }]}>
+                {opcao.descricao}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* Progresso real */}
+      {baixando && (
+        <View style={styles.progressoBox}>
+          <View style={styles.progressoTopo}>
+            <Text style={[styles.progressoRotulo, { color: colors.text }]}>
+              Baixando em {rotuloQualidade(qualidade)}
+            </Text>
+            <Text style={[styles.progressoPercentual, { color: colors.primary }]}>
+              {percentual}%
+            </Text>
+          </View>
+          <View style={[styles.barraFundo, { backgroundColor: colors.border }]}>
+            <View
+              style={[
+                styles.barraPreenchida,
+                { backgroundColor: colors.primary, width: `${percentual}%` },
               ]}
             />
           </View>
-          <View style={styles.detalhesProgresso}>
-            <Text style={[styles.percentual, { color: colors.primary }]}>{percentual}%</Text>
-            <Text style={[styles.tamanho, { color: colors.textSecondary }]}>
-              {formatarTamanho(estado.tamanhoAtual)} / {formatarTamanho(estado.tamanhoTotal)}
+          <Text style={[styles.progressoTamanho, { color: colors.textSecondary }]}>
+            {formatarTamanho(estado?.tamanhoAtual ?? 0)} de {formatarTamanho(estado?.tamanhoTotal ?? 0)}
+          </Text>
+        </View>
+      )}
+
+      {/* Concluído */}
+      {concluido && !baixando && (
+        <View
+          style={[
+            styles.statusBox,
+            {
+              backgroundColor: comAlfa(colors.success, 0.12),
+              borderColor: comAlfa(colors.success, 0.3),
+            },
+          ]}
+        >
+          <Icone nome="sucessoCirculo" tamanho={18} cor={colors.success} />
+          <View style={styles.statusTextos}>
+            <Text style={[styles.statusTitulo, { color: colors.success }]}>
+              Download concluído
+            </Text>
+            <Text style={[styles.statusDescricao, { color: colors.textSecondary }]}>
+              {Platform.OS === 'web'
+                ? 'O navegador salvou o arquivo na pasta de downloads.'
+                : 'O arquivo foi salvo no aparelho.'}
             </Text>
           </View>
         </View>
+      )}
 
-        {/* Botões de controle */}
-        <TouchableOpacity
+      {/* Erro */}
+      {!!mensagemErro && !baixando && (
+        <View
           style={[
-            styles.botaoCancelar,
-            { backgroundColor: colors.glassCard, borderColor: colors.error },
+            styles.statusBox,
+            {
+              backgroundColor: comAlfa(colors.error, 0.12),
+              borderColor: comAlfa(colors.error, 0.3),
+            },
           ]}
-          onPress={handleCancelar}
-          activeOpacity={0.7}
         >
-          <Text style={[styles.botaoCancelarTexto, { color: colors.error }]}>✕ Cancelar</Text>
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  }
-
-  // Download concluído
-  if (estado?.concluido && estado.caminhoLocal) {
-    return (
-      <Animated.View
-        style={[
-          styles.container,
-          {
-            opacity: fadeInAnim,
-            // Painel em vidro mais opaco, com contorno e sombra do tema
-            backgroundColor: colors.glassCardForte,
-            borderColor: colors.glassBorder,
-            shadowColor: colors.glassShadow,
-          },
-        ]}
-      >
-        <View style={styles.infoDownload}>
-          <Text style={[styles.titulo, { color: colors.text }]} numberOfLines={1}>
-            💾 {titulo}
-          </Text>
-          <Text style={[styles.artista, { color: colors.textSecondary }]} numberOfLines={1}>
-            {artista}
-          </Text>
+          <Icone nome="erro" tamanho={18} cor={colors.error} />
+          <View style={styles.statusTextos}>
+            <Text style={[styles.statusTitulo, { color: colors.error }]}>
+              Download não concluído
+            </Text>
+            <Text style={[styles.statusDescricao, { color: colors.textSecondary }]}>
+              {mensagemErro}
+            </Text>
+          </View>
         </View>
+      )}
 
-        <View style={[styles.concluido, { backgroundColor: colors.glassCard, borderColor: colors.success }]}>
-          <Animated.View
-            style={[
-              styles.checkmarkContainer,
-              {
-                backgroundColor: colors.success,
-                transform: [{ scale: scaleCheckmarkAnim }],
-              },
-            ]}
+      {/* Ações */}
+      <View style={styles.acoes}>
+        {baixando ? (
+          <TouchableOpacity
+            style={[styles.botaoOutline, { borderColor: colors.glassBorder }]}
+            onPress={cancelarDownload}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Cancelar download"
           >
-            <Text style={[styles.checkmark, { color: colors.buttonText }]}>✓</Text>
-          </Animated.View>
-          <Text style={[styles.concluidoTexto, { color: colors.success }]}>Baixado</Text>
-          <Text style={[styles.tamanhoFinal, { color: colors.textSecondary }]}>
-            {formatarTamanho(estado.tamanhoTotal)}
+            <Icone nome="limpar" tamanho={14} cor={colors.textSecondary} />
+            <Text style={[styles.botaoOutlineTexto, { color: colors.textSecondary }]}>
+              Cancelar
+            </Text>
+          </TouchableOpacity>
+        ) : concluido ? (
+          <TouchableOpacity
+            style={[styles.botaoOutline, { borderColor: colors.glassBorder }]}
+            onPress={removerArquivo}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Remover download"
+          >
+            <Icone nome="lixeira" tamanho={14} cor={colors.textSecondary} />
+            <Text style={[styles.botaoOutlineTexto, { color: colors.textSecondary }]}>
+              Remover
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[
+              styles.botaoPrincipal,
+              { backgroundColor: colors.button, shadowColor: colors.glassShadow },
+              iniciando && styles.botaoPressionado,
+            ]}
+            onPress={iniciarDownload}
+            disabled={iniciando}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={`Baixar em ${rotuloQualidade(qualidade)}`}
+          >
+            <Icone nome={mensagemErro ? 'recarregar' : 'download'} tamanho={15} cor={colors.buttonText} />
+            <Text style={[styles.botaoPrincipalTexto, { color: colors.buttonText }]}>
+              {mensagemErro
+                ? 'Tentar novamente'
+                : `Baixar ${rotuloQualidade(qualidade)}`}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {opcaoAtual && !baixando && !concluido && (
+          <Text style={[styles.notaQualidade, { color: colors.textSecondary }]}>
+            {opcaoAtual.titulo}
           </Text>
-        </View>
-
-        <TouchableOpacity
-          style={[
-            styles.botaoDeletar,
-            { backgroundColor: colors.secondary, borderColor: colors.border },
-          ]}
-          onPress={handleDeletar}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.botaoDeletarTexto, { color: colors.textSecondary }]}>🗑 Remover</Text>
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  }
-
-  // Erro
-  if (estado?.erro) {
-    return (
-      <Animated.View
-        style={[
-          styles.container,
-          {
-            opacity: fadeInAnim,
-            // Painel em vidro mais opaco, com contorno e sombra do tema
-            backgroundColor: colors.glassCardForte,
-            borderColor: colors.glassBorder,
-            shadowColor: colors.glassShadow,
-          },
-        ]}
-      >
-        <View style={styles.infoDownload}>
-          <Text style={[styles.titulo, { color: colors.text }]} numberOfLines={1}>
-            💾 {titulo}
-          </Text>
-          <Text style={[styles.artista, { color: colors.textSecondary }]} numberOfLines={1}>
-            {artista}
-          </Text>
-        </View>
-
-        <View style={[styles.erroBox, { backgroundColor: colors.glassCard, borderLeftColor: colors.error }]}>
-          <Text style={styles.erroIcone}>⚠️</Text>
-          <Text style={[styles.erroTexto, { color: colors.error }]}>{estado.erro}</Text>
-        </View>
-
-        <TouchableOpacity
-          style={[
-            styles.botaoBaixar,
-            { backgroundColor: colors.button, shadowColor: colors.glassShadow },
-          ]}
-          onPress={handleIniciarDownload}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.botaoTexto, { color: colors.buttonText }]}>⬇️ Tentar novamente</Text>
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  }
-
-  return null;
+        )}
+      </View>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: 16,
-    padding: 20,
-    marginHorizontal: 16,
-    marginVertical: 12,
+    borderRadius: 26,
+    padding: 18,
+    marginHorizontal: 20,
+    marginVertical: 10,
     borderWidth: 1,
-    // Contorno e sombra de vidro: as cores vêm do tema, aplicadas em linha
-    ...Platform.select({
-      ios: {
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.25,
-        shadowRadius: 12,
-      },
-      android: {
-        elevation: 5,
-      },
-    }),
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    elevation: 4,
   },
-
-  infoDownload: {
-    marginBottom: 16,
+  cabecalho: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
   },
-
+  selo: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  cabecalhoTextos: {
+    flex: 1,
+  },
   titulo: {
     fontSize: 15,
     fontWeight: '700',
-    marginBottom: 4,
-    letterSpacing: 0.3,
+    marginBottom: 3,
   },
-
-  artista: {
-    fontSize: 13,
-    fontWeight: '500',
+  descricao: {
+    fontSize: 11,
+    lineHeight: 15,
   },
-
-  progressoContainer: {
-    marginVertical: 14,
+  opcoes: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
   },
-
-  barraFundo: {
-    height: 8,
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 10,
+  opcao: {
+    flex: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    gap: 5,
   },
-
-  barraProgresso: {
-    height: '100%',
-    borderRadius: 4,
+  opcaoTopo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-
-  detalhesProgresso: {
+  opcaoTitulo: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  opcaoDescricao: {
+    fontSize: 9,
+    lineHeight: 13,
+  },
+  progressoBox: {
+    marginBottom: 14,
+  },
+  progressoTopo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 7,
   },
-
-  percentual: {
-    fontSize: 13,
+  progressoRotulo: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  progressoPercentual: {
+    fontSize: 12,
     fontWeight: '700',
   },
-
-  tamanho: {
-    fontSize: 12,
-    fontWeight: '500',
+  barraFundo: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
   },
-
-  tamanhoFinal: {
-    fontSize: 12,
-    marginTop: 6,
+  barraPreenchida: {
+    height: '100%',
+    borderRadius: 3,
   },
-
-  concluido: {
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 14,
-    alignItems: 'center',
+  progressoTamanho: {
+    fontSize: 9,
+    marginTop: 5,
+    textAlign: 'right',
+  },
+  statusBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
     borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 14,
   },
-
-  checkmarkContainer: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
+  statusTextos: {
+    flex: 1,
+    gap: 2,
   },
-
-  checkmark: {
-    fontSize: 28,
+  statusTitulo: {
+    fontSize: 12,
     fontWeight: '700',
   },
-
-  concluidoTexto: {
-    fontSize: 15,
-    fontWeight: '700',
+  statusDescricao: {
+    fontSize: 10,
+    lineHeight: 14,
   },
-
-  erroBox: {
-    borderRadius: 12,
-    padding: 14,
-    marginVertical: 14,
-    borderLeftWidth: 3,
+  acoes: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
   },
-
-  erroIcone: {
-    fontSize: 18,
-    marginRight: 10,
+  botaoPrincipal: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    minHeight: 46,
+    paddingHorizontal: 18,
+    borderRadius: 999,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.26,
+    shadowRadius: 12,
+    elevation: 4,
   },
-
-  erroTexto: {
+  botaoPressionado: {
+    opacity: 0.7,
+  },
+  botaoPrincipalTexto: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  botaoOutline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    minHeight: 42,
+    paddingHorizontal: 18,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  botaoOutlineTexto: {
     fontSize: 12,
     fontWeight: '600',
-    flex: 1,
   },
-
-  botaoBaixar: {
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    alignItems: 'center',
-    marginTop: 10,
-    ...Platform.select({
-      ios: {
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
-  },
-
-  botaoCancelar: {
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    alignItems: 'center',
-    marginTop: 10,
-    borderWidth: 1,
-  },
-
-  botaoDeletar: {
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    alignItems: 'center',
-    marginTop: 10,
-    borderWidth: 1,
-  },
-
-  botaoTexto: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-
-  botaoCancelarTexto: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-
-  botaoDeletarTexto: {
-    fontSize: 13,
-    fontWeight: '700',
+  notaQualidade: {
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
 });

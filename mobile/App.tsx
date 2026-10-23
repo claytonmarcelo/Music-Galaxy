@@ -3,6 +3,7 @@
 // Envolve os Providers de contextos globais (Favoritos, Histórico, Tema, Modais).
 
 import React from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
 import { FavoritosProvider } from './src/contexts/FavoritosContext';
 import { HistoricoProvider } from './src/contexts/HistoricoContext';
@@ -17,15 +18,17 @@ inicializarApiConfig();
 
 export default function App(): React.JSX.Element {
   return (
-    <ThemeProvider>
-      <FavoritosProvider>
-        <HistoricoProvider>
-          <ModalProvider>
-            <AppNavigator />
-            <ModalGlobalContainer />
-          </ModalProvider>
-        </HistoricoProvider>
-      </FavoritosProvider>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <FavoritosProvider>
+          <HistoricoProvider>
+            <ModalProvider>
+              <AppNavigator />
+              <ModalGlobalContainer />
+            </ModalProvider>
+          </HistoricoProvider>
+        </FavoritosProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

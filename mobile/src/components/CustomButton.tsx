@@ -1,5 +1,6 @@
-// Botão Personalizado com Animação
-// Botões estilizados com animações e temas dinâmicos
+// Botão personalizado em formato de pílula.
+// Primário em marfim (tema escuro) ou vinho (tema claro), secundário em
+// vidro e variantes discretas. Sempre com ícone de linha opcional.
 
 import React from 'react';
 import {
@@ -13,6 +14,7 @@ import {
 } from 'react-native';
 import { USE_NATIVE_DRIVER } from '../utils/animacoes';
 import { useTheme } from '../contexts/ThemeContext';
+import Icone, { NomeIcone } from './Icone';
 
 interface CustomButtonProps {
   title: string;
@@ -21,8 +23,8 @@ interface CustomButtonProps {
   size?: 'small' | 'medium' | 'large';
   disabled?: boolean;
   loading?: boolean;
-  icon?: string;
-  iconPosition?: 'left' | 'right';
+  icone?: NomeIcone;
+  iconeDireita?: boolean;
   style?: ViewStyle;
   textStyle?: TextStyle;
 }
@@ -34,125 +36,121 @@ export default function CustomButton({
   size = 'medium',
   disabled = false,
   loading = false,
-  icon,
-  iconPosition = 'left',
+  icone,
+  iconeDireita = false,
   style,
   textStyle,
 }: CustomButtonProps): React.JSX.Element {
   const { colors } = useTheme();
-  const scaleAnim = React.useRef(new Animated.Value(1)).current;
+  const escalaAnim = React.useRef(new Animated.Value(1)).current;
 
-  const handlePressIn = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 0.95,
+  const aoPressionar = () => {
+    Animated.spring(escalaAnim, {
+      toValue: 0.97,
       useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
   };
 
-  const handlePressOut = () => {
-    Animated.spring(scaleAnim, {
+  const aoSoltar = () => {
+    Animated.spring(escalaAnim, {
       toValue: 1,
       useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
   };
 
-  const getButtonStyle = (): ViewStyle => {
-    const baseStyle: ViewStyle = {
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-      flexDirection: 'row',
+  const corTexto =
+    variant === 'primary'
+      ? colors.buttonText
+      : variant === 'ghost' || variant === 'outline'
+        ? colors.primary
+        : colors.text;
+
+  const corIcone =
+    variant === 'primary' ? colors.buttonText : variant === 'secondary' ? colors.text : colors.primary;
+
+  const getEstiloBotao = (): ViewStyle => {
+    const tamanhos: Record<typeof size, ViewStyle> = {
+      small: { paddingHorizontal: 16, minHeight: 36 },
+      medium: { paddingHorizontal: 20, minHeight: 46 },
+      large: { paddingHorizontal: 26, minHeight: 54 },
     };
 
-    const sizeStyles = {
-      small: { paddingHorizontal: 12, paddingVertical: 8, minHeight: 36 },
-      medium: { paddingHorizontal: 16, paddingVertical: 12, minHeight: 44 },
-      large: { paddingHorizontal: 24, paddingVertical: 16, minHeight: 52 },
-    };
-
-    const variantStyles = {
-      // Botões sólidos ganham sombra suave de vidro para "flutuar" sobre a tela
+    const variantes: Record<typeof variant, ViewStyle> = {
       primary: {
         backgroundColor: colors.button,
         shadowColor: colors.glassShadow,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 4,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.28,
+        shadowRadius: 12,
+        elevation: 5,
       },
       secondary: {
-        backgroundColor: colors.secondary,
-        shadowColor: colors.glassShadow,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.25,
-        shadowRadius: 8,
-        elevation: 3,
+        backgroundColor: colors.glassCard,
+        borderWidth: 1,
+        borderColor: colors.glassBorder,
       },
-      outline: { 
+      outline: {
         backgroundColor: 'transparent',
-        borderWidth: 2,
-        borderColor: colors.button,
+        borderWidth: 1,
+        borderColor: colors.glassBorder,
       },
       ghost: { backgroundColor: 'transparent' },
     };
 
     return {
-      ...baseStyle,
-      ...sizeStyles[size],
-      ...variantStyles[variant],
-      opacity: disabled ? 0.5 : 1,
+      borderRadius: 999,
+      justifyContent: 'center',
+      alignItems: 'center',
+      flexDirection: 'row',
+      ...tamanhos[size],
+      ...variantes[variant],
+      opacity: disabled ? 0.45 : 1,
     };
   };
 
-  const getTextStyle = (): TextStyle => {
-    const baseStyle: TextStyle = {
-      fontWeight: '600',
-    };
-
-    const sizeStyles = {
-      small: { fontSize: 12 },
-      medium: { fontSize: 14 },
-      large: { fontSize: 16 },
-    };
-
-    const variantStyles = {
-      primary: { color: colors.buttonText },
-      secondary: { color: colors.text },
-      outline: { color: colors.button },
-      ghost: { color: colors.button },
-    };
-
-    return {
-      ...baseStyle,
-      ...sizeStyles[size],
-      ...variantStyles[variant],
-    };
-  };
+  const tamanhoFonte = size === 'small' ? 12 : size === 'large' ? 16 : 14;
+  const tamanhoIcone = size === 'small' ? 14 : size === 'large' ? 19 : 17;
 
   return (
-    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+    <Animated.View style={{ transform: [{ scale: escalaAnim }] }}>
       <TouchableOpacity
-        style={[getButtonStyle(), style]}
+        style={[getEstiloBotao(), style]}
         onPress={onPress}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
+        onPressIn={aoPressionar}
+        onPressOut={aoSoltar}
         disabled={disabled || loading}
-        activeOpacity={0.8}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={title}
       >
         {loading ? (
-          <ActivityIndicator color={colors.buttonText} size="small" />
+          <ActivityIndicator color={corTexto} size="small" />
         ) : (
           <>
-            {icon && iconPosition === 'left' && (
-              <Text style={[getTextStyle(), { marginRight: 8 }, textStyle]}>
-                {icon}
-              </Text>
+            {icone && !iconeDireita && (
+              <Icone
+                nome={icone}
+                tamanho={tamanhoIcone}
+                cor={corIcone}
+                estilo={styles.iconeEsquerda}
+              />
             )}
-            <Text style={[getTextStyle(), textStyle]}>{title}</Text>
-            {icon && iconPosition === 'right' && (
-              <Text style={[getTextStyle(), { marginLeft: 8 }, textStyle]}>
-                {icon}
-              </Text>
+            <Text
+              style={[
+                styles.texto,
+                { color: corTexto, fontSize: tamanhoFonte },
+                textStyle,
+              ]}
+            >
+              {title}
+            </Text>
+            {icone && iconeDireita && (
+              <Icone
+                nome={icone}
+                tamanho={tamanhoIcone}
+                cor={corIcone}
+                estilo={styles.iconeDireita}
+              />
             )}
           </>
         )}
@@ -160,3 +158,16 @@ export default function CustomButton({
     </Animated.View>
   );
 }
+
+const styles = StyleSheet.create({
+  texto: {
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+  iconeEsquerda: {
+    marginRight: 8,
+  },
+  iconeDireita: {
+    marginLeft: 8,
+  },
+});

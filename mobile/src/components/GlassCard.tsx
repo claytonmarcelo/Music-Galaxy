@@ -1,6 +1,6 @@
-// GlassCard — cartão de vidro fosco da identidade visual Aurora.
-// Fundo translúcido, contorno sutil, brilho na borda superior e sombra
-// suave. Usado em cartões, seções, modais e no player.
+// Cartão de vidro fosco minimalista.
+// Superfície translúcida de cantos amplos, contorno de 1 px, fio de luz
+// na borda superior e sombra muito suave — a base de toda a interface.
 
 import React from 'react';
 import { StyleSheet, View, ViewStyle, StyleProp } from 'react-native';
@@ -9,11 +9,16 @@ import { useTheme } from '../contexts/ThemeContext';
 interface GlassCardProps {
   children?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
-  forte?: boolean; // vidro mais opaco (modais, navegação)
+  forte?: boolean; // vidro mais opaco (modais, navegação, player)
   semBrilho?: boolean; // remove o fio de luz da borda superior
 }
 
-export default function GlassCard({ children, style, forte = false, semBrilho = false }: GlassCardProps): React.JSX.Element {
+export default function GlassCard({
+  children,
+  style,
+  forte = false,
+  semBrilho = false,
+}: GlassCardProps): React.JSX.Element {
   const { colors } = useTheme();
 
   return (
@@ -42,22 +47,20 @@ export default function GlassCard({ children, style, forte = false, semBrilho = 
 const styles = StyleSheet.create({
   cartao: {
     borderWidth: 1,
-    borderRadius: 20,
-    padding: 16,
+    borderRadius: 26,
+    padding: 18,
     overflow: 'hidden',
-    // Sombra suave de vidro (iOS) e elevação (Android)
-    shadowOpacity: 0.28,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
   },
   brilho: {
     position: 'absolute',
     top: 0,
-    left: 20,
-    right: 20,
-    height: 1.5,
-    borderRadius: 2,
-    opacity: 0.6,
+    left: 28,
+    right: 28,
+    height: 1,
+    opacity: 0.55,
   },
 });

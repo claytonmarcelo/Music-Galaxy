@@ -1,10 +1,10 @@
-// Componente de card para exibir uma versão (release) de uma música.
-// Respeita a Regra 1: só exibe capa quando cover_url não for null.
-// Exibe placeholder "Sem Capa" quando não há capa oficial disponível.
-// Usa animações e tema dinâmico.
-// Otimizado com memoização para evitar re-renders.
+// Card de versão (release).
+// Mostra a capa oficial quando existir (Regra 1), os metadados da versão,
+// duas ações diretas — ouvir e baixar — e o player embutido ao expandir.
+// O download rápido usa a qualidade padrão escolhida em Ajustes e sempre
+// passa pelo endpoint do backend, que resolve a fonte em sites abertos.
 
-import React, { useState, memo, useCallback } from 'react';
+import React, { useState, memo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,65 +13,117 @@ import {
   StyleSheet,
   Platform,
 } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
+
 import { Release } from '../types';
-import MusicPlayer from './MusicPlayer';
 import { useTheme } from '../contexts/ThemeContext';
-import { MusicEmojis } from './AnimatedIcon';
+import { useModal } from '../contexts/ModalContext';
 import AnimatedCard from './AnimatedCard';
+import Icone from './Icone';
+import PlayerControls from './PlayerControls';
 import { traduzirTipoRelease } from '../utils/tiposRelease';
+import { comAlfa } from '../utils/cores';
+import { downloadManager, EstadoDownload } from '../services/downloadManager';
+import {
+  FormatoDownload,
+  QUALIDADE_PADRAO,
+  obterQualidadePadrao,
+  urlDownloadRelease,
+  urlStreamRelease,
+  nomeBaseArquivoRelease,
+  rotuloQualidade,
+} from '../services/downloadRelease';
 
 interface Props {
   release: Release;
   onPress: (release: Release) => void;
 }
 
-// Cores de destaque por categoria de tipo de versão, resolvidas a partir
-// dos tokens do tema ativo (nada de cores fixas em hexadecimal).
+// Cores de destaque por categoria, sempre resolvidas pelos tokens do tema.
 function corDaCategoria(
   cores: ReturnType<typeof useTheme>['colors'],
   categoria?: string
 ): string {
   switch (categoria) {
     case 'release_format':
-      return cores.success;          // formato de lançamento — verde
+      return cores.success;
     case 'mix_edit':
-      return cores.auroraSecundaria; // edições e mixes — ciano
+      return cores.luzSecundaria;
     case 'instrumental':
-      return cores.auroraPrimaria;   // instrumentais — violeta
+      return cores.luzPrimaria;
     case 'playback':
-      return cores.warning;          // playback — âmbar
+      return cores.warning;
     default:
-      return cores.textSecondary;    // categoria desconhecida
+      return cores.textSecondary;
   }
 }
 
-// Traduz o tipo de versão para exibição em português.
-// Tipos desconhecidos são exibidos exatamente como vieram da fonte.
 function ReleaseCardComponent({ release, onPress }: Props): React.JSX.Element {
   const { colors } = useTheme();
-  const corCategoria = corDaCategoria(colors, release.release_type_category);
-  const [showPlayer, setShowPlayer] = useState(false);
+  const { toastSucesso, toastErro } = useModal();
+  const isFocused = useIsFocused();
 
-  const handlePress = useCallback(() => {
-    if (!showPlayer) {
-      setShowPlayer(true);
-    } else {
-      onPress(release);
+  const [showPlayer, setShowPlayer] = useState(false);
+  const [qualidade, setQualidade] = useState<FormatoDownload>(QUALIDADE_PADRAO);
+  const [urlAtual, setUrlAtual] = useState<string | null>(null);
+  const [estado, setEstado] = useState<EstadoDownload | null>(null);
+  const [baixandoAgora, setBaixandoAgora] = useState(false);
+
+  const corCategoria = corDaCategoria(colors, release.release_type_category);
+
+  // Relê a preferência sempre que a tela volta ao foco (ex.: após Ajustes).
+  useEffect(() => {
+    if (!isFocused) return;
+    let ativo = true;
+    obterQualidadePadrao().then((formato) => {
+      if (ativo) setQualidade(formato);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [isFocused]);
+
+  // Acompanha o progresso do download iniciado neste card.
+  useEffect(() => {
+    if (!urlAtual) return;
+    setEstado(downloadManager.obterEstado(urlAtual));
+    return downloadManager.subscribe(urlAtual, setEstado);
+  }, [urlAtual]);
+
+  const iniciarDownload = useCallback(async () => {
+    if (baixandoAgora) return;
+
+    const formato = await obterQualidadePadrao();
+    setQualidade(formato);
+    const url = urlDownloadRelease(release.id, formato);
+    setUrlAtual(url);
+    setBaixandoAgora(true);
+
+    try {
+      await downloadManager.baixar(url, nomeBaseArquivoRelease(release));
+      toastSucesso(`Download em ${rotuloQualidade(formato)} concluído!`);
+    } catch (erro) {
+      const mensagem = erro instanceof Error ? erro.message : 'Erro ao baixar o arquivo.';
+      toastErro(mensagem);
+    } finally {
+      setBaixandoAgora(false);
     }
-  }, [showPlayer, onPress, release]);
+  }, [baixandoAgora, release, toastSucesso, toastErro]);
+
+  const progresso = Math.round((estado?.progresso ?? 0) * 100);
+  const emDownload = baixandoAgora || estado?.baixando === true;
+  const concluido = estado?.concluido === true;
 
   return (
-    <AnimatedCard
-      style={styles.container}
-      animationType="slideUp"
-      delay={0}
-    >
+    <AnimatedCard style={styles.container} animationType="slideUp" delay={0}>
+      {/* Conteúdo principal — toque abre os detalhes da versão */}
       <TouchableOpacity
-        style={styles.cardBody}
-        onPress={handlePress}
-        activeOpacity={0.92}
+        style={styles.corpo}
+        onPress={() => onPress(release)}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={`Abrir detalhes de ${release.version_name}`}
       >
-        {/* Capa da música — Regra 1: só exibe se cover_url não for null */}
         <View style={styles.capaContainer}>
           {release.cover_url ? (
             <Image
@@ -81,91 +133,141 @@ function ReleaseCardComponent({ release, onPress }: Props): React.JSX.Element {
               accessibilityLabel={`Capa de ${release.version_name}`}
             />
           ) : (
-            // Placeholder quando não há capa oficial disponível
-            <View style={[styles.capa, styles.semCapa, { backgroundColor: colors.border }]}>
-              <Text style={[styles.semCapaIcone, { color: colors.textSecondary }]}>
-                {MusicEmojis.quality}
-              </Text>
+            <View
+              style={[
+                styles.capa,
+                styles.semCapa,
+                { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+              ]}
+            >
+              <Icone nome="album" tamanho={26} cor={colors.textSecondary} />
               <Text style={[styles.semCapaTexto, { color: colors.textSecondary }]}>
-                Sem Capa
+                Sem capa
               </Text>
             </View>
           )}
         </View>
 
-        {/* Informações do release */}
         <View style={styles.info}>
-          {/* Artista */}
           <Text style={[styles.artista, { color: colors.textSecondary }]} numberOfLines={1}>
             {release.artist_name}
           </Text>
-
-          {/* Nome da versão */}
           <Text style={[styles.versao, { color: colors.text }]} numberOfLines={2}>
             {release.version_name}
           </Text>
 
-          {/* Álbum (quando disponível) */}
-          {release.album_name && (
-            <Text style={[styles.album, { color: colors.textSecondary }]} numberOfLines={1}>
-              {MusicEmojis.album} {release.album_name}
-            </Text>
-          )}
-
-          {/* Linha de metadados: tipo, ano, país */}
           <View style={styles.metadados}>
-            {/* Badge de tipo de versão (release), traduzido para exibição */}
-            <View style={[styles.badge, { backgroundColor: corCategoria }]}>
-              <Text style={[styles.badgeTexto, { color: colors.buttonText }]} numberOfLines={1}>
+            <View
+              style={[
+                styles.chip,
+                {
+                  backgroundColor: comAlfa(corCategoria, 0.14),
+                  borderColor: comAlfa(corCategoria, 0.35),
+                },
+              ]}
+            >
+              <Text style={[styles.chipTexto, { color: corCategoria }]} numberOfLines={1}>
                 {traduzirTipoRelease(release.release_type)}
               </Text>
             </View>
 
-            {/* Ano de lançamento */}
             {release.release_year && (
-              <Text style={[styles.metaTexto, { color: colors.textSecondary }]}>
-                {MusicEmojis.year} {release.release_year}
-              </Text>
+              <View style={styles.metaItem}>
+                <Icone nome="calendario" tamanho={11} cor={colors.textSecondary} />
+                <Text style={[styles.metaTexto, { color: colors.textSecondary }]}>
+                  {release.release_year}
+                </Text>
+              </View>
             )}
 
-            {/* País */}
-            {release.country && (
-              <Text style={[styles.metaTexto, { color: colors.textSecondary }]}>
-                {MusicEmojis.country} {release.country}
-              </Text>
-            )}
-
-            {/* Qualidade */}
             {release.quality && (
-              <Text style={[styles.metaTexto, { color: colors.textSecondary }]}>
-                {MusicEmojis.flac} {release.quality}
-              </Text>
+              <View style={styles.metaItem}>
+                <Icone nome="qualidade" tamanho={11} cor={colors.textSecondary} />
+                <Text style={[styles.metaTexto, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {release.quality}
+                </Text>
+              </View>
             )}
           </View>
 
-          {/* Gravadora e fonte */}
-          <View style={styles.rodape}>
-            {release.label && (
-              <Text style={[styles.gravadora, { color: colors.textSecondary }]} numberOfLines={1}>
-                {release.label}
-              </Text>
-            )}
-            <Text style={[styles.fonte, { color: colors.textSecondary }]}>
-              {release.metadata_source}
-            </Text>
-          </View>
+          <Text style={[styles.fonte, { color: colors.textSecondary }]} numberOfLines={1}>
+            {release.metadata_source}
+          </Text>
         </View>
       </TouchableOpacity>
 
-      {/* MusicPlayer - aparece quando expandido */}
+      {/* Ações diretas */}
+      <View style={styles.acoes}>
+        <TouchableOpacity
+          style={[
+            styles.acaoSecundaria,
+            { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+          ]}
+          onPress={() => setShowPlayer((atual) => !atual)}
+          activeOpacity={0.75}
+          accessibilityLabel={showPlayer ? 'Fechar player' : 'Ouvir esta versão'}
+        >
+          <Icone
+            nome={showPlayer ? 'setaBaixo' : 'reproduzir'}
+            tamanho={15}
+            cor={colors.text}
+          />
+          <Text style={[styles.acaoTexto, { color: colors.text }]}>
+            {showPlayer ? 'Fechar' : 'Ouvir'}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.acaoPrimaria,
+            { backgroundColor: colors.button },
+            emDownload && styles.acaoDesabilitada,
+          ]}
+          onPress={iniciarDownload}
+          disabled={emDownload}
+          activeOpacity={0.8}
+          accessibilityLabel={`Baixar em ${rotuloQualidade(qualidade)}`}
+        >
+          <Icone
+            nome={concluido ? 'sucessoCirculo' : emDownload ? 'relogio' : 'download'}
+            tamanho={15}
+            cor={colors.buttonText}
+          />
+          <Text style={[styles.acaoTexto, { color: colors.buttonText }]}>
+            {emDownload
+              ? `Baixando ${progresso}%`
+              : concluido
+                ? 'Salvo'
+                : `Baixar ${rotuloQualidade(qualidade)}`}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Barra fina de progresso abaixo das ações */}
+      {emDownload && (
+        <View style={[styles.barraFundo, { backgroundColor: colors.border }]}>
+          <View
+            style={[
+              styles.barraProgresso,
+              { backgroundColor: colors.primary, width: `${progresso}%` },
+            ]}
+          />
+        </View>
+      )}
+
       {showPlayer && (
-        <MusicPlayer release={release} />
+        <PlayerControls
+          url={urlStreamRelease(release.id)}
+          titulo={release.version_name}
+          artista={release.artist_name}
+          compacto
+        />
       )}
     </AnimatedCard>
   );
 }
 
-// Memoizar o componente para evitar re-renders desnecessários
+// Memoização: evita re-render quando o card não mudou.
 export default memo(ReleaseCardComponent, (prevProps, nextProps) => {
   return (
     prevProps.release.id === nextProps.release.id &&
@@ -177,99 +279,131 @@ export default memo(ReleaseCardComponent, (prevProps, nextProps) => {
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: 16,
-    marginHorizontal: 20,
-    marginVertical: 8,
-    overflow: 'hidden',
-    // Contorno e sombra de vidro: a borda e a cor da sombra vêm do
-    // AnimatedCard, que resolve os tokens do tema ativo.
-    borderWidth: 1,
-    ...Platform.select({
-      ios: {
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.25,
-        shadowRadius: 12,
-      },
-      android: {
-        elevation: 5,
-      },
-    }),
+    marginHorizontal: 16,
+    marginVertical: 7,
+    padding: 12,
   },
-  cardBody: {
+  corpo: {
     flexDirection: 'row',
   },
   capaContainer: {
-    width: 104,
-    height: 104,
+    width: 88,
+    height: 88,
   },
   capa: {
-    width: 104,
-    height: 104,
+    width: 88,
+    height: 88,
+    borderRadius: 18,
   },
   semCapa: {
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  semCapaIcone: {
-    fontSize: 28,
+    borderWidth: 1,
+    gap: 4,
   },
   semCapaTexto: {
-    fontSize: 10,
-    marginTop: 6,
+    fontSize: 9,
+    letterSpacing: 0.3,
   },
   info: {
     flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingLeft: 14,
     justifyContent: 'space-between',
-    // Respiro mínimo entre as linhas de informação, mesmo quando o
-    // conteúdo é curto e o space-between distribui o restante.
+    minHeight: 88,
     gap: 4,
   },
   artista: {
-    fontSize: 12,
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
   },
   versao: {
     fontSize: 15,
     fontWeight: '700',
     lineHeight: 19,
-  },
-  album: {
-    fontSize: 11,
+    letterSpacing: 0.1,
   },
   metadados: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 2,
+    gap: 8,
   },
-  badge: {
-    paddingHorizontal: 8,
+  chip: {
+    paddingHorizontal: 9,
     paddingVertical: 3,
-    borderRadius: 6,
-    maxWidth: 130,
+    borderRadius: 999,
+    borderWidth: 1,
+    maxWidth: 150,
   },
-  badgeTexto: {
-    fontSize: 10,
-    fontWeight: '600',
-    // A cor do texto do badge vem do tema (colors.buttonText) em linha
+  chipTexto: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   metaTexto: {
-    fontSize: 11,
-  },
-  rodape: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 2,
-  },
-  gravadora: {
     fontSize: 10,
-    flex: 1,
+    fontWeight: '500',
   },
   fonte: {
     fontSize: 9,
+    opacity: 0.8,
+  },
+  acoes: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  acaoSecundaria: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  acaoPrimaria: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 999,
+    ...Platform.select({
+      ios: {
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.22,
+        shadowRadius: 8,
+      },
+      android: { elevation: 3 },
+    }),
+  },
+  acaoDesabilitada: {
+    opacity: 0.75,
+  },
+  acaoTexto: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  barraFundo: {
+    height: 3,
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginTop: 8,
+  },
+  barraProgresso: {
+    height: '100%',
+    borderRadius: 2,
   },
 });

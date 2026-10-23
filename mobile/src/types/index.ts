@@ -126,6 +126,17 @@ export interface RespostaObrasArtista {
 }
 
 // ============================================================
+// Ingestão manual (endpoint administrativo)
+// ============================================================
+
+export interface ResultadoIngestao {
+  works_created?: number;
+  releases_created?: number;
+  metadata_source?: string;
+  timestamp?: string;
+}
+
+// ============================================================
 // Parâmetros de navegação
 // ============================================================
 
@@ -136,6 +147,9 @@ export type RootStackParamList = {
   Explorar: undefined;
   Favoritos: undefined;
   Settings: undefined;
+
+  // Fila de downloads (acessível pelo cabeçalho da busca e por Ajustes)
+  FilaDownloads: undefined;
 
   // Telas de detalhe (compartilhadas por múltiplas stacks)
   DetalheRelease: { release: Release };

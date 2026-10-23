@@ -1,6 +1,6 @@
-// Modal Personalizado — substitui todos os Alert.alert nativos do app.
-// Visual de vidro fosco alinhado à identidade Aurora, com animação suave
-// de entrada, ícone por tipo de situação e botões estilizados.
+// Modal personalizado — substitui todas as caixas nativas do sistema.
+// Vidro fosco, ícone de linha por tipo de situação e botões em pílula
+// coerentes com o restante do aplicativo. As cores vêm do tema.
 
 import React, { useEffect, useRef } from 'react';
 import {
@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { USE_NATIVE_DRIVER } from '../utils/animacoes';
 import { useTheme } from '../contexts/ThemeContext';
+import Icone, { NomeIcone } from './Icone';
+import { comAlfa } from '../utils/cores';
 
 export type TipoModal = 'sucesso' | 'erro' | 'aviso' | 'info' | 'confirmacao';
 
@@ -29,16 +31,15 @@ interface Props {
   mensagem: string;
   botoes: BotaoModal[];
   onFechar?: () => void;
-  icone?: string;
 }
 
-// Ícones por tipo de situação (as cores vêm do tema).
-const ICONE_TIPO: Record<TipoModal, string> = {
-  sucesso: '✓',
-  erro: '✕',
-  aviso: '⚠',
-  info: 'ℹ',
-  confirmacao: '?',
+// Ícones de linha por tipo de situação.
+const ICONE_TIPO: Record<TipoModal, NomeIcone> = {
+  sucesso: 'sucessoCirculo',
+  erro: 'erro',
+  aviso: 'aviso',
+  info: 'info',
+  confirmacao: 'ajuda',
 };
 
 // Cada tipo aponta para um token de cor do tema.
@@ -59,46 +60,42 @@ export default function ModalPersonalizado({
   mensagem,
   botoes,
   onFechar,
-  icone,
 }: Props): React.JSX.Element {
   const { colors } = useTheme();
 
-  // Animações de entrada
-  const scaleAnim = useRef(new Animated.Value(0.7)).current;
+  // Animações de entrada: o cartão cresce suavemente a partir do centro.
+  const escalaAnim = useRef(new Animated.Value(0.92)).current;
   const opacidadeAnim = useRef(new Animated.Value(0)).current;
-  const translateYAnim = useRef(new Animated.Value(20)).current;
+  const deslocamentoAnim = useRef(new Animated.Value(16)).current;
 
   useEffect(() => {
     if (visivel) {
-      // Inicia animação de entrada
       Animated.parallel([
-        Animated.spring(scaleAnim, {
+        Animated.spring(escalaAnim, {
           toValue: 1,
           useNativeDriver: USE_NATIVE_DRIVER,
-          tension: 65,
-          friction: 11,
+          tension: 70,
+          friction: 12,
         }),
         Animated.timing(opacidadeAnim, {
           toValue: 1,
-          duration: 300,
+          duration: 220,
           useNativeDriver: USE_NATIVE_DRIVER,
         }),
-        Animated.timing(translateYAnim, {
+        Animated.timing(deslocamentoAnim, {
           toValue: 0,
-          duration: 400,
+          duration: 260,
           useNativeDriver: USE_NATIVE_DRIVER,
         }),
       ]).start();
     } else {
-      // Reset para a próxima abertura
-      scaleAnim.setValue(0.7);
+      escalaAnim.setValue(0.92);
       opacidadeAnim.setValue(0);
-      translateYAnim.setValue(20);
+      deslocamentoAnim.setValue(16);
     }
-  }, [visivel, scaleAnim, opacidadeAnim, translateYAnim]);
+  }, [visivel, escalaAnim, opacidadeAnim, deslocamentoAnim]);
 
   const corDestaque = colors[COR_TIPO[tipo]];
-  const iconeExibicao = icone || ICONE_TIPO[tipo];
 
   return (
     <Modal
@@ -106,26 +103,25 @@ export default function ModalPersonalizado({
       transparent
       animationType="fade"
       onRequestClose={onFechar}
+      statusBarTranslucent
     >
-      {/* Véu escuro translúcido atrás do modal */}
-      <View style={[styles.overlay, { backgroundColor: colors.backdrop }]}>
-        {/* Container do modal com animações */}
+      {/* Véu escuro atrás do cartão */}
+      <View style={[styles.veu, { backgroundColor: colors.backdrop }]}>
         <Animated.View
           style={[
             styles.containerAnimado,
             {
-              transform: [
-                { scale: scaleAnim },
-                { translateY: translateYAnim },
-              ],
               opacity: opacidadeAnim,
+              transform: [
+                { scale: escalaAnim },
+                { translateY: deslocamentoAnim },
+              ],
             },
           ]}
         >
-          {/* Cartão de vidro principal */}
           <View
             style={[
-              styles.card,
+              styles.cartao,
               {
                 backgroundColor: colors.glassCardForte,
                 borderColor: colors.glassBorder,
@@ -133,80 +129,82 @@ export default function ModalPersonalizado({
               },
             ]}
           >
-            {/* Fio de luz na borda superior do vidro */}
+            {/* Fio de luz na borda superior */}
             <View
               pointerEvents="none"
               style={[styles.brilho, { backgroundColor: colors.glassHighlight }]}
             />
 
-            {/* Ícone com fundo translúcido do tipo */}
+            {/* Ícone com halo translúcido do tipo */}
             <View
               style={[
-                styles.iconeContainer,
-                { backgroundColor: `${corDestaque}22`, borderColor: `${corDestaque}55` },
+                styles.iconeCirculo,
+                {
+                  backgroundColor: comAlfa(corDestaque, 0.14),
+                  borderColor: comAlfa(corDestaque, 0.34),
+                },
               ]}
             >
-              <Text style={[styles.icone, { color: corDestaque }]}>
-                {iconeExibicao}
-              </Text>
+              <Icone nome={ICONE_TIPO[tipo]} tamanho={30} cor={corDestaque} />
             </View>
 
-            {/* Título */}
             <Text style={[styles.titulo, { color: colors.text }]}>{titulo}</Text>
 
-            {/* Mensagem */}
             <Text style={[styles.mensagem, { color: colors.textSecondary }]}>
               {mensagem}
             </Text>
 
-            {/* Divisor visual */}
             <View style={[styles.divisor, { backgroundColor: colors.glassBorder }]} />
 
-            {/* Botões */}
             <View style={styles.containerBotoes}>
-              {botoes.map((botao, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={[
-                    styles.botao,
-                    botao.estilo === 'primario' && [
-                      styles.botaoPrimario,
-                      { backgroundColor: corDestaque },
-                    ],
-                    botao.estilo === 'secundario' && [
-                      styles.botaoSecundario,
-                      {
-                        backgroundColor: colors.glassCard,
-                        borderColor: colors.glassBorder,
-                      },
-                    ],
-                    botao.estilo === 'destrutivo' && [
-                      styles.botaoDestrutivo,
-                      {
-                        backgroundColor: `${colors.error}22`,
-                        borderColor: colors.error,
-                      },
-                    ],
-                    botoes.length > 1 && index === 0 && { marginRight: 8 },
-                  ]}
-                  onPress={() => {
-                    botao.onPress();
-                    onFechar?.();
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text
+              {botoes.map((botao, indice) => {
+                const destrutivo = botao.estilo === 'destrutivo';
+                const secundario = botao.estilo === 'secundario';
+
+                return (
+                  <TouchableOpacity
+                    key={`${botao.texto}-${indice}`}
                     style={[
-                      styles.textoBotao,
-                      { color: colors.buttonText },
-                      botao.estilo === 'secundario' && { color: colors.text },
-                      botao.estilo === 'destrutivo' && { color: colors.error },
+                      styles.botao,
+                      {
+                        backgroundColor: destrutivo
+                          ? comAlfa(colors.error, 0.14)
+                          : secundario
+                            ? colors.glassCard
+                            : colors.button,
+                        borderColor: destrutivo
+                          ? comAlfa(colors.error, 0.4)
+                          : secundario
+                            ? colors.glassBorder
+                            : 'transparent',
+                        borderWidth: secundario || destrutivo ? 1 : 0,
+                      },
                     ]}
+                    onPress={() => {
+                      botao.onPress();
+                      onFechar?.();
+                    }}
+                    activeOpacity={0.82}
+                    accessibilityRole="button"
+                    accessibilityLabel={botao.texto}
                   >
-                    {botao.texto}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[
+                        styles.textoBotao,
+                        {
+                          color: destrutivo
+                            ? colors.error
+                            : secundario
+                              ? colors.text
+                              : colors.buttonText,
+                        },
+                      ]}
+                    >
+                      {botao.texto}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
         </Animated.View>
@@ -216,57 +214,55 @@ export default function ModalPersonalizado({
 }
 
 const styles = StyleSheet.create({
-  overlay: {
+  veu: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 24,
   },
 
   containerAnimado: {
-    width: '85%',
-    maxWidth: 380,
+    width: '100%',
+    maxWidth: 372,
   },
 
-  card: {
-    borderRadius: 24,
+  cartao: {
+    borderRadius: 28,
     borderWidth: 1,
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingTop: 26,
+    paddingBottom: 22,
     overflow: 'hidden',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 12,
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.32,
+    shadowRadius: 28,
+    elevation: 16,
   },
 
   brilho: {
     position: 'absolute',
     top: 0,
-    left: 24,
-    right: 24,
-    height: 1.5,
-    borderRadius: 2,
-    opacity: 0.6,
+    left: 26,
+    right: 26,
+    height: 1,
+    opacity: 0.7,
   },
 
-  iconeContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+  iconeCirculo: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
     alignSelf: 'center',
-    marginBottom: 16,
-  },
-
-  icone: {
-    fontSize: 36,
-    fontWeight: '700',
+    marginBottom: 18,
   },
 
   titulo: {
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: '700',
+    letterSpacing: 0.2,
     textAlign: 'center',
     marginBottom: 8,
   },
@@ -274,43 +270,33 @@ const styles = StyleSheet.create({
   mensagem: {
     fontSize: 14,
     textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 16,
+    lineHeight: 21,
+    marginBottom: 20,
   },
 
   divisor: {
     height: 1,
-    marginBottom: 16,
+    marginBottom: 18,
   },
 
   containerBotoes: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 8,
+    gap: 10,
   },
 
   botao: {
-    paddingVertical: 12,
+    flex: 1,
+    minHeight: 48,
     paddingHorizontal: 16,
-    borderRadius: 12,
-    minWidth: 100,
+    borderRadius: 999,
     justifyContent: 'center',
     alignItems: 'center',
-    flex: 1,
-  },
-
-  botaoPrimario: {},
-
-  botaoSecundario: {
-    borderWidth: 1,
-  },
-
-  botaoDestrutivo: {
-    borderWidth: 1,
   },
 
   textoBotao: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
 });

@@ -4,7 +4,7 @@
     "slug": "musicgalaxy",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "scheme": "musicgalaxy",
     "icon": "./assets/icon.png",
     "ios": {
@@ -12,7 +12,11 @@
       "bundleIdentifier": "com.musicgalaxy.app"
     },
     "android": {
-      "package": "com.musicgalaxy.app"
+      "package": "com.musicgalaxy.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#201816"
+      }
     },
     "web": {
       "bundler": "metro",
@@ -28,7 +32,7 @@
           "image": "./assets/splash.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#0B0B1A"
+          "backgroundColor": "#1A1312"
         }
       ],
       "expo-audio"
