@@ -2,7 +2,7 @@
 // está acessível. Permite abrir o aplicativo sem internet e explica, de
 // forma clara, como corrigir. Fica logo acima da barra de navegação.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
@@ -23,7 +23,9 @@ export default function OfflineBanner({ onAbrirAjustes }: OfflineBannerProps): R
 
   // Consulta o servidor uma única vez por ciclo de vida; o estado muda
   // apenas quando o aplicativo volta ao primeiro plano.
-  const verificar = async () => {
+  // A função é estável (useCallback) porque só depende de estado interno e
+  // de importações do módulo — por isso pode entrar na lista do efeito.
+  const verificar = useCallback(async () => {
     if (verificandoRef.current) return;
     verificandoRef.current = true;
     try {
@@ -38,7 +40,7 @@ export default function OfflineBanner({ onAbrirAjustes }: OfflineBannerProps): R
     } finally {
       verificandoRef.current = false;
     }
-  };
+  }, []);
 
   useEffect(() => {
     verificar();
@@ -50,8 +52,7 @@ export default function OfflineBanner({ onAbrirAjustes }: OfflineBannerProps): R
     return () => {
       inscricao.remove();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [verificar]);
 
   if (!offline && !naoConfigurado) {
     return null;

@@ -100,6 +100,7 @@ musicgalaxy/
 - Mesma regra em `GET /api/releases/by-date`, `GET /api/works/:id/releases` e `GET /api/works/by-decade/:decade` (obras só aparecem se tiverem ao menos uma versão com áudio)
 - As versões sem áudio continuam no banco (Regra 2 intacta nos dados); o filtro é de EXIBIÇÃO
 - A identidade de um candidato de áudio vem do PRÓPRIO arquivo (nome do arquivo → texto do link → título da página, este último só com um único link de áudio na página). Nunca herdar identidade da página com vários áudios (players globais tocariam a música errada)
+- A contagem por década usa `ANO_EFETIVO_SQL` (`backend/src/utils/urls.ts`): quando a obra não tem `original_release_year`, vale o menor ano de lançamento das suas versões. Sem essa segunda fonte, as obras sem ano próprio sumiam das listas por década e a tela parecia vazia
 
 ## Schema do Banco de Dados
 
@@ -179,6 +180,12 @@ Para decisões técnicas não cobertas neste documento:
 ### Exceções que Requerem Confirmação Humana
 1. **Mudança na porta 3307 do MariaDB** - Nunca alterar sem autorização explícita
 2. **Flexibilização das Regras 1, 2, 3, 4, 5, 6 ou 7** - Nunca flexibilizar sem autorização explícita
+
+### Avisos e modais globais
+- O aviso (`ToastNotificacao`) e o modal (`ModalPersonalizado`) são montados por `mobile/src/components/ModalGlobalContainer.tsx`, que fica na raiz do `ModalProvider`
+- A camada do contêiner global usa `StyleSheet.absoluteFill`: o aviso é posicionado de forma absoluta e, sem uma referência de altura real, saía desenhado fora da janela (altura zero, colada no rodapé da coluna)
+- O aviso respeita a área segura com `useSafeAreaInsets()` (`top: insets.top + 10`), mostra a barra de tempo restante e some sozinho depois da duração informada pelo `ModalContext`
+- O modal usa o componente `Modal` do React Native (portal próprio) e continua centralizado, independente da camada do aviso
 
 ### Fluxo de Downloads (inspirado no deemix, sem plataformas)
 - A experiência de busca, escolha de qualidade e fila segue a lógica de gerenciadores como o deemix, mas **o áudio continua vindo exclusivamente de sites abertos** (Regra 3). O Deezer e qualquer outra plataforma de música não são integrados nem consultados

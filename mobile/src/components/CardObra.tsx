@@ -1,159 +1,105 @@
-// Componente CardObra — exibe uma obra musical com artista, capa e estatísticas.
-// Visual de vidro fosco: fundo translúcido, contorno sutil e sombra suave,
-// com as cores sempre resolvidas pelos tokens do tema ativo.
+// Componente CardObra — exibe uma obra musical com artista e ano de
+// lançamento original. Visual de vidro fosco: fundo translúcido, contorno
+// sutil e ícone de linha, com as cores sempre resolvidas pelos tokens do
+// tema ativo. É o mesmo cartão usado em Explorar e nos detalhes do artista.
 
 import React from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Image,
-} from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
 import { Work } from '../types';
 import { useTheme } from '../contexts/ThemeContext';
+import { comAlfa } from '../utils/cores';
+import Icone from './Icone';
 
 interface Props {
   obra: Work;
   onPress: (obra: Work) => void;
-  mostraEstatisticas?: boolean;
+  // Em telas de artista o nome do artista já está no cabeçalho.
+  mostraArtista?: boolean;
 }
 
 export default function CardObra({
   obra,
   onPress,
-  mostraEstatisticas = false,
+  mostraArtista = true,
 }: Props): React.JSX.Element {
   const { colors } = useTheme();
+
+  const ano = obra.effective_year ?? obra.original_release_year;
 
   return (
     <TouchableOpacity
       style={[
         styles.card,
-        {
-          // Vidro fosco: fundo translúcido, contorno e sombra vindos do tema
-          backgroundColor: colors.glassCard,
-          borderColor: colors.glassBorder,
-          borderLeftColor: colors.primary,
-          shadowColor: colors.glassShadow,
-        },
+        { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
       ]}
       onPress={() => onPress(obra)}
-      activeOpacity={0.7}
+      activeOpacity={0.75}
+      accessibilityRole="button"
+      accessibilityLabel={`Abrir a obra ${obra.title}`}
     >
-      {/* Conteúdo principal */}
+      <View
+        style={[styles.icone, { backgroundColor: comAlfa(colors.primary, 0.12) }]}
+      >
+        <Icone nome="musica" tamanho={16} cor={colors.primary} />
+      </View>
+
       <View style={styles.conteudo}>
-        {/* Título da obra */}
-        <Text style={[styles.tituloObra, { color: colors.text }]} numberOfLines={2}>
+        <Text style={[styles.titulo, { color: colors.text }]} numberOfLines={2}>
           {obra.title}
         </Text>
 
-        {/* Artista */}
-        <Text style={[styles.nomeArtista, { color: colors.primary }]} numberOfLines={1}>
-          {obra.artist.name}
-        </Text>
-
-        {/* País do artista (se disponível) */}
-        {obra.artist.country && (
-          <Text style={[styles.paisArtista, { color: colors.textSecondary }]}>
-            🌍 {obra.artist.country}
+        {mostraArtista && (
+          <Text style={[styles.artista, { color: colors.textSecondary }]} numberOfLines={1}>
+            {obra.artist.name}
           </Text>
         )}
 
-        {/* Ano de lançamento original */}
-        <Text style={[styles.anoLancamento, { color: colors.textSecondary }]}>
-          {obra.original_release_year || 'Ano desconhecido'}
-        </Text>
-
-        {/* Estatísticas (opcional) */}
-        {mostraEstatisticas && (
-          <View style={[styles.containerEstatisticas, { borderTopColor: colors.border }]}>
-            <View style={styles.itemEstat}>
-              <Text style={[styles.labelEstat, { color: colors.textSecondary }]}>Obras</Text>
-              <Text style={[styles.valorEstat, { color: colors.primary }]}>1</Text>
-            </View>
-          </View>
+        {ano && (
+          <Text style={[styles.ano, { color: colors.primary }]} numberOfLines={1}>
+            {ano}
+          </Text>
         )}
       </View>
 
-      {/* Seta indicadora */}
-      <Text style={[styles.seta, { color: colors.primary }]}>→</Text>
+      <Icone nome="seta" tamanho={17} cor={colors.textSecondary} />
     </TouchableOpacity>
   );
 }
 
-// ============================================================
-// Estilos
-// ============================================================
-
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 16,
-    marginBottom: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 20,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: 20,
     borderWidth: 1,
-    borderLeftWidth: 4,
-    // Sombra suave de vidro (a cor vem do tema, aplicada em linha)
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 5,
   },
-
+  icone: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   conteudo: {
     flex: 1,
   },
-
-  tituloObra: {
-    fontSize: 15,
+  titulo: {
+    fontSize: 13.5,
     fontWeight: '600',
-    marginBottom: 4,
+    lineHeight: 17,
   },
-
-  nomeArtista: {
-    fontSize: 13,
-    fontWeight: '500',
-    marginBottom: 2,
+  artista: {
+    fontSize: 10.5,
+    marginTop: 2,
   },
-
-  paisArtista: {
-    fontSize: 12,
-    marginBottom: 4,
-  },
-
-  anoLancamento: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-
-  containerEstatisticas: {
-    flexDirection: 'row',
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-  },
-
-  itemEstat: {
-    marginRight: 16,
-  },
-
-  labelEstat: {
-    fontSize: 11,
-    marginBottom: 2,
-  },
-
-  valorEstat: {
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-
-  seta: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 12,
+  ano: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 3,
   },
 });

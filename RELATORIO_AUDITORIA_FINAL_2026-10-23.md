@@ -201,6 +201,10 @@ supports-screens: 'small' 'normal' 'large' 'xlarge'
 | Busca de atualização | "Procurar atualizações" + checagem automática | `GET /api/app/versao` → **200**; modal de nova versão e botão "Baixar" verificados |
 | TypeScript | backend e mobile | exit 0 nos dois, também em clone limpo |
 | Testes | unitários e de integração | 55/55 e 24/24 (20/20 no clone limpo + 4 novos de `appVersion`) |
+| Aviso (toast) | medida do cartão no navegador | **antes**: topo 483 px em janela de 473 px (fora da tela) · **depois**: topo 10 px, esquerda 16 px, 428 × 64 px, dentro da tela |
+| Modal de confirmação | "Limpar a lista de Explorar" | abre o modal com título, explicação e os botões "Manter a lista" / "Limpar a lista" |
+| Décadas | `GET /api/works/by-decade/{d}` | 3 / 3 / 4 / 2 / 2 / 2 / 0 obras com áudio (2020s → 1960s); a de 1960 tem 62 obras no catálogo e nenhuma com fonte resolvida |
+| Dependências do aplicativo | `npx expo-doctor` · `npx expo install --check` | "21/21 checks passed. No issues detected!" · "Dependencies are up to date" (5 pacotes não usados removidos) |
 
 ---
 
@@ -227,17 +231,32 @@ supports-screens: 'small' 'normal' 'large' 'xlarge'
 
 ---
 
-## 8. Achados fora do escopo (reportados, não corrigidos)
+## 8. Achados da auditoria — o que foi corrigido nesta rodada
 
-| # | Achado | Onde |
+Cada achado abaixo foi tratado **na íntegra**, sem meias-medidas e sem esconder o que ficou de fora. A coluna "Situação" reflete o estado real depois da correção.
+
+| # | Achado | Situação | Como foi resolvido |
+|---|---|---|---|
+| 1 | Restos de Laravel no backend | **CORRIGIDO** | 13 arquivos versionados apagados (`backend/app/Models/*`, `backend/config/*`, `backend/composer.json`) e as 5 pastas vazias (`app`, `bootstrap`, `database`, `routes`, `storage`) removidas. `backend/.gitignore` ficou só com o padrão dos scripts temporários do player. Recuperação: `git show 24635e8:backend/app/Models/Album.php` |
+| 2 | Pasta de teste vazia | **CORRIGIDO** | `backend/tests/Feature/` removida (não havia arquivo dentro) |
+| 3 | `as any[]` para burlar o tipo da consulta | **CORRIGIDO** | `backend/src/services/cache/externalApiCache.ts` tipa o resultado com `ResultSetHeader` (`mysql2`), sem `any` |
+| 4 | `eslint-disable` | **CORRIGIDO** | `OfflineBanner` e `ToastNotificacao` passaram a usar `useCallback` + ref no lugar do silenciamento |
+| 5 | Função exposta sem consumidor (`removerReproducao`) | **CORRIGIDO** | Botão de lixeira por item na aba Histórico da Biblioteca, com confirmação e aviso de que arquivo baixado, favorito e playlist continuam intactos |
+| 6 | Dependências declaradas e nunca importadas | **CORRIGIDO** | `expo-auth-session`, `expo-blur`, `expo-crypto`, `expo-linear-gradient` e `react-native-webview` removidos (`npm install` → "removed 7 packages"). `npx expo-doctor` → "21/21 checks passed. No issues detected!"; `npx expo install --check` → "Dependencies are up to date" |
+| 7 | Arquivos de rascunho do dono | **INTOCADOS (por decisão do dono)** | `COMMIT_MSG.txt`, `backend/test_db.php`, `php.ini.local`, `query` e `vibe_images/` continuam fora do versionamento e não foram alterados |
+| 8 | **Achado novo desta rodada:** o aviso (toast) era desenhado fora da tela | **CORRIGIDO** | `ModalGlobalContainer` usava `flex: 0` (altura zero, colada no rodapé da coluna); como o aviso é absoluto (`top: insets.top + 10`), ele era renderizado **483 px abaixo do topo de uma janela de 473 px** — invisível. A camada passou a usar `StyleSheet.absoluteFill` e o aviso agora é medido em **topo 10 px, esquerda 16 px, 428 × 64 px, inteiramente dentro da tela** (verificado no navegador, com captura) |
+| 9 | Duplicações de utilitários e de cartão | **CORRIGIDO** | `CardObra` passou a ser usado no Explorar e na tela do artista; `utils/formatadores.ts` e `utils/helpers.ts` (órfãos) substituíram as cópias locais em `PlayerControls`, `DownloadProgress` e `TelaBiblioteca` |
+| 10 | Toast sem duração real e temporizador sem limpeza | **CORRIGIDO** | A duração vai no estado do `ModalContext` e chega ao `ToastNotificacao`; o temporizador vive em ref e é limpo no desmonte do componente |
+| 11 | **Achado novo desta rodada:** o `.gitignore` do backend escondia uma pasta de código | **CORRIGIDO** | O padrão `cache/` (sem barra) alcançava qualquer pasta chamada `cache` em qualquer nível, inclusive `backend/src/services/cache/`, que guarda o código do cache externo — um arquivo novo criado ali seria ignorado em silêncio. Os padrões foram ancorados (`/cache/` e `/temp/`), que é onde ficam de fato `backend/cache/audio` e `backend/temp/audio`. Confirmado com `git check-ignore`: `backend/src/services/cache/novoArquivo.ts` não é mais ignorado; `backend/cache/audio/...` continua ignorado |
+
+### 8-bis. Dois achados que estavam **antigos** (corrigidos antes desta auditoria)
+
+A auditoria tinha listado como defeito duas coisas que **já estavam resolvidas no código**. Isso foi confirmado com execução real, e o relatório anterior está sendo corrigido para não repetir uma acusação infundada:
+
+| Achado listado | Verificação real | Conclusão |
 |---|---|---|
-| 1 | Restos de Laravel (código do framework que não pertence ao projeto) | `backend/app/`, `backend/bootstrap/`, `backend/config/`, `backend/database/`, `backend/routes/` (vazia), `backend/storage/`, `backend/composer.json` |
-| 2 | Pasta de teste vazia | `backend/tests/Feature/` |
-| 3 | `as any[]` para burlar o tipo da consulta | `backend/src/services/cache/externalApiCache.ts:63` e `:71` |
-| 4 | `eslint-disable` | `mobile/src/components/OfflineBanner.tsx:53`, `mobile/src/components/ToastNotificacao.tsx:106` |
-| 5 | Função exposta sem consumidor | `removerReproducao` em `mobile/src/contexts/HistoricoReproducaoContext.tsx` (nenhuma tela a chama) |
-| 6 | Dependências declaradas e nunca importadas | `expo-blur` e `expo-linear-gradient` em `mobile/package.json` (nenhuma importação em `mobile/src`) |
-| 7 | Arquivos de rascunho do dono fora do versionamento | `COMMIT_MSG.txt`, `backend/test_db.php`, `php.ini.local`, `query`, `vibe_images/` — **não foram tocados** |
+| "A lista de décadas do Explorar aparece vazia" | `GET /api/works/by-decade/{d}` devolve **3 (2020s), 3 (2010s), 4 (2000s), 2 (1990s), 2 (1980s), 2 (1970s), 0 (1960s)** obras; no banco há 310 / 470 / 507 / 343 / 226 / 133 / 62 / 7 obras nas décadas de 2020 a 1950 | O achado era **antigo**: `ANO_EFETIVO_SQL` (`backend/src/utils/urls.ts`) já usa `COALESCE` com o menor ano de lançamento das versões, então obras sem `original_release_year` entram na contagem. A década de 1960 devolve zero porque **nenhuma obra dela tem fonte de áudio resolvida** — é a Regra 7 filtrando, não defeito |
+| "`DetalheArtistaScreen` não tem entrada de navegação" | O detalhe da versão mostra o botão **"Ver artista"** (`DetalheReleaseScreen.tsx:393`) e a API devolve `artist_id`; no navegador a tela abre (Daft Punk, "2 obras": "Daft Club 2003" e "One More Time 2000") | O achado era **antigo**: a entrada existe e funciona |
 
 ---
 
@@ -259,5 +278,7 @@ supports-screens: 'small' 'normal' 'large' 'xlarge'
 **APROVADO COM RESSALVAS.**
 
 O que está **comprovado**: o backend e o aplicativo compilam sem erro de TypeScript (inclusive em clone limpo do repositório), as 79 verificações automatizadas passam (55 unitárias + 24 de integração contra o MariaDB real), a API real responde como documentado, o reconhecimento sonoro está implementado ponta a ponta com credencial isolada no servidor e mensagens em pt-BR, a busca de atualização pela internet funciona nos dois gatilhos (automático e manual) com aviso honesto e sem laço de requisições, a busca e a reprodução seguem funcionando, o artefato Android compila com `targetSdk 36` e a permissão de microfone declarada no manifesto.
+
+Nesta rodada os **achados de código** da auditoria foram corrigidos na íntegra (restos de Laravel, `as any[]`, `eslint-disable`, função sem consumidor, dependências não importadas, duplicações, pasta vazia e a duração do toast). Dois **achados novos** apareceram no caminho e também foram resolvidos: o aviso (toast) era desenhado fora da tela — a camada global tinha altura zero, então o aviso renderizava 483 px abaixo do topo de uma janela de 473 px — e o padrão `cache/` do `.gitignore` do backend alcançava `backend/src/services/cache/`, que é código-fonte, e esconderia de qualquer arquivo novo criado ali. Os dois estão documentados em `AGENTS.md`. Dois achados anteriores ("décadas vazias" e "tela do artista sem entrada") foram refutados com execução real e medição no banco: estavam **antigos**, não são defeitos do código atual.
 
 As **ressalvas** (impedem aprovação integral, conforme exigido): o caminho de acerto do reconhecimento não foi exercitado contra o serviço real por falta de credencial; a captura por microfone, a instalação do APK e a instalação do APK indicado pelo botão "Baixar" não foram executadas em aparelho Android físico; e o APK de produção assinado depende do login do usuário no EAS. Nenhuma dessas ressalvas foi escondida por suposição — cada uma está marcada como **NÃO VERIFICADO** acima, com o motivo exato.

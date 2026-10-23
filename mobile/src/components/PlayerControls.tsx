@@ -20,6 +20,7 @@ import { playerAudio, EstadoPlayer } from '../services/playerAudio';
 import { useModal } from '../contexts/ModalContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { TIMINGS, USE_NATIVE_DRIVER } from '../utils/animacoes';
+import { formatTime } from '../utils/helpers';
 import { comAlfa } from '../utils/cores';
 import Icone from './Icone';
 
@@ -179,14 +180,6 @@ export default function PlayerControls({
     }
   };
 
-  const formatarTempo = (ms: number): string => {
-    if (!ms || ms <= 0) return '0:00';
-    const totalSegundos = Math.floor(ms / 1000);
-    const minutos = Math.floor(totalSegundos / 60);
-    const segundos = totalSegundos % 60;
-    return `${minutos}:${segundos.toString().padStart(2, '0')}`;
-  };
-
   const rotuloBotao = carregando
     ? 'Carregando'
     : tocando
@@ -273,10 +266,10 @@ export default function PlayerControls({
         />
         <View style={styles.tempos}>
           <Text style={[styles.tempoTexto, { color: colors.textSecondary }]}>
-            {formatarTempo(tempo)}
+            {formatTime(tempo)}
           </Text>
           <Text style={[styles.tempoTexto, { color: colors.textSecondary }]}>
-            {formatarTempo(duracao)}
+            {formatTime(duracao)}
           </Text>
         </View>
       </View>

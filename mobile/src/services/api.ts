@@ -6,7 +6,7 @@
 // Ajustes (ver services/apiConfig.ts). Ao iniciar o aplicativo, o endereço
 // salvo é carregado; sem configuração em produção, o app funciona offline.
 
-import { RespostaBusca, Release, Work, RespostaWork, RespostaReleasesDeWork, Artista, RespostaArtista, RespostaObrasArtista, ResultadoIngestao, VersaoPublicada } from '../types';
+import { RespostaBusca, Release, RespostaWork, RespostaReleasesDeWork, RespostaArtista, RespostaObrasArtista, ResultadoIngestao, VersaoPublicada } from '../types';
 import { urlBasePadrao, obterUrlSalva, normalizarUrlServidor, definirUrlServidor, testarConexaoServidor } from './apiConfig';
 
 // ============================================================

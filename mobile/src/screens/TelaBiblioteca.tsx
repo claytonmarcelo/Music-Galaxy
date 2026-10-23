@@ -29,6 +29,7 @@ import GlassCard from '../components/GlassCard';
 import Icone, { NomeIcone } from '../components/Icone';
 import CustomButton from '../components/CustomButton';
 import { traduzirTipoRelease } from '../utils/tiposRelease';
+import { formatarDataRelativa } from '../utils/formatadores';
 import { comAlfa } from '../utils/cores';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Biblioteca'>;
@@ -46,7 +47,7 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
   const { favoritos, removerFavorito } = useFavoritos();
   const { playlists, criarPlaylist, excluirPlaylist } = usePlaylists();
   const { historico, limparHistorico } = useHistorico();
-  const { reproducoes, limparHistoricoReproducao } = useHistoricoReproducao();
+  const { reproducoes, removerReproducao, limparHistoricoReproducao } = useHistoricoReproducao();
   const { colors } = useTheme();
   const { abrirConfirmacao, toastSucesso, toastErro } = useModal();
 
@@ -85,6 +86,29 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
       'Limpar reproduções recentes?',
       'O registro de reproduções será apagado. Nenhum arquivo baixado, favorito ou playlist será removido.',
       () => limparHistoricoReproducao()
+    );
+  };
+
+  // Remove apenas uma reprodução do registro, sem tocar em favoritos,
+  // playlists ou arquivos baixados.
+  const handleRemoverReproducao = (releaseId: number): void => {
+    abrirConfirmacao(
+      'Remover do histórico de reproduções?',
+      'Esta reprodução sairá do registro. Nenhum arquivo baixado, favorito ou playlist será removido.',
+      () => {
+        void (async () => {
+          try {
+            await removerReproducao(releaseId);
+            toastSucesso('Reprodução removida do histórico.');
+          } catch (erro) {
+            const mensagem =
+              erro instanceof Error
+                ? erro.message
+                : 'Não foi possível remover a reprodução do histórico.';
+            toastErro(mensagem);
+          }
+        })();
+      }
     );
   };
 
@@ -428,7 +452,7 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
                 >
                   {playlist.releases.length}{' '}
                   {playlist.releases.length === 1 ? 'versão' : 'versões'} ·{' '}
-                  {formatarData(new Date(playlist.atualizadaEm))}
+                  {formatarDataRelativa(new Date(playlist.atualizadaEm))}
                 </Text>
               </View>
 
@@ -517,7 +541,7 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
                   {item.termo}
                 </Text>
                 <Text style={[styles.dataHistorico, { color: colors.textSecondary }]}>
-                  {formatarData(new Date(item.timestamp))}
+                  {formatarDataRelativa(new Date(item.timestamp))}
                 </Text>
               </View>
             ))}
@@ -593,8 +617,21 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
               </View>
 
               <Text style={[styles.dataHistorico, { color: colors.textSecondary }]}>
-                {formatarData(new Date(item.reproduzidoEm))}
+                {formatarDataRelativa(new Date(item.reproduzidoEm))}
               </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.botaoRemover,
+                  { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                ]}
+                onPress={() => handleRemoverReproducao(item.release.id)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Remover ${item.release.version_name} do histórico de reproduções`}
+              >
+                <Icone nome="lixeira" tamanho={14} cor={colors.error} />
+              </TouchableOpacity>
             </TouchableOpacity>
           ))
         ) : (
@@ -674,22 +711,6 @@ export default function TelaBiblioteca({ navigation }: Props): React.JSX.Element
       </SafeAreaView>
     </FundoAtmosfera>
   );
-}
-
-// Tempo relativo curto em português brasileiro.
-function formatarData(data: Date): string {
-  const agora = new Date();
-  const diferenca = agora.getTime() - data.getTime();
-  const minutos = Math.floor(diferenca / 60000);
-  const horas = Math.floor(diferenca / 3600000);
-  const dias = Math.floor(diferenca / 86400000);
-
-  if (minutos < 1) return 'Agora';
-  if (minutos < 60) return `${minutos} min`;
-  if (horas < 24) return `${horas} h`;
-  if (dias < 7) return `${dias} d`;
-
-  return data.toLocaleDateString('pt-BR');
 }
 
 const styles = StyleSheet.create({

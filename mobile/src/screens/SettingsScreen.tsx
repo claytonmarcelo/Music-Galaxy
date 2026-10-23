@@ -36,7 +36,7 @@ import CustomButton from '../components/CustomButton';
 import FundoAtmosfera from '../components/FundoAtmosfera';
 import GlassCard from '../components/GlassCard';
 import Icone, { NomeIcone } from '../components/Icone';
-import SeletorTema, { Tema } from '../components/SeletorTema';
+import SeletorTema from '../components/SeletorTema';
 import { useVerificacaoAtualizacao } from '../hooks/useVerificacaoAtualizacao';
 import { VERSAO_APLICATIVO } from '../services/versao';
 import { RootStackParamList } from '../types';

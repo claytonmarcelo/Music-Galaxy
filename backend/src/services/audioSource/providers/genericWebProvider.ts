@@ -395,7 +395,7 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
   }
 
   // Visita uma página aberta e converte links de áudio em candidatos pontuáveis
-  private async extrairDaPagina(paginaUrl: string, identity: AudioIdentity): Promise<AudioCandidate[]> {
+  private async extrairDaPagina(paginaUrl: string, _identity: AudioIdentity): Promise<AudioCandidate[]> {
     try {
       const auditada = await auditarUrl(paginaUrl);
       if (!auditada.ok) {

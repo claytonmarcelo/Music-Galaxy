@@ -38,7 +38,7 @@ export class DirectLinkProvider extends BaseAudioSourceProvider {
   // Este provider não faz descoberta — ele resolve URLs fornecidas.
   // Retorna SUCCESS com zero candidatos para não poluir o ranking do orquestrador
   // com falsos fracassos (comportamento esperado, não um erro).
-  async search(identity: AudioIdentity): Promise<SearchResult> {
+  async search(_identity: AudioIdentity): Promise<SearchResult> {
     return {
       providerId: this.providerId,
       candidates: [],

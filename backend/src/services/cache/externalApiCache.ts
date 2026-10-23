@@ -4,7 +4,7 @@
 // buscas já realizadas anteriormente.
 
 import pool from '../../config/database';
-import { RowDataPacket } from 'mysql2';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 
 // TTL padrão de cache por fonte (em segundos)
 const TTL_MUSICBRAINZ = 60 * 60 * 24 * 7; // 7 dias
@@ -57,18 +57,18 @@ export async function salvarNoCache(
 // da fonte. Regra do usuário: buscas idênticas nunca reutilizam respostas
 // antigas — o cache do termo é sempre apagado antes de uma nova ingestão.
 export async function limparCacheDoTermo(requestKey: string): Promise<number> {
-  const [resultado] = await pool.execute(
+  const [resultado] = await pool.execute<ResultSetHeader>(
     `DELETE FROM external_api_cache WHERE request_key = ?`,
     [requestKey]
-  ) as any[];
+  );
   return resultado.affectedRows ?? 0;
 }
 
 // Remove entradas de cache expiradas — pode ser chamado periodicamente.
 export async function limparCacheExpirado(): Promise<number> {
-  const [resultado] = await pool.execute(
+  const [resultado] = await pool.execute<ResultSetHeader>(
     `DELETE FROM external_api_cache WHERE expires_at < NOW()`
-  ) as any[];
+  );
   return resultado.affectedRows ?? 0;
 }
 

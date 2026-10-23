@@ -38,19 +38,10 @@ coverage/
 .nyc_output/
 
 # Áudio: cache permanente e temporários do pipeline de download (Regra 3)
-cache/
-temp/
+# Ancorados na raiz do backend: sem a barra, o padrão "cache/" também
+# alcançava backend/src/services/cache/, que é código-fonte do projeto.
+/cache/
+/temp/
 
-# Laravel structure (obsolete - to be removed manually with admin permissions)
-# Ancorados na raiz do backend: sem a barra, "routes/" também ignorava
-# src/routes/, que é código do projeto e precisa ser versionado.
-/app/
-/bootstrap/
-/config/
-/database/
-/routes/
-/storage/
-/composer.json
-
-# Temporary player scripts (to be removed manually with admin permissions)
+# Scripts temporários do player usados em depuração local
 *-player-script.js

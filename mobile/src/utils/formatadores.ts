@@ -15,12 +15,12 @@ export function formatarDataRelativa(data: Date): string {
 
   if (diferenca < 0) return 'No futuro';
   if (minutos < 1) return 'Agora';
-  if (minutos < 60) return `${minutos}min atrás`;
-  if (horas < 24) return `${horas}h atrás`;
-  if (dias < 7) return `${dias}d atrás`;
-  if (semanas < 4) return `${semanas}sem atrás`;
-  if (meses < 12) return `${meses}mês atrás`;
-  if (anos < 10) return `${anos}ano atrás`;
+  if (minutos < 60) return `${minutos} min atrás`;
+  if (horas < 24) return `${horas} h atrás`;
+  if (dias < 7) return `${dias} d atrás`;
+  if (semanas < 4) return `${semanas} sem atrás`;
+  if (meses < 12) return `${meses} ${meses === 1 ? 'mês' : 'meses'} atrás`;
+  if (anos < 10) return `${anos} ${anos === 1 ? 'ano' : 'anos'} atrás`;
 
   return data.toLocaleDateString('pt-BR');
 }

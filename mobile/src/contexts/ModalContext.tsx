@@ -1,7 +1,7 @@
 // Contexto Global para Modais e Notificações
 // Permite usar modais de qualquer lugar do app sem prop drilling
 
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { TipoModal, BotaoModal } from '../components/ModalPersonalizado';
 import { TipoToast } from '../components/ToastNotificacao';
 
@@ -17,6 +17,9 @@ interface EstadoToast {
   visivel: boolean;
   tipo: TipoToast;
   mensagem: string;
+  // Duração total de exibição em ms — o aviso usa esse mesmo valor para
+  // esconder a barra de tempo, então o tempo mostrado bate com o real.
+  duracao: number;
 }
 
 interface ModalContextType {
@@ -70,9 +73,13 @@ export function ModalProvider({ children }: Props): React.JSX.Element {
     visivel: false,
     tipo: 'info',
     mensagem: '',
+    duracao: 3000,
   });
 
-  const [timeoutToast, setTimeoutToast] = useState<ReturnType<typeof setTimeout> | null>(null);
+  // O temporizador fica em uma ref (e não em estado) para que as funções de
+  // toast mantenham sempre a mesma identidade: assim o componente de aviso
+  // não reinicia a animação quando um novo aviso é mostrado.
+  const timeoutToastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Modais
   const abrirSucesso = useCallback((titulo: string, mensagem: string, onConfirmar?: () => void) => {
@@ -190,23 +197,26 @@ export function ModalProvider({ children }: Props): React.JSX.Element {
 
   // Toasts
   const mostrarToast = useCallback((tipo: TipoToast, mensagem: string, duracao: number) => {
-    if (timeoutToast) clearTimeout(timeoutToast);
+    if (timeoutToastRef.current) {
+      clearTimeout(timeoutToastRef.current);
+      timeoutToastRef.current = null;
+    }
 
     setEstadoToast({
       visivel: true,
       tipo,
       mensagem,
+      duracao,
     });
 
-    const timeout = setTimeout(() => {
+    timeoutToastRef.current = setTimeout(() => {
+      timeoutToastRef.current = null;
       setEstadoToast(prev => ({
         ...prev,
         visivel: false,
       }));
     }, duracao);
-
-    setTimeoutToast(timeout);
-  }, [timeoutToast]);
+  }, []);
 
   const toastSucesso = useCallback((mensagem: string, duracao = 3000) => {
     mostrarToast('sucesso', mensagem, duracao);
@@ -225,12 +235,25 @@ export function ModalProvider({ children }: Props): React.JSX.Element {
   }, [mostrarToast]);
 
   const fecharToast = useCallback(() => {
-    if (timeoutToast) clearTimeout(timeoutToast);
+    if (timeoutToastRef.current) {
+      clearTimeout(timeoutToastRef.current);
+      timeoutToastRef.current = null;
+    }
     setEstadoToast(prev => ({
       ...prev,
       visivel: false,
     }));
-  }, [timeoutToast]);
+  }, []);
+
+  // Evita deixar um temporizador pendente quando o aplicativo é desmontado.
+  useEffect(() => {
+    return () => {
+      if (timeoutToastRef.current) {
+        clearTimeout(timeoutToastRef.current);
+        timeoutToastRef.current = null;
+      }
+    };
+  }, []);
 
   const valor: ModalContextType = {
     estadoModal,

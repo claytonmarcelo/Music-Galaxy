@@ -28,19 +28,11 @@ import {
   rotuloQualidade,
 } from '../services/downloadRelease';
 import { comAlfa } from '../utils/cores';
+import { formatFileSize } from '../utils/helpers';
 import Icone from './Icone';
 
 interface Props {
   release: Release;
-}
-
-// Formata bytes em uma medida legível.
-function formatarTamanho(bytes: number): string {
-  if (!bytes || bytes <= 0) return '0 B';
-  const unidades = ['B', 'KB', 'MB', 'GB'];
-  const indice = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), unidades.length - 1);
-  const valor = bytes / Math.pow(1024, indice);
-  return `${valor.toFixed(valor >= 10 || indice === 0 ? 0 : 1)} ${unidades[indice]}`;
 }
 
 export default function DownloadProgress({ release }: Props): React.JSX.Element {
@@ -214,7 +206,7 @@ export default function DownloadProgress({ release }: Props): React.JSX.Element 
             />
           </View>
           <Text style={[styles.progressoTamanho, { color: colors.textSecondary }]}>
-            {formatarTamanho(estado?.tamanhoAtual ?? 0)} de {formatarTamanho(estado?.tamanhoTotal ?? 0)}
+            {formatFileSize(estado?.tamanhoAtual ?? 0)} de {formatFileSize(estado?.tamanhoTotal ?? 0)}
           </Text>
         </View>
       )}

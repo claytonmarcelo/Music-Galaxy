@@ -162,7 +162,7 @@ export class AudioValidator {
   }
 
   // Detectar possíveis vinheta ou conteúdo extra
-  async detectVinylOrExtraContent(filePath: string): Promise<{ hasVinyl: boolean; hasExtraContent: boolean; confidence: number }> {
+  async detectVinylOrExtraContent(_filePath: string): Promise<{ hasVinyl: boolean; hasExtraContent: boolean; confidence: number }> {
     // Esta é uma detecção heurística baseada em análise de áudio
     // Uma implementação completa exigiria análise de waveform e detecção de padrões
     

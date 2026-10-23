@@ -23,6 +23,7 @@ import { useModal } from '../contexts/ModalContext';
 import FundoAtmosfera from '../components/FundoAtmosfera';
 import GlassCard from '../components/GlassCard';
 import ReleaseCard from '../components/ReleaseCard';
+import CardObra from '../components/CardObra';
 import Icone from '../components/Icone';
 import CustomButton from '../components/CustomButton';
 import { comAlfa } from '../utils/cores';
@@ -406,42 +407,7 @@ export default function TelaExplorar({ navigation }: Props): React.JSX.Element {
           </Text>
 
           {obrasDecada.map((obra) => (
-            <TouchableOpacity
-              key={obra.id}
-              style={[
-                styles.cardObra,
-                { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
-              ]}
-              onPress={() => handleSelecionarObra(obra)}
-              activeOpacity={0.75}
-              accessibilityRole="button"
-              accessibilityLabel={`Abrir a obra ${obra.title}`}
-            >
-              <View
-                style={[
-                  styles.cardIcone,
-                  { backgroundColor: comAlfa(colors.primary, 0.12) },
-                ]}
-              >
-                <Icone nome="musica" tamanho={16} cor={colors.primary} />
-              </View>
-
-              <View style={styles.conteudoCardObra}>
-                <Text style={[styles.tituloObra, { color: colors.text }]} numberOfLines={2}>
-                  {obra.title}
-                </Text>
-                <Text style={[styles.artistaObra, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {obra.artist.name}
-                </Text>
-                {obra.original_release_year && (
-                  <Text style={[styles.anoObra, { color: colors.primary }]}>
-                    {obra.original_release_year}
-                  </Text>
-                )}
-              </View>
-
-              <Icone nome="seta" tamanho={17} cor={colors.textSecondary} />
-            </TouchableOpacity>
+            <CardObra key={obra.id} obra={obra} onPress={handleSelecionarObra} />
           ))}
         </>
       )}
@@ -643,40 +609,6 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     paddingHorizontal: 22,
     marginBottom: 9,
-  },
-  cardObra: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginHorizontal: 20,
-    marginBottom: 8,
-    padding: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  cardIcone: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  conteudoCardObra: {
-    flex: 1,
-  },
-  tituloObra: {
-    fontSize: 13.5,
-    fontWeight: '600',
-    lineHeight: 17,
-  },
-  artistaObra: {
-    fontSize: 10.5,
-    marginTop: 2,
-  },
-  anoObra: {
-    fontSize: 10,
-    fontWeight: '600',
-    marginTop: 3,
   },
   containerCarregando: {
     alignItems: 'center',

@@ -2,7 +2,7 @@
 // Vidro fosco, ícone de linha por tipo e uma barra que mostra o tempo
 // restante de exibição. Respeita a área segura do aparelho.
 
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { USE_NATIVE_DRIVER } from '../utils/animacoes';
@@ -52,7 +52,14 @@ export default function ToastNotificacao({
   const opacidadeAnim = useRef(new Animated.Value(0)).current;
   const progressoAnim = useRef(new Animated.Value(1)).current;
 
-  const fecharToast = () => {
+  // Guarda o callback de fechamento em uma ref: assim a animação não depende
+  // da identidade da função recebida por prop e não reinicia sozinha.
+  const onFecharRef = useRef(onFechar);
+  useEffect(() => {
+    onFecharRef.current = onFechar;
+  }, [onFechar]);
+
+  const fecharToast = useCallback(() => {
     Animated.parallel([
       Animated.timing(deslocamentoAnim, {
         toValue: -24,
@@ -65,9 +72,9 @@ export default function ToastNotificacao({
         useNativeDriver: USE_NATIVE_DRIVER,
       }),
     ]).start(() => {
-      onFechar?.();
+      onFecharRef.current?.();
     });
-  };
+  }, [deslocamentoAnim, opacidadeAnim]);
 
   useEffect(() => {
     if (!visivel) return;
@@ -103,8 +110,7 @@ export default function ToastNotificacao({
 
       return () => clearTimeout(temporizador);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visivel, duracao, deslocamentoAnim, opacidadeAnim, progressoAnim]);
+  }, [visivel, duracao, deslocamentoAnim, opacidadeAnim, progressoAnim, fecharToast]);
 
   if (!visivel) return <View />;
 
