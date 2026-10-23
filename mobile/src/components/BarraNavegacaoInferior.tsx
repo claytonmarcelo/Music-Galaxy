@@ -9,8 +9,8 @@
 // Ajustes — por isso o rodapé não parece mais uma fileira de botões soltos.
 //
 // Proporções compactas: a cápsula é baixa de propósito, para pesar pouco na
-// tela e devolver espaço ao conteúdo. Bolha de 32 px, ícone de 19 px e
-// rótulo de 9,5 px cabem numa cápsula de ~58 px de altura.
+// tela e devolver espaço ao conteúdo. Bolha de 28 px, ícone de 17 px e
+// rótulo de 9 px cabem numa cápsula de ~48 px de altura.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated, LayoutChangeEvent } from 'react-native';
@@ -40,13 +40,13 @@ const ABAS: Array<{ rota: RotaAba; rotulo: string; icone: NomeIcone }> = [
 const LARGURA_MAXIMA = 560;
 
 // Diâmetro da bolha que marca a aba ativa (círculo atrás do ícone).
-const TAMANHO_BOLHA = 32;
+const TAMANHO_BOLHA = 28;
 
 // Traço do ícone dentro da bolha.
-const TAMANHO_ICONE = 19;
+const TAMANHO_ICONE = 17;
 
 // Respiro mínimo entre a cápsula e a borda de baixo do aparelho.
-const RESPIRO_MINIMO = 10;
+const RESPIRO_MINIMO = 8;
 
 export default function BarraNavegacaoInferior(): React.JSX.Element {
   const { colors } = useTheme();
@@ -190,25 +190,25 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 6,
+    paddingTop: 4,
   },
   trilho: {
     width: '100%',
     maxWidth: LARGURA_MAXIMA,
-    borderRadius: 22,
+    borderRadius: 18,
     borderWidth: 1,
     paddingHorizontal: 4,
-    paddingVertical: 5,
-    shadowOffset: { width: 0, height: 7 },
-    shadowOpacity: 0.26,
-    shadowRadius: 13,
-    elevation: 11,
+    paddingVertical: 3,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.24,
+    shadowRadius: 11,
+    elevation: 9,
   },
   fioDeLuz: {
     position: 'absolute',
     top: 0,
-    left: 30,
-    right: 30,
+    left: 24,
+    right: 24,
     height: 1,
     opacity: 0.6,
     borderRadius: 1,
@@ -233,7 +233,7 @@ const styles = StyleSheet.create({
   aba: {
     flex: 1,
     alignItems: 'center',
-    gap: 2,
+    gap: 1,
   },
   iconeArea: {
     width: TAMANHO_BOLHA,
@@ -242,10 +242,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   rotulo: {
-    fontSize: 9.5,
+    fontSize: 9,
     fontWeight: '500',
     letterSpacing: 0.1,
-    lineHeight: 12,
+    lineHeight: 11,
   },
   rotuloAtiva: {
     fontWeight: '700',

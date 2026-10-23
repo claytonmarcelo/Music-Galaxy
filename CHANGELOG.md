@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (Rodapé mais baixo outra vez, sem perder os rótulos — 23/10/2026)
+- **O rodapé desceu mais 14 px** — a cápsula de vidro foi de **58 px** para **48 px** de altura, e o rodapé inteiro (cápsula + respiro) de **74 px** para **60 px** numa janela de 473 px, medido no navegador. Contra o desenho original, são **37 px devolvidos ao conteúdo** (97 px → 60 px, −38%).
+- **Peça por peça** — bolha da aba ativa de 32 px → **28 px**, ícone de 19 px → **17 px**, rótulo de 9,5/12 px → **9/11 px**, espaçamento entre ícone e rótulo de 2 px → **1 px**, enchimento vertical da cápsula de 5 px → **3 px**, respiro acima da cápsula de 6 px → **4 px**, raio de 22 px → **18 px**, sombra mais curta (`offset 6`, `radius 11`, `elevation 9`), fio de luz de 30 px → **24 px** de recuo nas pontas e distância mínima até a borda do aparelho de 10 px → **8 px**. O vidro fosco, o fio de luz e a animação da mola continuam iguais.
+- **Nada sumiu na redução** — os cinco rótulos (Busca, Biblioteca, Explorar, Favoritos, Ajustes) continuam visíveis e legíveis; a navegação foi testada no navegador (Explorar abriu a tela certa) e a bolha ficou com **0,008 px** de desvio entre o próprio centro e o centro da aba ativa. `npx tsc --noEmit` no aplicativo → exit 0.
+
 ### Docs (Relatório de auditoria final consolidado em 14 seções — 23/10/2026)
 - **O relatório passou a refletir o estado real do código** — `RELATORIO_AUDITORIA_FINAL_2026-10-23.md` agora cobre o commit `5e4d764`: **99/99** verificações (61 unitárias + 25 de integração + 13 do aplicativo), TypeScript limpo nas duas camadas, busca com **50 versões exibidas** (total 51, 139 pendentes), stream **206** com `Content-Range`, respostas reais de **400/413/503** do reconhecimento e os cenários de cancelamento observados no navegador.
 - **Três seções novas e o veredito no fim** — entraram "Configuração de desenvolvimento e produção", "Inspeção do Git" e "Logs e observabilidade"; o veredito virou a **seção 14**. Também foi registrada uma seção própria para os achados **fora do escopo** (esqueleto Android legado na raiz, serviços `redis`/`mailpit` sem uso, script `lint` sem configuração e a permissão `SYSTEM_ALERT_WINDOW`), todos relatados e não corrigidos em silêncio.
