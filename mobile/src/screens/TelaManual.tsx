@@ -166,7 +166,9 @@ const ASSUNTOS: Assunto[] = [
     icone: 'recarregar',
     resumo: 'Receber uma versão mais nova.',
     passos: [
-      'Quando houver uma nova versão, baixe o arquivo APK atualizado e instale por cima do aplicativo atual.',
+      'O aplicativo procura uma versão nova sozinho ao abrir. Para procurar na mão, vá em Ajustes → Sobre → "Procurar atualizações".',
+      'Quando existe versão nova, aparece um aviso com o botão "Baixar". Toque nele para abrir a página de download no navegador do aparelho.',
+      'Baixe o arquivo APK atualizado e instale por cima do aplicativo atual.',
       'Seus favoritos, playlists, histórico e downloads continuam no aparelho depois da atualização.',
       'A atualização do aplicativo não muda a versão do Android do aparelho. Quando o sistema for atualizado, o aplicativo continua funcionando.',
     ],

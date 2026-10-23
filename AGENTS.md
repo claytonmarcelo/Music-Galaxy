@@ -133,6 +133,7 @@ O schema é definitivo e não deve ser alterado sem justificativa técnica docum
 - `GET /api/releases/:id/download?format=mp3|flac` - Download do arquivo de áudio gerado a partir da fonte web aberta (pipeline: cache → dedup → fetch → ffprobe → conversão condicional → validação)
 - `POST /api/releases/:id/audio-source` - Registra manualmente uma fonte aberta (`{ "url": "..." }`), sempre validada pelo guard da Regra 3
 - `POST /api/recognize` - Reconhece a música que está tocando a partir de uma amostra de áudio enviada pelo aplicativo (`{ "audio_base64": "..." }`). É o único fluxo que **não** devolve áudio: devolve a identificação. A credencial do provedor fica somente no backend.
+- `GET /api/app/versao` - Versão do aplicativo que o servidor está publicando, usada pela busca de atualização do app (`versao`, `url`, `notas`, `obrigatoria`)
 
 ### Formato de Resposta
 Todas as respostas devem preservar:
@@ -296,8 +297,23 @@ RECOGNITION_PROVIDER=audd
 AUDD_TOKEN=seu_token_de_desenvolvedor_audd
 RECOGNITION_RATE_LIMIT_WINDOW_MS=900000
 RECOGNITION_RATE_LIMIT_MAX_REQUESTS=20
+
+# Publicação de versão do aplicativo (GET /api/app/versao)
+APP_VERSAO_PUBLICADA=1.0.0
+APP_URL_DOWNLOAD=https://github.com/claytonmarcelo/Music-Galaxy/releases/latest
+APP_NOTAS_ATUALIZACAO=
+APP_ATUALIZACAO_OBRIGATORIA=false
 ```
 O Internet Archive não exige chave nem configuração adicional.
+
+### Busca de Atualização do Aplicativo
+- **O servidor publica, o aplicativo confere** — `backend/src/services/appVersion.ts` lê o ambiente e devolve a versão em `GET /api/app/versao`. Publicar uma versão nova é editar o `.env`: nem o backend nem o aplicativo precisam ser recompilados.
+- **Comparação numérica** — `mobile/src/services/versao.ts` compara as partes numéricas (`1.10` é mais nova que `1.9`; `1.2` vale o mesmo que `1.2.0`). Versão não numérica é ignorada: o aplicativo nunca afirma estar desatualizado sem prova.
+- **Dois gatilhos** — checagem automática 2,5 s depois de abrir (`AppNavigator`) e busca manual em Ajustes → Sobre → "Procurar atualizações". A trava `emAndamento` impede requisições repetidas.
+- **Aviso honesto** — sem resposta do servidor, nada é inventado: a checagem automática fica em silêncio e a manual explica que não foi possível procurar.
+- **Segurança do link** — o servidor só aceita endereço `http`/`https`; versão fora do formato `1`, `1.2` ou `1.2.3` cai no padrão. O aplicativo abre o endereço publicado com `Linking.openURL`.
+- **Sem perda de dados** — o APK novo é instalado por cima; favoritos, playlists, histórico e downloads ficam no aparelho.
+- **Sem dependência nova** — a versão instalada é a constante `VERSAO_APLICATIVO` (`mobile/src/services/versao.ts`), mantida em sincronia com `version` do `mobile/package.json` e com `APP_VERSAO_PUBLICADA`.
 
 ### Rate Limiting
 - MusicBrainz: 1 requisição por segundo

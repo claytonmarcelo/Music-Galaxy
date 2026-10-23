@@ -2,13 +2,14 @@
 // Usa React Navigation com StackNavigator para transições entre telas.
 // Otimizado sem lazy loading para evitar problemas de estado
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme, Theme, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useTheme } from '../contexts/ThemeContext';
 import OfflineBanner from '../components/OfflineBanner';
 import BarraNavegacaoInferior from '../components/BarraNavegacaoInferior';
+import { useVerificacaoAtualizacao } from '../hooks/useVerificacaoAtualizacao';
 
 import { RootStackParamList } from '../types';
 import BuscaScreen from '../screens/BuscaScreen';
@@ -29,6 +30,19 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 export default function AppNavigator(): React.JSX.Element {
   const { colors, isDark } = useTheme();
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  const { consultar } = useVerificacaoAtualizacao();
+
+  // Procura uma versão nova do aplicativo uma vez, logo depois de abrir.
+  // A checagem é silenciosa: se o servidor não responder, o aplicativo
+  // continua funcionando normalmente e o usuário pode pedir a busca na
+  // tela de Ajustes.
+  useEffect(() => {
+    const temporizador = setTimeout(() => {
+      void consultar(false);
+    }, 2500);
+
+    return () => clearTimeout(temporizador);
+  }, [consultar]);
 
   // Tema da navegação alinhado aos tokens visuais do aplicativo.
   const base = isDark ? DarkTheme : DefaultTheme;

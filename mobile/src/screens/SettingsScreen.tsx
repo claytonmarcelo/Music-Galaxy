@@ -37,6 +37,8 @@ import FundoAtmosfera from '../components/FundoAtmosfera';
 import GlassCard from '../components/GlassCard';
 import Icone, { NomeIcone } from '../components/Icone';
 import SeletorTema, { Tema } from '../components/SeletorTema';
+import { useVerificacaoAtualizacao } from '../hooks/useVerificacaoAtualizacao';
+import { VERSAO_APLICATIVO } from '../services/versao';
 import { RootStackParamList } from '../types';
 import { comAlfa } from '../utils/cores';
 
@@ -49,6 +51,7 @@ export default function SettingsScreen(): React.JSX.Element {
   const { theme, isDark, colors, setTheme } = useTheme();
   const navigation = useNavigation<NavProp>();
   const { abrirErro, abrirAviso, toastSucesso, toastInfo } = useModal();
+  const { verificando, consultar: consultarAtualizacao } = useVerificacaoAtualizacao();
 
   const [qualidade, setQualidade] = useState<FormatoDownload>('mp3');
   const [resumo, setResumo] = useState({ total: 0, baixando: 0, concluidos: 0, erros: 0 });
@@ -356,13 +359,52 @@ export default function SettingsScreen(): React.JSX.Element {
               <View style={styles.sobreTextos}>
                 <Text style={[styles.sobreNome, { color: colors.text }]}>Music Galaxy</Text>
                 <Text style={[styles.sobreVersao, { color: colors.textSecondary }]}>
-                  Versão 1.0.0
+                  Versão {VERSAO_APLICATIVO}
                 </Text>
                 <Text style={[styles.sobreDescricao, { color: colors.textSecondary }]}>
                   Todas as versões de uma obra, com áudio de fontes abertas da web.
                 </Text>
               </View>
             </View>
+
+            <View style={[styles.sobreDivisor, { backgroundColor: colors.glassBorder }]} />
+
+            {/* Busca de atualização pela internet */}
+            <TouchableOpacity
+              style={[
+                styles.atalhoManual,
+                { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+              ]}
+              onPress={() => void consultarAtualizacao(true)}
+              disabled={verificando}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel="Procurar atualizações do aplicativo"
+            >
+              <View
+                style={[
+                  styles.atalhoIcone,
+                  { backgroundColor: comAlfa(colors.primary, 0.14) },
+                ]}
+              >
+                <Icone
+                  nome="recarregar"
+                  tamanho={17}
+                  cor={verificando ? colors.textSecondary : colors.primary}
+                />
+              </View>
+              <View style={styles.atalhoTextos}>
+                <Text style={[styles.atalhoTitulo, { color: colors.text }]}>
+                  Procurar atualizações
+                </Text>
+                <Text style={[styles.atalhoDescricao, { color: colors.textSecondary }]}>
+                  {verificando
+                    ? 'Procurando uma versão mais recente...'
+                    : 'Verifica no servidor se há uma versão nova para baixar.'}
+                </Text>
+              </View>
+              <Icone nome="seta" tamanho={17} cor={colors.textSecondary} />
+            </TouchableOpacity>
 
             <View style={[styles.sobreDivisor, { backgroundColor: colors.glassBorder }]} />
 

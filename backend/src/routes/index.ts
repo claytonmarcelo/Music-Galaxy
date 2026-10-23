@@ -12,8 +12,19 @@ import { listarReleaseTypes } from '../controllers/releaseTypesController';
 import { detalharArtista, listarObrasArtista } from '../controllers/artistsController';
 import { streamAudio, downloadAudio, definirFonteAudio } from '../controllers/audioController';
 import { reconhecerMusicaNoAudio } from '../controllers/recognitionController';
+import { publicarVersao } from '../controllers/appController';
 
 const router = Router();
+
+// ============================================================
+// Versão publicada do aplicativo
+// ============================================================
+// O aplicativo consulta esta rota para saber se existe uma versão nova
+// para download. A resposta vem do ambiente do servidor (ver
+// services/appVersion.ts) — publicar uma versão nova não exige
+// recompilar o aplicativo.
+
+router.get('/app/versao', publicarVersao);
 
 // ============================================================
 // Reconhecimento sonoro

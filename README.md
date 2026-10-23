@@ -125,6 +125,14 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - **Nada é apagado por engano** — excluir playlist, limpar histórico ou remover favorito nunca apaga o arquivo baixado no aparelho.
 - **Tela Biblioteca** — quatro abas (Resumo, Favoritos, Playlists e Histórico), com contagem de favoritos, playlists, reproduções, artistas, obras e tipos.
 
+### Busca de Atualização do Aplicativo
+- **Checagem automática** — ao abrir, o aplicativo consulta `GET /api/app/versao` no servidor configurado e compara com a versão instalada.
+- **Busca na mão** — em Ajustes → Sobre, a linha "Procurar atualizações" força a consulta na hora e mostra o que aconteceu ("Você já está usando a versão mais recente" ou o aviso de nova versão).
+- **Aviso honesto** — quando existe versão nova, um modal em vidro fosco mostra o número da versão, as notas publicadas pelo dono e o botão "Baixar", que abre o endereço informado pelo servidor no navegador.
+- **Sem perda de dados** — o APK novo é instalado por cima do aplicativo atual; favoritos, playlists, histórico e downloads continuam no aparelho.
+- **Sem promessas inventadas** — se o servidor não responder, o aplicativo apenas avisa que não conseguiu procurar; versão ou endereço fora do padrão são descartados pelo servidor antes de chegar ao app.
+- **Publicação pelo `.env`** — o dono publica uma versão nova editando `APP_VERSAO_PUBLICADA`, `APP_URL_DOWNLOAD`, `APP_NOTAS_ATUALIZACAO` e `APP_ATUALIZACAO_OBRIGATORIA` no servidor, sem recompilar nada.
+
 ### Interface Premium
 - **Identidade de vidro fosco** — paleta taupe quente, vinho/bordô e marfim, com cartões translúcidos, contornos finos e cantos amplos. Todos os componentes leem os tokens do `ThemeContext`; nenhum estilo usa cor hexadecimal fixa.
 - **Tema claro, escuro e automático** — segue o sistema quando configurado como automático e persiste a escolha no aparelho.
@@ -486,6 +494,32 @@ Identifica a música de um trecho de áudio. Corpo: `{ "audio_base64": "<base64>
 
 #### `GET /health`
 Health check da API.
+
+#### `GET /api/app/versao`
+Versão do aplicativo que o servidor está publicando. É o que alimenta a busca de atualização no app.
+
+```json
+{
+  "success": true,
+  "data": {
+    "versao": "1.1.0",
+    "url": "https://github.com/claytonmarcelo/Music-Galaxy/releases/download/v1.1.0/Music-Galaxy-v1.1.0.apk",
+    "notas": "Correções na busca de áudio e no player.",
+    "obrigatoria": false
+  }
+}
+```
+
+A resposta é controlada pelo ambiente do servidor — publicar uma versão nova é editar o `.env`, sem recompilar e sem republicar o aplicativo:
+
+```env
+APP_VERSAO_PUBLICADA=1.1.0
+APP_URL_DOWNLOAD=https://github.com/claytonmarcelo/Music-Galaxy/releases/download/v1.1.0/Music-Galaxy-v1.1.0.apk
+APP_NOTAS_ATUALIZACAO=Correções na busca de áudio e no player.
+APP_ATUALIZACAO_OBRIGATORIA=false
+```
+
+Valores fora do padrão são ignorados com segurança: versão fora do formato `1`, `1.2` ou `1.2.3` cai em `1.0.0` e endereço fora de `http`/`https` cai no endereço oficial de lançamentos.
 
 ---
 

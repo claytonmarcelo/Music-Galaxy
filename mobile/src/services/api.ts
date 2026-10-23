@@ -6,7 +6,7 @@
 // Ajustes (ver services/apiConfig.ts). Ao iniciar o aplicativo, o endereço
 // salvo é carregado; sem configuração em produção, o app funciona offline.
 
-import { RespostaBusca, Release, Work, RespostaWork, RespostaReleasesDeWork, Artista, RespostaArtista, RespostaObrasArtista, ResultadoIngestao } from '../types';
+import { RespostaBusca, Release, Work, RespostaWork, RespostaReleasesDeWork, Artista, RespostaArtista, RespostaObrasArtista, ResultadoIngestao, VersaoPublicada } from '../types';
 import { urlBasePadrao, obterUrlSalva, normalizarUrlServidor, definirUrlServidor, testarConexaoServidor } from './apiConfig';
 
 // ============================================================
@@ -178,6 +178,15 @@ export async function verificarSaude(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// Versão do aplicativo que o servidor está publicando — usada para avisar
+// o usuário que existe uma versão nova para download.
+export async function buscarVersaoPublicada(
+  sinal?: AbortSignal
+): Promise<{ success: boolean; data: VersaoPublicada }> {
+  const url = '/api/app/versao';
+  return requisicaoComTimeout(url, sinal);
 }
 
 // ============================================================

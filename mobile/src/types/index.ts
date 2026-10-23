@@ -180,6 +180,14 @@ export interface RespostaReconhecimento {
   data?: RecognitionResult;
 }
 
+// Versão do aplicativo publicada pelo servidor (GET /api/app/versao).
+export interface VersaoPublicada {
+  versao: string;
+  url: string;
+  notas: string | null;
+  obrigatoria: boolean;
+}
+
 // ============================================================
 // Parâmetros de navegação
 // ============================================================

@@ -97,6 +97,7 @@ export function criarApp(): Express {
         release:        'GET /api/releases/:id',
         releaseTypes:   'GET /api/release-types',
         reconhecer:     'POST /api/recognize',
+        versaoApp:      'GET /api/app/versao',
         health:         'GET /health',
       },
     });
