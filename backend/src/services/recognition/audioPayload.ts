@@ -20,6 +20,8 @@ export const TAMANHO_MIN_AUDIO_BYTES = 1024;
 export const TAMANHO_MAX_BASE64 = Math.ceil(TAMANHO_MAX_AUDIO_BYTES * 1.4);
 
 // Formatos aceitos pelo serviço de reconhecimento.
+// A lista é a fonte única: o validador e o adaptador do provedor usam
+// estas mesmas entradas.
 export const FORMATOS_ACEITOS: FormatoAudio[] = [
   'mp3',
   'm4a',
@@ -29,9 +31,6 @@ export const FORMATOS_ACEITOS: FormatoAudio[] = [
   'webm',
   'aac',
 ];
-
-// Tipo de dados aceitos para áudio — usado no mapeamento de erro do corpo.
-export const TIPO_MIME_AUDIO = 'audio/mpeg';
 
 /**
  * Remove o prefixo de data URI e valida o alfabeto base64.
@@ -142,17 +141,4 @@ export function validarAmostra(audioBase64: string): AmostraValida {
   }
 
   return { audio, formato };
-}
-
-/**
- * Estima a duração da amostra em segundos.
- *
- * Serve apenas para diagnóstico: quando a estimativa fica fora da janela
- * útil do provedor, o serviço avisa antes de gastar uma requisição.
- * A estimativa usa 128 kbps, taxa typicalamente gerada pela captura do
- * aplicativo.
- */
-export function estimarDuracaoSegundos(audio: Buffer): number {
-  const bitsPorSegundo = 128 * 1000;
-  return Math.round((audio.length * 8) / bitsPorSegundo);
 }

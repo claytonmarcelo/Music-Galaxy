@@ -19,7 +19,12 @@ function validarAmbiente(): string[] {
     throw new Error(`PORT inválida: ${process.env['PORT']}`);
   }
 
-  for (const chave of ['RATE_LIMIT_WINDOW_MS', 'RATE_LIMIT_MAX_REQUESTS']) {
+  for (const chave of [
+    'RATE_LIMIT_WINDOW_MS',
+    'RATE_LIMIT_MAX_REQUESTS',
+    'RECOGNITION_RATE_LIMIT_WINDOW_MS',
+    'RECOGNITION_RATE_LIMIT_MAX_REQUESTS',
+  ]) {
     const valor = process.env[chave];
     if (valor !== undefined && (!Number.isFinite(Number(valor)) || Number(valor) <= 0)) {
       throw new Error(`${chave} inválida: ${valor}`);

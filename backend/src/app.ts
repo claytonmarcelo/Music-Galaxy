@@ -10,6 +10,7 @@ import rateLimit from 'express-rate-limit';
 
 import routes from './routes';
 import { middlewareErros } from './middleware/errorHandler';
+import { criarLimiteReconhecimento } from './middleware/limiteReconhecimento';
 
 // ============================================================
 // Configuração de CORS
@@ -55,6 +56,11 @@ export function criarApp(): Express {
   // padrão de 10kb não serviria. Este parser é registrado ANTES do parser
   // geral: o body-parser marca o corpo como já lido (`req._body`) e o parser
   // geral o ignora, evitando o erro 413 em rotas normais.
+  //
+  // O limite de requisições da rota vem ANTES do parser: recusar a tentativa
+  // antes de receber e decodificar o corpo inteiro da amostra evita trabalho
+  // desperdiçado e pressão de memória quando o limite é atingido.
+  app.use('/api/recognize', criarLimiteReconhecimento());
   app.use('/api/recognize', express.json({ limit: '3mb' }));
 
   // Corpo pequeno: a API só recebe termos de busca e URLs de fonte.

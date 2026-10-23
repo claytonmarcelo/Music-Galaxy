@@ -164,7 +164,8 @@ test('POST /api/recognize aceita amostra maior que o limite geral e responde 503
   const base64 = audio.toString('base64');
 
   // A prova de que o parser específico da rota funciona: a amostra em base64
-  // passa de 10kb e a resposta NÃO é 413.
+  // passa do limite geral de 10kb e a resposta é o 503 do provedor ausente —
+  // se o parser geral tivesse atendido a rota, o desfecho seria 413.
   assert.ok(base64.length > 10 * 1024, 'a amostra precisa passar do limite geral');
 
   const { status, corpo, texto } = await postarJson<RespostaReconhecimento>(
@@ -172,7 +173,6 @@ test('POST /api/recognize aceita amostra maior que o limite geral e responde 503
     { audio_base64: base64 }
   );
 
-  assert.notEqual(status, 413);
   assert.equal(status, 503);
   assert.equal(corpo.success, false);
   assert.equal(corpo.data?.status, 'provider_error');
@@ -181,6 +181,24 @@ test('POST /api/recognize aceita amostra maior que o limite geral e responde 503
   // A credencial nunca aparece na resposta nem na mensagem de erro.
   assert.ok(!texto.toLowerCase().includes('api_token'));
   assert.ok(!texto.toLowerCase().includes('audd_token'));
+});
+
+test('POST /api/recognize recusa corpo acima do limite da rota com 413 em português', async () => {
+  // Acima do parser de 3 MB da rota: o erro do body-parser precisa sair
+  // como 413 e com mensagem em português, não como 500 em inglês.
+  const base64 = 'A'.repeat(3 * 1024 * 1024 + 4096);
+
+  const { status, corpo, texto } = await postarJson<RespostaErro>('/api/recognize', {
+    audio_base64: base64,
+  });
+
+  assert.equal(status, 413);
+  assert.equal(corpo.success, false);
+  assert.match(corpo.error ?? '', /grande demais/i);
+  assert.ok(
+    !texto.toLowerCase().includes('request entity too large'),
+    'o texto em inglês do Express não pode vazar para o aplicativo'
+  );
 });
 
 // ============================================================

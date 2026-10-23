@@ -23,6 +23,41 @@ export class ErroAplicacao extends Error {
   }
 }
 
+/**
+ * Erros do parser de corpo (body-parser) chegam com `type` e `status` próprios.
+ *
+ * Sem este tratamento, um corpo grande demais responderia 500 e um JSON
+ * inválido também — e o texto em inglês do Express ("request entity too
+ * large") vazaria para o aplicativo. Aqui a resposta sai no padrão da API,
+ * com código e mensagem em português.
+ */
+function erroDoParserDeCorpo(
+  erro: Error & { type?: string; status?: number; statusCode?: number },
+  caminho: string
+): { status: number; mensagem: string } | null {
+  if (erro.type === 'entity.too.large') {
+    return caminho.includes('/recognize')
+      ? {
+          status: 413,
+          mensagem:
+            'A amostra de áudio enviada é grande demais. Grave um trecho mais curto.',
+        }
+      : {
+          status: 413,
+          mensagem: 'O corpo da requisição é grande demais.',
+        };
+  }
+
+  if (erro.type === 'entity.parse.failed') {
+    return {
+      status: 400,
+      mensagem: 'O corpo da requisição não é um JSON válido.',
+    };
+  }
+
+  return null;
+}
+
 // Middleware de erros — deve ser o último middleware registrado no Express.
 export function middlewareErros(
   err: Error,
@@ -31,7 +66,15 @@ export function middlewareErros(
   _next: NextFunction
 ): void {
   // Determina o código HTTP adequado
-  const status = err instanceof ErroAplicacao ? err.statusHttp : 500;
+  const erroDoParser = erroDoParserDeCorpo(
+    err as Error & { type?: string; status?: number; statusCode?: number },
+    req.path
+  );
+  const status = erroDoParser
+    ? erroDoParser.status
+    : err instanceof ErroAplicacao
+      ? err.statusHttp
+      : 500;
 
   // Log detalhado apenas em desenvolvimento
   if (process.env.NODE_ENV !== 'production') {
@@ -47,7 +90,9 @@ export function middlewareErros(
     data?: Record<string, unknown>;
   } = {
     success: false,
-    error: err.message || 'Erro interno do servidor',
+    error: erroDoParser
+      ? erroDoParser.mensagem
+      : err.message || 'Erro interno do servidor',
   };
 
   // Detalhe público opcional (ex.: status do reconhecimento sonoro).

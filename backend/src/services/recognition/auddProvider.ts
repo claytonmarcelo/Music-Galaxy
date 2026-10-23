@@ -13,6 +13,7 @@
 // Ela nunca é devolvida ao aplicativo nem registrada em log.
 
 import axios from 'axios';
+import { FORMATOS_ACEITOS } from './audioPayload';
 import { FormatoAudio, RecognitionError, RecognitionResult } from './types';
 
 // Endpoint público do serviço de reconhecimento.
@@ -24,10 +25,10 @@ const TIMEOUT_MS = 20000;
 // Limite de tamanho da resposta (o serviço devolve JSON pequeno).
 const TAMANHO_MAX_RESPOSTA = 512 * 1024;
 
-// Formatos que o serviço externo aceita receber.
-const FORMATOS_ACEITOS: FormatoAudio[] = ['mp3', 'm4a', 'wav', 'flac', 'ogg', 'webm', 'aac'];
-
 // Tipo MIME enviado para cada formato suportado.
+// A lista de formatos aceitos é a mesma do validador (`audioPayload.ts`):
+// uma única fonte, para que a validação da amostra e o envio ao serviço
+// externo nunca divirjam.
 const MIME_POR_FORMATO: Record<FormatoAudio, string> = {
   mp3: 'audio/mpeg',
   m4a: 'audio/mp4',

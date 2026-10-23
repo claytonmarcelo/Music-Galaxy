@@ -33,6 +33,9 @@ yarn-error.*
 *.pem
 
 # local env files
+# Nenhum arquivo .env real entra no repositório — em nenhuma pasta.
+# Os modelos (.env.example) continuam versionados.
+.env
 .env*.local
 
 # typescript

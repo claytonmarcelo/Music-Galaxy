@@ -8,8 +8,12 @@ services:
     environment:
       MARIADB_DATABASE: musicgalaxy
       MARIADB_USER: musicgalaxy
-      MARIADB_PASSWORD: secret
-      MARIADB_ROOT_PASSWORD: rootsecret
+      # Senhas vêm do ambiente (ou do .env ao lado deste arquivo).
+      # Os valores padrão mantêm o comportamento anterior para uso local;
+      # em qualquer ambiente compartilhado, defina MARIADB_PASSWORD e
+      # MARIADB_ROOT_PASSWORD — nenhum segredo real fica versionado aqui.
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-secret}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-rootsecret}
       TZ: America/Sao_Paulo
     ports:
       - "3307:3306"
