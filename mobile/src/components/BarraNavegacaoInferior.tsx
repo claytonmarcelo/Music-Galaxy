@@ -7,6 +7,10 @@
 // por baixo do ícone, e o rótulo acompanha a hierarquia do tema. É a mesma
 // linguagem visual usada no botão de tema do cabeçalho e no seletor de
 // Ajustes — por isso o rodapé não parece mais uma fileira de botões soltos.
+//
+// Proporções compactas: a cápsula é baixa de propósito, para pesar pouco na
+// tela e devolver espaço ao conteúdo. Bolha de 32 px, ícone de 19 px e
+// rótulo de 9,5 px cabem numa cápsula de ~58 px de altura.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated, LayoutChangeEvent } from 'react-native';
@@ -36,10 +40,13 @@ const ABAS: Array<{ rota: RotaAba; rotulo: string; icone: NomeIcone }> = [
 const LARGURA_MAXIMA = 560;
 
 // Diâmetro da bolha que marca a aba ativa (círculo atrás do ícone).
-const TAMANHO_BOLHA = 40;
+const TAMANHO_BOLHA = 32;
+
+// Traço do ícone dentro da bolha.
+const TAMANHO_ICONE = 19;
 
 // Respiro mínimo entre a cápsula e a borda de baixo do aparelho.
-const RESPIRO_MINIMO = 14;
+const RESPIRO_MINIMO = 10;
 
 export default function BarraNavegacaoInferior(): React.JSX.Element {
   const { colors } = useTheme();
@@ -155,7 +162,7 @@ export default function BarraNavegacaoInferior(): React.JSX.Element {
                 <View style={styles.iconeArea}>
                   <Icone
                     nome={aba.icone}
-                    tamanho={20}
+                    tamanho={TAMANHO_ICONE}
                     cor={ativa ? colors.primary : colors.textSecondary}
                   />
                 </View>
@@ -183,19 +190,19 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingTop: 6,
   },
   trilho: {
     width: '100%',
     maxWidth: LARGURA_MAXIMA,
-    borderRadius: 30,
+    borderRadius: 22,
     borderWidth: 1,
-    paddingHorizontal: 6,
-    paddingVertical: 8,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.28,
-    shadowRadius: 18,
-    elevation: 14,
+    paddingHorizontal: 4,
+    paddingVertical: 5,
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.26,
+    shadowRadius: 13,
+    elevation: 11,
   },
   fioDeLuz: {
     position: 'absolute',
@@ -218,15 +225,15 @@ const styles = StyleSheet.create({
     height: TAMANHO_BOLHA,
     borderRadius: TAMANHO_BOLHA / 2,
     borderWidth: 1,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    elevation: 3,
   },
   aba: {
     flex: 1,
     alignItems: 'center',
-    gap: 3,
+    gap: 2,
   },
   iconeArea: {
     width: TAMANHO_BOLHA,
@@ -235,10 +242,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   rotulo: {
-    fontSize: 10.5,
+    fontSize: 9.5,
     fontWeight: '500',
     letterSpacing: 0.1,
-    lineHeight: 14,
+    lineHeight: 12,
   },
   rotuloAtiva: {
     fontWeight: '700',
