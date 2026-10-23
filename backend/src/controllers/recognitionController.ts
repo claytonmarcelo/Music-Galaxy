@@ -29,9 +29,11 @@ export async function reconhecerMusicaNoAudio(
     const corpo = (req.body || {}) as CorpoReconhecimento;
 
     if (typeof corpo.audio_base64 !== 'string') {
+      // Erro do pedido, não do serviço: o status próprio evita que o painel
+      // anuncie "serviço indisponível" quando o corpo veio sem a amostra.
       return next(
         new RecognitionError(
-          'provider_error',
+          'invalid_request',
           'Envie a amostra de áudio no campo "audio_base64".',
           400
         )
@@ -53,7 +55,7 @@ export async function reconhecerMusicaNoAudio(
     // Erro de validação da amostra (tamanho, base64 ou formato) — a mensagem
     // já é técnica e útil para o usuário final.
     if (err instanceof Error) {
-      return next(new RecognitionError('provider_error', err.message, 400));
+      return next(new RecognitionError('invalid_request', err.message, 400));
     }
 
     next(err);

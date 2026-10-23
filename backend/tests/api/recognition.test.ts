@@ -133,6 +133,9 @@ test('POST /api/recognize sem corpo devolve 400 com mensagem clara', async () =>
   assert.equal(status, 400);
   assert.equal(corpo.success, false);
   assert.match(corpo.error ?? '', /audio_base64/i);
+  // Pedido inválido não é falha do provedor: o painel precisa dessa
+  // distinção para não anunciar "serviço indisponível" sem motivo.
+  assert.equal(corpo.data?.status, 'invalid_request');
 });
 
 test('POST /api/recognize com base64 corrompido devolve 400', async () => {
@@ -143,6 +146,7 @@ test('POST /api/recognize com base64 corrompido devolve 400', async () => {
   assert.equal(status, 400);
   assert.equal(corpo.success, false);
   assert.match(corpo.error ?? '', /corrompida|inválido/i);
+  assert.equal(corpo.data?.status, 'invalid_request');
 });
 
 test('POST /api/recognize com conteúdo que não é áudio devolve 400', async () => {
@@ -153,6 +157,7 @@ test('POST /api/recognize com conteúdo que não é áudio devolve 400', async (
 
   assert.equal(status, 400);
   assert.match(corpo.error ?? '', /formato do áudio/i);
+  assert.equal(corpo.data?.status, 'invalid_request');
 });
 
 // ============================================================

@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 
 import { criarApp } from './app';
 import { testarConexaoBanco } from './config/database';
+import { iniciarPreenchimentoDeCapas } from './services/covers/coverResolver';
 
 dotenv.config();
 
@@ -49,6 +50,10 @@ async function iniciar(): Promise<void> {
     avisos.forEach((aviso) => console.warn(`[SERVER] Aviso: ${aviso}`));
 
     await testarConexaoBanco();
+
+    // Regra 1: busca em segundo plano a capa oficial das versões que o
+    // aplicativo exibe e ainda estão sem imagem. Não bloqueia a subida.
+    iniciarPreenchimentoDeCapas();
 
     const porta = parseInt(process.env['PORT'] || '3001', 10);
     app.listen(porta, '0.0.0.0', () => {

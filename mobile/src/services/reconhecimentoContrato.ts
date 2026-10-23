@@ -23,6 +23,7 @@ export const STATUS_VALIDOS: RecognitionStatus[] = [
   'microphone_unavailable',
   'network_error',
   'provider_error',
+  'invalid_request',
   'cancelled',
 ];
 
@@ -37,6 +38,10 @@ export function statusValido(valor: unknown): valor is RecognitionStatus {
  */
 export function statusPeloCodigoHttp(codigo: number): RecognitionStatus {
   if (codigo === 408 || codigo === 504) return 'network_error';
+  // 400 é recusa do pedido (amostra ausente, corrompida ou em formato não
+  // aceito) — não é o serviço fora do ar. Sem esta distinção, o painel
+  // anunciava "serviço indisponível" por causa de uma amostra inválida.
+  if (codigo === 400) return 'invalid_request';
   return 'provider_error';
 }
 

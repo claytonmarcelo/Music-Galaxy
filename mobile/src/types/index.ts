@@ -162,6 +162,7 @@ export type RecognitionStatus =
   | 'microphone_unavailable'
   | 'network_error'
   | 'provider_error'
+  | 'invalid_request'
   | 'cancelled';
 
 export interface RecognitionResult {

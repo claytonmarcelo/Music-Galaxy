@@ -47,6 +47,9 @@ musicgalaxy/
 - Nunca usar capas de outra música
 - Se não houver capa disponível, exibir placeholder "Sem Capa"
 - No banco: `cover_url` NULL = sem capa oficial
+- **De onde a capa vem** — `backend/src/services/covers/coverResolver.ts` lê a referência oficial gravada pela ingestão: o MBID do MusicBrainz é consultado no **Cover Art Archive** (a mesma capa publicada no MusicBrainz) e o id do Discogs no **detalhe do lançamento** (`/releases/{id}`, com o token do servidor), porque a busca do Discogs devolve `cover_image` vazio. Só a imagem principal/frente é aceita — contracapa, selo e encarte não são capa.
+- **Nada bloqueia a subida** — o preenchimento roda em segundo plano: uma rodada 5s depois de o servidor subir e outra a cada 5 minutos, em lotes de 40 versões com áudio (as únicas exibidas, Regra 7). A capa existe em https; se a fonte devolver `http://`, o protocolo é trocado para que a imagem carregue em página https e no Android, sem alterar a imagem.
+- **Sem imagem, continua nulo** — 404, corpo vazio ou acervo sem frente não viram capa inventada; a versão segue com `cover_url` NULL e o aplicativo mostra "Sem capa". Referências já tentadas não são repetidas na mesma execução do servidor.
 
 ### Regra 2 — Pesquisa Musical Completa
 - Retornar TODAS as versões de uma obra musical
@@ -95,12 +98,25 @@ musicgalaxy/
 
 ### Regra 7 — Só Exibir Versões que Têm Áudio
 - "Caso encontre uma música que não possua o áudio, elimine a busca e não mostre no aplicativo"
-- `GET /api/search` devolve apenas versões com `audio_source_url` preenchida; as demais entram em fila de resolução em segundo plano (8s de intervalo) e aparecem nas próximas buscas. A resposta traz `pendentes_audio` (versões aguardando resolução).
+- `GET /api/search` devolve apenas versões com `audio_source_url` preenchida; as demais entram em fila de resolução em segundo plano e aparecem nas próximas consultas. A resposta traz `pendentes_audio` (versões aguardando resolução).
+- A fila resolve **até 3 versões em paralelo** com intervalo de 8s por trabalhador, as versões do termo recém-buscado entram na frente e são deduplicadas; ao terminar a ingestão em segundo plano, o controller reconsulta as pendentes do termo e as enfileira, para que as faixas recém-catalogadas não esperem a próxima busca.
+- **A tela se atualiza sozinha** enquanto houver `pendentes_audio > 0`: a cada 10s o aplicativo chama `GET /api/search?q=...&leve=1`, que responde só com o banco local e **não** dispara ingestão (sem isso, o rate limit do MusicBrainz/Discogs estouraria). O automatismo para ao resolver tudo, ao paginar, ao trocar o termo ou após 24 tentativas; o orçamento é por termo e se renova a cada queda real de pendentes. Um número de sequência descarta respostas atrasadas para nunca sobrescrever uma busca nova.
+- **A atualização automática é isenta do limite geral** — `leve=1` não dispara ingestão nem escreve nada (duas consultas ao banco), mas era contada no limite de 100 requisições/15 min e bloqueava o próprio aplicativo depois de poucas buscas. O `skip` do `express-rate-limit` (`backend/src/app.ts`) libera somente `GET /api/search?leve=1`; as buscas normais, com ingestão, continuam limitadas.
 - O filtro de áudio da busca é aplicado **no SQL, antes do LIMIT/OFFSET** — filtrar depois da paginação escondia versões com áudio que caíam além da primeira página (a busca por "daft punk" devolvia 0 resultados com uma versão pronta no banco). O `total` da resposta é a contagem de versões com áudio; `pendentes_audio` é a contagem das que ainda não têm.
 - Mesma regra em `GET /api/releases/by-date`, `GET /api/works/:id/releases` e `GET /api/works/by-decade/:decade` (obras só aparecem se tiverem ao menos uma versão com áudio)
 - As versões sem áudio continuam no banco (Regra 2 intacta nos dados); o filtro é de EXIBIÇÃO
 - A identidade de um candidato de áudio vem do PRÓPRIO arquivo (nome do arquivo → texto do link → título da página, este último só com um único link de áudio na página). Nunca herdar identidade da página com vários áudios (players globais tocariam a música errada)
 - A contagem por década usa `ANO_EFETIVO_SQL` (`backend/src/utils/urls.ts`): quando a obra não tem `original_release_year`, vale o menor ano de lançamento das suas versões. Sem essa segunda fonte, as obras sem ano próprio sumiam das listas por década e a tela parecia vazia
+
+### Regra 8 — Nomes Oficiais de Músicas, Artistas e Bandas
+- "O aplicativo mostra cada música, artista e banda pelo nome oficial, como os estúdios de gravação publicaram. **Não é permitido abreviar, escrever errado nem inventar nome — é regra.**"
+- O nome chega ao banco exatamente como a fonte oficial (MusicBrainz/Discogs) o publica: mesma grafia, acentos, maiúsculas e minúsculas e sinais (`AC/DC`, `deadmau5`, `Björk`, `Guns N' Roses`). O único ajuste permitido é remover espaços em branco sobrando.
+- **O tipo de lançamento nunca entra no nome.** `version_name` é o título oficial da faixa; "Compilation", "Live", "Remix", "Promo", "Remastered" ficam em `release_type` (Regra 6) — nunca colados como "(Compilation)". Antes da regra, **1.700 das 4.868 versões** do banco carregavam esse sufixo inventado (ex.: "Daft Punk (Compilation)"); **1.698 foram reparadas** em 23/10/2026 (o nome voltou a ser o título da obra, inclusive nas 59 que tinham áudio) e as **2 restantes** são nomes oficiais que realmente terminam em "(Remix)". Nenhuma linha foi apagada, e os valores anteriores ficaram registrados fora do repositório.
+- `backend/src/services/sources/nomesOficiais.ts` é o único módulo autorizado a tocar em nome vindo de fora (`limparNomeOficial`, `nomeOficialOuNulo`). Os adapters passam por ele e `searchOrchestrator.ts` tem a última barreira: registro sem artista, título ou versão não é gravado.
+- **O aplicativo não transforma o nome**: nada de caixa alta forçada em nome de artista ou música (transformaria `deadmau5` em `DEADMAU5`). Caixa alta fica reservada para rótulos de interface e etiquetas.
+- Em gravações com vários créditos, o catálogo mantém o **artista principal** do crédito oficial como entidade da tabela `artists`; não funde "feat." em um nome composto para não criar um artista que não existe. O nome completo segue disponível na fonte oficial referenciada pela versão.
+- O `label` do Discogs perde o numeral de desambiguação do próprio catálogo ("Virgin (2)" → "Virgin"), que não faz parte do nome oficial da gravadora.
+- Nenhuma limpeza de dados legados é feita sem autorização do dono; a correção vale para tudo que for ingerido a partir de agora.
 
 ## Schema do Banco de Dados
 
@@ -122,7 +138,7 @@ O schema é definitivo e não deve ser alterado sem justificativa técnica docum
 ## Arquitetura da API
 
 ### Endpoints Obrigatórios
-- `GET /api/search?q={termo}` - **único endpoint que o app mobile chama para busca.** Internamente, consulta primeiro o banco local; se não houver resultado local, ou os dados existentes estiverem além do TTL de `external_api_cache`, o próprio endpoint dispara a ingestão das fontes externas através do orquestrador antes de responder. Responde apenas com versões que têm áudio (Regra 7): `results` filtrado por `audio_source_url`, campo `pendentes_audio` com a contagem das que aguardam, e fila de resolução em segundo plano para descobrir a fonte delas em sites abertos.
+- `GET /api/search?q={termo}` - **único endpoint que o app mobile chama para busca.** Internamente, consulta primeiro o banco local; se não houver resultado local, ou os dados existentes estiverem além do TTL de `external_api_cache`, o próprio endpoint dispara a ingestão das fontes externas através do orquestrador antes de responder. Responde apenas com versões que têm áudio (Regra 7): `results` filtrado por `audio_source_url`, campo `pendentes_audio` com a contagem das que aguardam, e fila de resolução em segundo plano para descobrir a fonte delas em sites abertos. Com `leve=1`, responde somente do banco local (sem ingestão) — é o caminho da atualização automática da tela.
 - `POST /api/search/ingest` - endpoint administrativo/interno, fora do fluxo normal do app. Serve apenas para forçar resincronização manual de um termo (script de manutenção, painel administrativo futuro). Documentado como "uso interno apenas" até existir camada de autenticação.
 - `GET /api/works/:id` - Detalhes de obra específica
 - `GET /api/works/:id/releases` - Lista versões de uma obra (somente as que têm áudio — Regra 7)
@@ -255,6 +271,7 @@ npx eas-cli build --platform android --profile preview
 backend/src/services/
 ├── sources/
 │   ├── types.ts
+│   ├── nomesOficiais.ts         # Regra 8 — nomes oficiais, sem sufixo inventado
 │   ├── musicBrainzAdapter.ts
 │   └── discogsAdapter.ts
 ├── audioSource/
@@ -268,6 +285,8 @@ backend/src/services/
 │       └── directLinkProvider.ts
 ├── cache/
 │   └── externalApiCache.ts
+├── covers/
+│   └── coverResolver.ts          # Regra 1 — capa oficial (CAA/Discogs) em segundo plano
 ├── rateLimiting/
 │   └── rateLimiter.ts
 ├── recognition/
@@ -291,6 +310,23 @@ mobile/src/
 mobile/tests/reconhecimento.test.ts       # testes do contrato puro (node:test)
 ```
 
+### Catálogo do MusicBrainz — busca por artista e por gravação
+- **Nome de artista primeiro** — `buscarPorTermo` começa tentando reconhecer o termo como artista (`/artist?query=artist:"term"`), com igualdade de nome normalizado (sem acentos, sem pontuação) e pontuação ≥ 95; falhar nesse ramo não impede a busca por gravação.
+- **Piso de catálogo** — só é aceito artista com **≥ 20 releases** no MusicBrainz (`release-count`). Sem esse piso, uma banda de mesmo nome que a música (por exemplo "One More Time", 8 releases) sequestrava o termo no lugar do Daft Punk (556).
+- **Discografia com faixas** — `/release?artist={MBID}&inc=recordings+artist-credits+labels+release-groups&limit=50&type=album|single|ep`, no máximo **10 discos**, dos mais antigos para os mais novos.
+- **Prensagens agrupadas** — os discos são deduplicados por `release-group.id` (CD, vinil, remaster do mesmo álbum contam uma vez) e fica a data mais antiga.
+- **Uma obra por faixa** — cada faixa vira uma obra (`work`), com o ano de `recording.first-release-date` quando existe e o ano do disco quando não. O artista da obra é sempre o artista pesquisado, não o crédito da faixa (que fragmentava o catálogo em "ABBA (Björn, Benny, Agnetha & Frida)" e afins).
+- **Nome oficial, sem sufixo (Regra 8)** — `version_name` e `work_title` recebem o título oficial da faixa; `album_name` recebe o título oficial do disco. "Compilation", "Live", "Remix" e demais tipos secundários vão para `release_type`, nunca para o nome — o código que colava `(Compilation)` foi removido.
+- **Identidade única da versão** — `external_id` = `release:faixa:recording`, então o mesmo disco em outra prensagem não duplica versões; `quality` representa o suporte (`media[].format` → Vinyl/CD/Digital…) e `source_reference_url` aponta para o release no MusicBrainz.
+- **Faixas sem música descartadas** — títulos como `[unknown]`, `[untitled]`, `[silence]`, `[data track]` e `[video]` não entram no catálogo.
+- **Busca por gravação continua sendo o caminho 2** — para nome de música ou termo livre, cada palavra com 2+ letras vira um grupo `(recording OR artist OR release)` combinado por AND. A API não oferece ordenação por popularidade, então a qualidade dos resultados depende do catálogo por artista descrito acima.
+- **Verificação real desta rodada (2026-10-23)** — "the beatles" saiu de **0** para **7 versões com áudio** (148 pendentes), "adele" **7**, "coldplay" **11**, "metallica" **2**; as obras criadas por essas buscas somam **190** (`id > 3800`).
+
+### Ingestão — uma por termo e gravação serializada
+- **Uma ingestão por termo** — `ingerirPorTermo()` guarda a execução em curso num mapa por termo normalizado; quem chega enquanto ela roda (duplo toque, duas abas, paginação) espera e recebe **o mesmo resultado**, em vez de abrir outra consulta ao MusicBrainz e ao Discogs. Sem a trava, o mesmo termo era buscado em paralelo e a gravação duplicava trabalho.
+- **Gravação uma de cada vez** — artista e obra são criados com "SELECT e depois INSERT" e as tabelas não têm índice único em nome/título; duas ingestões de termos diferentes podiam passar pelo mesmo teste ao mesmo tempo e criar linhas repetidas. `gravarComExclusividade()` faz a persistência rodar em série — o custo é baixo porque a espera real está nas fontes externas.
+- **Evidência (2026-10-23)** — três `POST /api/search/ingest` para "portishead", dois disparados juntos e um 2 s depois, responderam em **3 s** com os mesmos números (**37 obras, 115 versões**); o banco ficou com **115 releases e 115 `external_id` distintos** e **um único** artista "Portishead" (`id` 3323).
+
 ### Descoberta de Áudio em Sites Abertos
 - `SourceOrchestrator` consulta os provedores em paralelo e só aceita candidato com classificação `EXACT_MATCH` (pontuação ≥ 90 no `ExactMatchEngine`).
 - `InternetArchiveProvider` usa três consultas Lucene progressivas no `advancedsearch.php` (artista+título, artista+título restrito ao creator, artista), com parada antecipada quando já há fonte forte; metadados têm cache em memória de 30 min (100 itens) e o orçamento total da busca é de 28s.
@@ -300,7 +336,8 @@ mobile/tests/reconhecimento.test.ts       # testes do contrato puro (node:test)
 
 ### Reconhecimento Sonoro (identificar a música que está tocando)
 - **Fluxo** — o botão de microfone no campo de busca (`mobile/src/screens/BuscaScreen.tsx`) aciona `mobile/src/hooks/useReconhecimentoSonoro.ts`, que grava alguns segundos com `expo-audio`, apaga o arquivo de origem e envia a amostra em base64 para `POST /api/recognize`. O resultado aparece em `mobile/src/components/PainelReconhecimento.tsx`, que oferece "Pesquisar no Music Galaxy" — a busca normal do aplicativo, sem caminho paralelo de áudio.
-- **Contrato** — status possíveis: `matched`, `no_match`, `permission_denied`, `microphone_unavailable`, `network_error`, `provider_error`, `cancelled`. O campo `confidence` só aparece quando o provedor entrega uma medida documentada; nenhum metadado é inventado pelo Music Galaxy.
+- **Contrato** — status possíveis: `matched`, `no_match`, `permission_denied`, `microphone_unavailable`, `network_error`, `provider_error`, `invalid_request`, `cancelled`. O campo `confidence` só aparece quando o provedor entrega uma medida documentada; nenhum metadado é inventado pelo Music Galaxy.
+- **Amostra inválida não é serviço indisponível** — campo ausente, base64 corrompido ou formato não aceito respondem **400** com `data.status = "invalid_request"`; o painel mostra "Amostra de áudio inválida" e não "Serviço indisponível". Antes os dois casos chegavam como `provider_error` e a mensagem culpava o provedor por um pedido fora do contrato. Falha real do provedor (5xx, 429) continua `provider_error`.
 - **Limites da amostra** — base64 de 1 KB a 2 MB, áudio de 2 a 30 segundos, formatos `mp3`, `m4a`, `wav`, `flac`, `ogg`, `webm`, `aac`. A duração é lida do próprio arquivo (`backend/src/services/recognition/duracaoAmostra.ts`): WAV, FLAC e M4A têm leitura exata; MP3 é aproximada; formatos sem duração no cabeçalho (OGG, WebM) usam a janela tolerante de 2 a 45 segundos e nunca são recusados só por estimativa. Amostra inválida é recusada com mensagem em português, e a validação do pedido vem antes da checagem de credencial do provedor.
 - **Privacidade** — a credencial do provedor fica somente no `backend/.env`; ela nunca vai para o aplicativo, para o APK, para o código nativo ou para log. A gravação é temporária, apagada logo após a análise e não é gravada no banco.
 - **O destino da amostra é informado ao usuário** — a tecnologia escolhida (API externa) exige o envio do áudio: o trecho sai do aparelho, vai ao servidor do Music Galaxy e dali ao serviço de reconhecimento. Isso está escrito no painel (durante a captura), no manual do aplicativo e na permissão de microfone do sistema (`microphonePermission` do plugin `expo-audio`). Nada é gravado, nem no aparelho depois da análise, nem no MariaDB, nem em log.

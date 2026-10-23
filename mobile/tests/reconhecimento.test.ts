@@ -32,7 +32,7 @@ test('aceita todos os status do contrato compartilhado', () => {
     assert.equal(statusValido(status), true, `o status ${status} deveria ser aceito`);
   }
 
-  assert.equal(STATUS_VALIDOS.length, 7);
+  assert.equal(STATUS_VALIDOS.length, 8);
 });
 
 test('recusa status fora do contrato', () => {
@@ -53,7 +53,8 @@ test('traduz códigos HTTP em situações do contrato', () => {
   assert.equal(statusPeloCodigoHttp(503), 'provider_error');
   assert.equal(statusPeloCodigoHttp(502), 'provider_error');
   assert.equal(statusPeloCodigoHttp(429), 'provider_error');
-  assert.equal(statusPeloCodigoHttp(400), 'provider_error');
+  // 400 é recusa do pedido, não indisponibilidade do serviço.
+  assert.equal(statusPeloCodigoHttp(400), 'invalid_request');
 });
 
 // ============================================================

@@ -19,7 +19,14 @@ import { ErroAplicacao } from '../../middleware/errorHandler';
  * - `microphone_unavailable`: não há microfone utilizável no aparelho.
  * - `network_error`: falha de rede ou tempo esgotado na comunicação.
  * - `provider_error`: o serviço de reconhecimento respondeu com erro.
+ * - `invalid_request`: a amostra enviada não passou na validação do servidor.
  * - `cancelled`: o usuário interrompeu a tentativa.
+ *
+ * `invalid_request` é diferente de `provider_error`: um pedido fora do
+ * contrato (campo ausente, base64 corrompido, formato não aceito) não diz
+ * nada sobre a saúde do provedor. Antes, os dois casos chegavam ao
+ * aplicativo como `provider_error` e o painel anunciava "serviço
+ * indisponível" por causa de uma amostra inválida.
  */
 export type RecognitionStatus =
   | 'matched'
@@ -28,6 +35,7 @@ export type RecognitionStatus =
   | 'microphone_unavailable'
   | 'network_error'
   | 'provider_error'
+  | 'invalid_request'
   | 'cancelled';
 
 /** Formatos de áudio aceitos na análise. */

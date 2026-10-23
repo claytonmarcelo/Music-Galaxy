@@ -77,6 +77,17 @@ export function criarApp(): Express {
       success: false,
       error: 'Muitas requisições. Tente novamente em alguns minutos.',
     },
+    // A atualização automática da busca (`leve=1`) roda a cada 10 s enquanto
+    // o backend procura as fontes de áudio, até 24 tentativas por termo. Ela
+    // não dispara ingestão nem escreve nada — são duas consultas ao banco.
+    // Contá-la no limite geral de 100 requisições/15 min fazia o próprio
+    // aplicativo ser bloqueado após poucas buscas, justamente quando a lista
+    // precisava continuar se atualizando. As buscas normais (com ingestão)
+    // continuam limitadas.
+    skip: (req) =>
+      req.method === 'GET' &&
+      req.path === '/api/search' &&
+      req.query['leve'] === '1',
   });
   app.use(limiteGeral);
 

@@ -124,6 +124,15 @@ function descricaoDoErro(
         detalhe: 'A captura foi interrompida e o microfone já foi liberado.',
         icone: 'info',
       };
+    case 'invalid_request':
+      // A amostra não passou na validação do servidor — nada a ver com a
+      // disponibilidade do serviço. Tentar de novo com uma captura nova é
+      // o caminho; a busca por texto continua funcionando.
+      return {
+        titulo: 'Amostra de áudio inválida',
+        detalhe: `${texto} ${avisoBusca}`,
+        icone: 'aviso',
+      };
     case 'provider_error':
       // Serviço fora do ar, credencial não configurada no servidor ou
       // limite de tentativas atingido: tudo isso vive no mesmo status, e a

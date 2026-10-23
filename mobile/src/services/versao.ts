@@ -15,7 +15,7 @@ import { VersaoPublicada } from '../types';
 // ATENÇÃO: manter em sincronia com o campo "version" do mobile/package.json
 // e com APP_VERSAO_PUBLICADA no servidor. Quando a versão sobe, os três
 // lugares sobem juntos.
-export const VERSAO_APLICATIVO = '1.0.0';
+export const VERSAO_APLICATIVO = '1.0.1';
 
 export interface ResultadoAtualizacao {
   /** Verdadeiro quando existe versão mais nova que a instalada. */
