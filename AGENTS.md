@@ -132,6 +132,7 @@ O schema é definitivo e não deve ser alterado sem justificativa técnica docum
 - `GET /api/releases/:id/stream` - Stream de áudio completo (proxy da fonte web aberta, com suporte a Range). Única fonte de playback do app (Regra 3)
 - `GET /api/releases/:id/download?format=mp3|flac` - Download do arquivo de áudio gerado a partir da fonte web aberta (pipeline: cache → dedup → fetch → ffprobe → conversão condicional → validação)
 - `POST /api/releases/:id/audio-source` - Registra manualmente uma fonte aberta (`{ "url": "..." }`), sempre validada pelo guard da Regra 3
+- `POST /api/recognize` - Reconhece a música que está tocando a partir de uma amostra de áudio enviada pelo aplicativo (`{ "audio_base64": "..." }`). É o único fluxo que **não** devolve áudio: devolve a identificação. A credencial do provedor fica somente no backend.
 
 ### Formato de Resposta
 Todas as respostas devem preservar:
@@ -226,6 +227,8 @@ npx eas-cli build --platform android --profile preview
 - O `eas.json` gera **APK** (`buildType: "apk"`) nos três perfis (development, preview, production)
 - O backend não está embutido no APK: o usuário informa o endereço na tela de Ajustes (seção "Servidor da API"), salvo no aparelho
 - Ícone do app: `mobile/assets/icon.png` (fundo transparente, canal alfa real)
+- **Níveis de API do Android** — o SDK 57 já usa `compileSdk`/`targetSdk` 36 (Android 16, lançado em 2025) e `minSdk` 24, com os padrões do `expo-modules-core`. Não é preciso `expo-build-properties` para atender ao Android 2025+; só se for necessário mudar algum nível, aí sim a dependência entra com avaliação de compatibilidade
+- O projeto nativo (`mobile/android/`) é **gerado** por `npx expo prebuild` e não é versionado; `local.properties` guarda o caminho do SDK da máquina e nunca deve ser commitado
 
 ## Integração com Fontes Externas
 
@@ -234,6 +237,7 @@ npx eas-cli build --platform android --profile preview
 - **Cover Art Archive** - Capas oficiais associadas ao MusicBrainz
 - **Discogs** - Catálogo com detalhes de formatos físicos e variações
 - **Internet Archive** - Acervo aberto com áudio; descoberta via APIs públicas do archive.org, sem chave e sem login (Regra 3)
+- **AudD** - Serviço de identificação de música por áudio (reconhecimento sonoro). Exige credencial de desenvolvedor; a chave fica **apenas** no backend
 
 ### Estrutura de Integração
 ```
@@ -255,6 +259,11 @@ backend/src/services/
 │   └── externalApiCache.ts
 ├── rateLimiting/
 │   └── rateLimiter.ts
+├── recognition/
+│   ├── types.ts                # contrato normalizado + status possíveis
+│   ├── audioPayload.ts          # validação da amostra (base64, formato, tamanho)
+│   ├── recognitionService.ts    # escolhe o provedor e traduz erros
+│   └── auddProvider.ts          # adaptador do AudD (credencial no backend)
 └── ingestion/
     ├── searchOrchestrator.ts
     └── ingestionLogger.ts
@@ -267,18 +276,33 @@ backend/src/services/
 - Validação real (2026-10-23) da release 40 (Daft Punk — One More Time): descoberta em 1,6s, stream `206` com `Content-Range: bytes 0-2047/12817079`, download MP3 de 12.817.079 bytes (assinatura ID3) e cache-hit em 0,39s. O primeiro download direto do archive.org levou ~115s (≈111 KB/s); é latência da fonte, não do pipeline.
 - Instrumental/remix/live só são usados quando a própria release pede essa versão; lançamentos originais nunca recebem um áudio alternativo.
 
+### Reconhecimento Sonoro (identificar a música que está tocando)
+- **Fluxo** — o botão de microfone no campo de busca (`mobile/src/screens/BuscaScreen.tsx`) aciona `mobile/src/hooks/useReconhecimentoSonoro.ts`, que grava alguns segundos com `expo-audio`, apaga o arquivo de origem e envia a amostra em base64 para `POST /api/recognize`. O resultado aparece em `mobile/src/components/PainelReconhecimento.tsx`, que oferece "Pesquisar no Music Galaxy" — a busca normal do aplicativo, sem caminho paralelo de áudio.
+- **Contrato** — status possíveis: `matched`, `no_match`, `permission_denied`, `microphone_unavailable`, `network_error`, `provider_error`, `cancelled`. O campo `confidence` só aparece quando o provedor entrega uma medida documentada; nenhum metadado é inventado pelo Music Galaxy.
+- **Limites da amostra** — base64 de 1 KB a 2 MB, áudio de 2 a 30 segundos, formatos `mp3`, `m4a`, `wav`, `flac`, `ogg`, `webm`, `aac`. Amostra inválida é recusada com mensagem em português.
+- **Privacidade** — a credencial do provedor fica somente no `backend/.env`; ela nunca vai para o aplicativo, para o APK, para o código nativo ou para log. A gravação é temporária, apagada logo após a análise e não é gravada no banco.
+- **Sem credencial** — sem `AUDD_TOKEN` a rota responde 503 com mensagem de serviço não configurado e o aplicativo explica isso ao usuário; a busca por texto continua funcionando normalmente.
+- **Fora do escopo da Regra 3** — o reconhecimento identifica a obra, mas **não** fornece áudio: as versões exibidas continuam vindo do catálogo e sendo filtradas por `audio_source_url` (Regra 7).
+
 ### Configuração
 Adicionar ao `backend/.env`:
 ```env
 MUSICBRAINZ_USER_AGENT=MusicGalaxy/1.0 (contato: seu-email@exemplo.com)
 DISCOGS_TOKEN=seu_token_pessoal_discogs
 DISCOGS_USER_AGENT=MusicGalaxy/1.0
+
+# Reconhecimento sonoro (POST /api/recognize)
+RECOGNITION_PROVIDER=audd
+AUDD_TOKEN=seu_token_de_desenvolvedor_audd
+RECOGNITION_RATE_LIMIT_WINDOW_MS=900000
+RECOGNITION_RATE_LIMIT_MAX_REQUESTS=20
 ```
 O Internet Archive não exige chave nem configuração adicional.
 
 ### Rate Limiting
 - MusicBrainz: 1 requisição por segundo
 - Discogs: 60 requisições por minuto (autenticado)
+- Reconhecimento sonoro: 20 tentativas por janela de 15 minutos (`RECOGNITION_RATE_LIMIT_*`)
 
 ## Verificação
 

@@ -104,6 +104,13 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - **Guard anti-SSRF** — bloqueia domínios de plataformas, protocolos não HTTP(S), portas e credenciais suspeitas, IPs privados/loopback/link-local/reservados (IPv4 e IPv6), DNS rebinding, redirects para destinos proibidos e respostas acima do limite.
 - **Falha explícita** — quando não há fonte confiável, a versão não é exibida na busca (Regra 7) e permanece na fila de resolução em segundo plano; nunca se inventa uma fonte ou um áudio.
 
+### Reconhecimento Sonoro (identificar a música que está tocando)
+- **Captura no aparelho** — o botão de microfone dentro do campo de busca grava um trecho curto (12 s, com contagem regressiva de 3 s) usando `expo-audio`. A permissão é pedida só no momento da ação e o microfone é liberado ao sair da tela ou mandar o app para o fundo.
+- **Envio ao backend** — a amostra é lida em base64 (`expo-file-system/legacy` no Android/iOS, `FileReader` na web) e enviada para `POST /api/recognize`. O arquivo temporário é apagado logo após a análise, em qualquer caminho de saída.
+- **Provedor AudD** — `auddProvider` fala com a API pública do AudD usando `api_token` no corpo da requisição (nunca na URL) e o áudio em `multipart/form-data`. A credencial fica **apenas** no backend (`AUDD_TOKEN` no `.env`) e nunca é exposta ao aplicativo.
+- **Contrato honesto** — o painel só exibe título, artista, álbum e confiança **exatamente** como o serviço respondeu. Sem correspondência, o app avisa que não encontrou a música e **não** preenche o campo de busca com nenhuma sugestão inventada.
+- **Erros tratados em português** — permissão negada, microfone indisponível, falta de internet, credencial inválida, excesso de tentativas e falha do provedor viram mensagens claras, com "Tentar novamente" e "Cancelar" no painel.
+
 ### Ingestão de Dados Externos
 - Orquestrador de ingestão consulta MusicBrainz, Cover Art Archive e Discogs
 - Cache das respostas em MariaDB, com TTL configurável
@@ -462,6 +469,18 @@ Gera o arquivo de áudio a partir da fonte aberta (cache → deduplicação → 
 
 #### `POST /api/releases/:id/audio-source`
 Registra manualmente uma fonte aberta confiável: `{ "url": "https://..." }`. A URL é validada pelo guard `auditarUrl()` antes de ser salva.
+
+### Reconhecimento Sonoro
+
+#### `POST /api/recognize`
+Identifica a música de um trecho de áudio. Corpo: `{ "audio_base64": "<base64>" }`.
+
+- A amostra precisa ter entre 1 KB e 2 MB e ser um formato de áudio reconhecido (mp3, m4a, wav, flac, ogg, webm, aac) — o formato é conferido pelos bytes iniciais do arquivo, não pelo nome.
+- A duração útil fica entre 2 e 30 segundos.
+- A resposta segue o contrato `{ success, data: { status, title?, artist?, album?, releaseYear?, provider?, confidence? } }`, com `status` em `matched`, `no_match`, `permission_denied`, `microphone_unavailable`, `network_error`, `provider_error` ou `cancelled`.
+- Sem correspondência, `status` é `no_match` **sem** título, artista ou qualquer outro metadado inventado.
+- A credencial do provedor (`AUDD_TOKEN`) fica somente no backend. Sem ela, o endpoint responde `503` com a mensagem de que o reconhecimento não está configurado neste servidor.
+- Limitador de requisições próprio (20 por 15 minutos, configurável por `RECOGNITION_RATE_LIMIT_*`).
 
 ### Sistema
 
