@@ -3,12 +3,12 @@ node_modules/
 package-lock.json
 
 # Build output
-dist/
-dist-test/
-*.js
-*.js.map
-*.d.ts
-*.d.ts.map
+/dist/
+/dist-test/
+/*.js
+/*.js.map
+/*.d.ts
+/*.d.ts.map
 
 # Environment variables
 .env
@@ -42,13 +42,15 @@ cache/
 temp/
 
 # Laravel structure (obsolete - to be removed manually with admin permissions)
-app/
-bootstrap/
-config/
-database/
-routes/
-storage/
-composer.json
+# Ancorados na raiz do backend: sem a barra, "routes/" também ignorava
+# src/routes/, que é código do projeto e precisa ser versionado.
+/app/
+/bootstrap/
+/config/
+/database/
+/routes/
+/storage/
+/composer.json
 
 # Temporary player scripts (to be removed manually with admin permissions)
 *-player-script.js

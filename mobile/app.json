@@ -35,7 +35,14 @@
           "backgroundColor": "#1A1312"
         }
       ],
-      "expo-audio"
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "O Music Galaxy usa o microfone para identificar a música que está tocando. A gravação é temporária e apagada logo após a análise.",
+          "recordAudioAndroid": true,
+          "enableBackgroundRecording": false
+        }
+      ]
     ],
     "platforms": [
       "ios",

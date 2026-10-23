@@ -51,6 +51,12 @@ export function criarApp(): Express {
     credentials: true,
   }));
 
+  // O reconhecimento sonoro recebe uma amostra de áudio em base64 — o limite
+  // padrão de 10kb não serviria. Este parser é registrado ANTES do parser
+  // geral: o body-parser marca o corpo como já lido (`req._body`) e o parser
+  // geral o ignora, evitando o erro 413 em rotas normais.
+  app.use('/api/recognize', express.json({ limit: '3mb' }));
+
   // Corpo pequeno: a API só recebe termos de busca e URLs de fonte.
   app.use(express.json({ limit: '10kb' }));
   app.use(express.urlencoded({ extended: true, limit: '10kb' }));
@@ -90,6 +96,7 @@ export function criarApp(): Express {
         workReleases:   'GET /api/works/:id/releases',
         release:        'GET /api/releases/:id',
         releaseTypes:   'GET /api/release-types',
+        reconhecer:     'POST /api/recognize',
         health:         'GET /health',
       },
     });

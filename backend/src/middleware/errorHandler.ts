@@ -7,11 +7,19 @@ import { Request, Response, NextFunction } from 'express';
 // Classe de erro personalizada para erros esperados da aplicação.
 export class ErroAplicacao extends Error {
   public statusHttp: number;
+  // Dados extras e públicos do erro (por exemplo o status do reconhecimento).
+  // Nunca credenciais, endereço interno ou corpo bruto de um serviço externo.
+  public detalhe?: Record<string, unknown>;
 
-  constructor(mensagem: string, statusHttp: number = 500) {
+  constructor(
+    mensagem: string,
+    statusHttp: number = 500,
+    detalhe?: Record<string, unknown>
+  ) {
     super(mensagem);
     this.name = 'ErroAplicacao';
     this.statusHttp = statusHttp;
+    this.detalhe = detalhe;
   }
 }
 
@@ -33,10 +41,21 @@ export function middlewareErros(
     console.error(`[ERRO] ${req.method} ${req.path} → ${status}: ${err.message}`);
   }
 
-  res.status(status).json({
+  const resposta: {
+    success: boolean;
+    error: string;
+    data?: Record<string, unknown>;
+  } = {
     success: false,
     error: err.message || 'Erro interno do servidor',
-  });
+  };
+
+  // Detalhe público opcional (ex.: status do reconhecimento sonoro).
+  if (err instanceof ErroAplicacao && err.detalhe) {
+    resposta.data = err.detalhe;
+  }
+
+  res.status(status).json(resposta);
 }
 
 // Wrapper para controllers assíncronos — evita repetir try/catch em cada rota.

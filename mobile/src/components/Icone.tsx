@@ -68,6 +68,7 @@ const ICONES = {
   stopCirculo: { familia: 'feather', nome: 'stop-circle' },
   mais: { familia: 'feather', nome: 'plus' },
   menos: { familia: 'feather', nome: 'minus' },
+  microfone: { familia: 'feather', nome: 'mic' },
 } as const satisfies Record<string, DefinicaoIcone>;
 
 export type NomeIcone = keyof typeof ICONES;

@@ -2,6 +2,7 @@
 // Agrupa todos os endpoints e aplica validações e middlewares.
 
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { asyncHandler } from '../middleware/errorHandler';
 import { validarParametroBusca, validarPaginacao, validarParamId } from '../middleware/validacao';
 import { buscarMusicas, forcarIngestion } from '../controllers/searchController';
@@ -10,8 +11,40 @@ import { detalharRelease, listarReleasesPorData } from '../controllers/releasesC
 import { listarReleaseTypes } from '../controllers/releaseTypesController';
 import { detalharArtista, listarObrasArtista } from '../controllers/artistsController';
 import { streamAudio, downloadAudio, definirFonteAudio } from '../controllers/audioController';
+import { reconhecerMusicaNoAudio } from '../controllers/recognitionController';
 
 const router = Router();
+
+// ============================================================
+// Reconhecimento sonoro
+// ============================================================
+// Cada tentativa consome uma requisição do serviço externo de reconhecimento,
+// por isso a rota tem limite próprio, mais restrito que o limite geral.
+
+// Limite específico da rota de reconhecimento (configurável por ambiente).
+const limiteReconhecimento = rateLimit({
+  windowMs: parseInt(
+    process.env['RECOGNITION_RATE_LIMIT_WINDOW_MS'] || '900000',
+    10
+  ),
+  max: parseInt(process.env['RECOGNITION_RATE_LIMIT_MAX_REQUESTS'] || '20', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: 'Muitas tentativas de reconhecimento. Aguarde alguns minutos antes de tentar de novo.',
+    data: { status: 'provider_error' },
+  },
+});
+
+// POST /api/recognize
+// Recebe a amostra de áudio capturada pelo microfone e devolve a
+// identificação. O áudio não é gravado em disco nem no banco de dados.
+router.post(
+  '/recognize',
+  limiteReconhecimento,
+  asyncHandler(reconhecerMusicaNoAudio)
+);
 
 // ============================================================
 // Busca Musical

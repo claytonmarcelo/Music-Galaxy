@@ -41,7 +41,10 @@ import Icone from '../components/Icone';
 import FundoAtmosfera from '../components/FundoAtmosfera';
 import GlassCard from '../components/GlassCard';
 import CustomButton from '../components/CustomButton';
-import { comAlfa } from '../utils/cores';
+import BotaoTema from '../components/BotaoTema';
+import PainelReconhecimento from '../components/PainelReconhecimento';
+import { useReconhecimentoSonoro } from '../hooks/useReconhecimentoSonoro';
+import { comAlfa, opacizar } from '../utils/cores';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Busca'>;
 
@@ -60,7 +63,7 @@ export default function BuscaScreen(): React.JSX.Element {
   const { favoritos } = useFavoritos();
   const { historico, adicionarBusca, removerBusca, limparHistorico } = useHistorico();
   const { toastSucesso, toastErro, toastInfo } = useModal();
-  const { colors, isDark } = useTheme();
+  const { colors, isDark, setTheme } = useTheme();
 
   const [termo, setTermo]           = useState('');
   const [releases, setReleases]     = useState<Release[]>([]);
@@ -76,6 +79,9 @@ export default function BuscaScreen(): React.JSX.Element {
   const [mostrarFiltros, setMostrarFiltros] = useState(false);
   const [filtros, setFiltros]       = useState<Filtros>({});
   const [resumoFila, setResumoFila] = useState({ baixando: 0, erros: 0, total: 0 });
+
+  // Reconhecimento sonoro: identifica a música que está tocando no ambiente.
+  const reconhecimento = useReconhecimentoSonoro();
 
   // Animações de entrada da lista e dos estados vazios.
   const fadeListaAnim = useRef(new Animated.Value(0)).current;
@@ -114,10 +120,14 @@ export default function BuscaScreen(): React.JSX.Element {
     };
   }, [atualizarResumoFila]);
 
-  // Web: o Chrome pinta o campo de busca de amarelo quando preenche
-  // automaticamente (-webkit-autofill), mudando a cor do placeholder para
-  // fora do padrão. Este estilo global desliga esse comportamento usando
-  // sempre os tokens do tema (nunca cores fixas).
+  // Web: o navegador (Chrome, Edge e Firefox) pinta o campo de busca de
+  // amarelo quando o preenchimento automático age sobre ele, e recorta esse
+  // amarelo no texto — o retângulo que aparecia dentro do placeholder. O
+  // truque antigo (sombra interna com o token translúcido) não resolvia,
+  // porque uma cor com alfa não encobre o fundo imposto pelo navegador.
+  // Aqui a cor do campo é composta em um rgb opaco e o estilo nativo de
+  // preenchimento automático é neutralizado de forma definitiva, sempre com
+  // os tokens do tema (nunca cores fixas).
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const styleId = 'musicgalaxy-autofill-fix';
@@ -129,18 +139,26 @@ export default function BuscaScreen(): React.JSX.Element {
       document.head.appendChild(estilo);
     }
 
+    // Versão opaca do fundo do campo, para encobrir o que o navegador impõe.
+    const fundoOpaco = opacizar(colors.input, colors.background);
+
     estilo.textContent = `
       input:-webkit-autofill,
       input:-webkit-autofill:hover,
-      input:-webkit-autofill:focus {
-        -webkit-text-fill-color: ${colors.text};
-        -webkit-box-shadow: 0 0 0px 1000px ${colors.input} inset;
-        box-shadow: 0 0 0px 1000px ${colors.input} inset;
+      input:-webkit-autofill:focus,
+      input:-webkit-autofill:active,
+      input:-moz-autofill,
+      input:-moz-autofill:hover,
+      input:-moz-autofill:focus {
+        -webkit-text-fill-color: ${colors.text} !important;
+        -webkit-background-clip: border-box !important;
+        background-color: transparent !important;
+        box-shadow: 0 0 0 1000px ${fundoOpaco} inset !important;
         caret-color: ${colors.text};
-        transition: background-color 9999s ease-in-out 0s;
+        transition: background-color 0s ease 0s;
       }
     `;
-  }, [colors.text, colors.input]);
+  }, [colors.text, colors.input, colors.background]);
 
   const releasesFiltrados = useCallback(() => {
     let resultado = releases;
@@ -319,6 +337,32 @@ export default function BuscaScreen(): React.JSX.Element {
     void executarBusca(termoSugerido, 0, false);
   }, [executarBusca]);
 
+  // ==========================================================
+  // Reconhecimento sonoro
+  // ==========================================================
+  // Inicia a identificação a partir do botão de microfone. Um pedido por
+  // vez: tocar novamente durante uma tentativa cancela a anterior.
+  const iniciarReconhecimento = useCallback(() => {
+    Keyboard.dismiss();
+    setFocoInput(false);
+    void reconhecimento.iniciar();
+  }, [reconhecimento]);
+
+  // Envia a faixa reconhecida para a busca normal — o mesmo caminho usado
+  // pelas sugestões e pelo histórico, sem inventar termos.
+  const pesquisarFaixaReconhecida = useCallback((termoFaixa: string) => {
+    reconhecimento.limparResultado();
+    selecionarSugestao(termoFaixa);
+  }, [reconhecimento, selecionarSugestao]);
+
+  const repetirReconhecimento = useCallback(() => {
+    void reconhecimento.iniciar();
+  }, [reconhecimento]);
+
+  const encerrarReconhecimento = useCallback(() => {
+    reconhecimento.cancelar();
+  }, [reconhecimento]);
+
   const removerSugestao = useCallback(async (
     termoRemover: string,
     evento: GestureResponderEvent
@@ -425,6 +469,8 @@ export default function BuscaScreen(): React.JSX.Element {
           </View>
 
           <View style={styles.acoesCabecalho}>
+            <BotaoTema onAlternar={() => setTheme(isDark ? 'light' : 'dark')} />
+
             <TouchableOpacity
               style={[
                 styles.botaoCabecalho,
@@ -499,6 +545,9 @@ export default function BuscaScreen(): React.JSX.Element {
                 returnKeyType="search"
                 autoCapitalize="none"
                 autoCorrect={false}
+                // Campo de pesquisa não tem nada a ver com preenchimento
+                // automático: desligar evita o amarelo do navegador.
+                autoComplete="off"
                 accessibilityLabel="Campo de busca musical"
               />
               {termo.length === 0 && (
@@ -511,6 +560,28 @@ export default function BuscaScreen(): React.JSX.Element {
                 </Text>
               )}
             </View>
+            {/* Botão de reconhecimento sonoro — fica dentro da pílula para
+                não competir com o botão de filtros. */}
+            <TouchableOpacity
+              style={[
+                styles.botaoMicrofone,
+                {
+                  backgroundColor: reconhecimento.ocupado
+                    ? comAlfa(colors.primary, 0.18)
+                    : comAlfa(colors.primary, 0.08),
+                  borderColor: comAlfa(colors.primary, reconhecimento.ocupado ? 0.5 : 0.22),
+                },
+              ]}
+              onPress={iniciarReconhecimento}
+              activeOpacity={0.75}
+              accessibilityLabel="Identificar a música que está tocando"
+            >
+              <Icone
+                nome="microfone"
+                tamanho={16}
+                cor={colors.primary}
+              />
+            </TouchableOpacity>
             {termo.length > 0 && (
               <TouchableOpacity
                 onPress={limparBusca}
@@ -549,6 +620,18 @@ export default function BuscaScreen(): React.JSX.Element {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* Painel de reconhecimento sonoro — aparece só quando há
+            identificação em andamento ou resultado a mostrar. */}
+        <PainelReconhecimento
+          estado={reconhecimento.estado}
+          contagem={reconhecimento.contagem}
+          resultado={reconhecimento.resultado}
+          mensagemErro={reconhecimento.mensagemErro}
+          aoPesquisar={pesquisarFaixaReconhecida}
+          aoTentarNovamente={repetirReconhecimento}
+          aoCancelar={encerrarReconhecimento}
+        />
 
         {/* Aviso de mínimo de letras */}
         {termo.trim().length > 0 && termo.trim().length < MINIMO_LETRAS && (
@@ -963,6 +1046,14 @@ const styles = StyleSheet.create({
   },
   botaoLimpar: {
     padding: 4,
+  },
+  botaoMicrofone: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
   },
   botaoFiltros: {
     width: 54,

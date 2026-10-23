@@ -56,6 +56,19 @@ const ASSUNTOS: Assunto[] = [
     ],
   },
   {
+    id: 'reconhecer',
+    titulo: 'Identificar a música pelo som',
+    icone: 'microfone',
+    resumo: 'Descobrir o que está tocando ao lado do aparelho.',
+    passos: [
+      'Toque no botão de microfone dentro do campo de busca. O aplicativo pede a permissão do microfone na primeira vez.',
+      'Quando a contagem terminar, deixe a música tocar perto do aparelho por alguns segundos.',
+      'Se a música for reconhecida, o nome aparece no painel. Toque em "Pesquisar no Music Galaxy" para ver todas as versões dela.',
+      'Se o trecho não for reconhecido, o aplicativo avisa que não encontrou nada e o campo de busca continua vazio — nenhuma sugestão é inventada.',
+      'Se o servidor não estiver configurado ou sem acesso à internet, o painel explica o motivo e permite tentar de novo.',
+    ],
+  },
+  {
     id: 'ouvir',
     titulo: 'Como ouvir',
     icone: 'fone',

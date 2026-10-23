@@ -149,6 +149,38 @@ export interface ResultadoIngestao {
 }
 
 // ============================================================
+// Reconhecimento sonoro
+// ============================================================
+// Contrato espelhado do backend (POST /api/recognize). O campo
+// `confidence` só aparece quando o serviço de reconhecimento devolveu uma
+// medida documentada — o aplicativo nunca estima confiança.
+
+export type RecognitionStatus =
+  | 'matched'
+  | 'no_match'
+  | 'permission_denied'
+  | 'microphone_unavailable'
+  | 'network_error'
+  | 'provider_error'
+  | 'cancelled';
+
+export interface RecognitionResult {
+  status: RecognitionStatus;
+  title?: string;
+  artist?: string;
+  album?: string;
+  releaseYear?: number;
+  provider?: string;
+  confidence?: number;
+}
+
+export interface RespostaReconhecimento {
+  success: boolean;
+  error?: string;
+  data?: RecognitionResult;
+}
+
+// ============================================================
 // Parâmetros de navegação
 // ============================================================
 
