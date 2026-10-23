@@ -1,11 +1,18 @@
 // Controller de obras musicais (works).
-// Endpoints GET /api/works/:id e GET /api/works/:id/releases
+// Endpoints GET /api/works/:id, GET /api/works/:id/releases e
+// GET /api/works/by-decade/:decade.
+//
+// O ano efetivo da obra usa `original_release_year` quando existe e, caso
+// contrário, o menor ano conhecido entre as versões (ANO_EFETIVO_SQL). Sem
+// esse fallback, as obras cujo metadado veio sem ano ficavam invisíveis na
+// exploração por década, mesmo tendo versões com áudio.
 
 import { Request, Response, NextFunction } from 'express';
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/database';
 import { ErroAplicacao } from '../middleware/errorHandler';
 import { ReleaseCompleto } from '../types';
+import { ANO_EFETIVO_SQL, baseUrlDaRequisicao, urlsDeMidia } from '../utils/urls';
 
 // GET /api/works/:id — detalhes de uma obra específica
 export async function detalharWork(
@@ -20,7 +27,7 @@ export async function detalharWork(
       `SELECT
          w.id,
          w.title,
-         w.original_release_year,
+         ${ANO_EFETIVO_SQL} AS effective_year,
          w.created_at,
          a.id      AS artist_id,
          a.name    AS artist_name,
@@ -39,10 +46,11 @@ export async function detalharWork(
     res.json({
       success: true,
       data: {
-        id:                   row['id'],
-        title:                row['title'],
-        original_release_year: row['original_release_year'],
-        created_at:           row['created_at'],
+        id:                    row['id'],
+        title:                 row['title'],
+        original_release_year: row['effective_year'],
+        effective_year:        row['effective_year'],
+        created_at:            row['created_at'],
         artist: {
           id:      row['artist_id'],
           name:    row['artist_name'],
@@ -55,7 +63,7 @@ export async function detalharWork(
   }
 }
 
-// GET /api/works/:id/releases — todas as versões de uma obra
+// GET /api/works/:id/releases — todas as versões COM ÁUDIO de uma obra
 export async function listarReleasesDeWork(
   req: Request,
   res: Response,
@@ -65,10 +73,20 @@ export async function listarReleasesDeWork(
     const id     = parseInt(req.params['id']!, 10);
     const limit  = Math.min(parseInt(req.query['limit']  as string || '100', 10), 100);
     const offset = Math.max(parseInt(req.query['offset'] as string || '0',   10), 0);
+    const baseUrl = baseUrlDaRequisicao(req);
 
-    // Verifica se a obra existe
+    // Dados da obra (inclui o artista para a tela de detalhes poder navegar)
     const [worksRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id, title FROM works WHERE id = ?`,
+      `SELECT
+         w.id,
+         w.title,
+         ${ANO_EFETIVO_SQL} AS effective_year,
+         a.id      AS artist_id,
+         a.name    AS artist_name,
+         a.country AS artist_country
+       FROM works w
+       JOIN artists a ON w.artist_id = a.id
+       WHERE w.id = ?`,
       [id]
     );
     if (worksRows.length === 0) {
@@ -88,14 +106,15 @@ export async function listarReleasesDeWork(
          r.cover_url,
          r.source_reference_url,
          r.audio_preview_url,
-         r.streaming_url,
-         r.download_url,
          r.audio_source_url,
+         r.audio_source_provider,
+         r.audio_source_page_url,
          rt.name        AS release_type,
          rt.category    AS release_type_category,
          ms.name        AS metadata_source,
          w.title        AS work_title,
          w.original_release_year,
+         a.id           AS artist_id,
          a.name         AS artist_name,
          a.country      AS artist_country
        FROM releases r
@@ -117,36 +136,52 @@ export async function listarReleasesDeWork(
     );
     const total = (countRows[0]?.['total'] as number) ?? 0;
 
-    const releases: ReleaseCompleto[] = (rows as any[]).map(row => ({
-      id:                    row['id'],
-      work_id:               row['work_id'],
-      version_name:          row['version_name'],
-      album_name:            row['album_name'],
-      release_year:          row['release_year'],
-      label:                 row['label'],
-      country:               row['country'],
-      quality:               row['quality'],
-      cover_url:             row['cover_url'],
-      source_reference_url:  row['source_reference_url'],
-      audio_preview_url:     row['audio_preview_url'],
-      streaming_url:        row['streaming_url'],
-      download_url:         row['download_url'],
-      audio_source_url:      row['audio_source_url'] ?? null,
-      release_type:          row['release_type'],
-      release_type_category: row['release_type_category'],
-      metadata_source:       row['metadata_source'],
-      work_title:            row['work_title'],
-      artist_name:           row['artist_name'],
-      artist_country:        row['artist_country'],
-      original_release_year: row['original_release_year'],
-    }));
+    const releases: ReleaseCompleto[] = rows.map(row => {
+      const releaseId = row['id'] as number;
+      const midia = urlsDeMidia(baseUrl, releaseId);
+      return {
+        id:                    releaseId,
+        work_id:               row['work_id'] as number,
+        version_name:          row['version_name'] as string,
+        album_name:            row['album_name'] as string | null,
+        release_year:          row['release_year'] as number | null,
+        label:                 row['label'] as string | null,
+        country:               row['country'] as string | null,
+        quality:               row['quality'] as string | null,
+        cover_url:             row['cover_url'] as string | null,
+        release_type:          row['release_type'] as string,
+        release_type_category: row['release_type_category'] as string,
+        metadata_source:       row['metadata_source'] as string,
+        source_reference_url:  row['source_reference_url'] as string | null,
+        audio_preview_url:     row['audio_preview_url'] as string | null,
+        // Mesmo contrato da busca: URLs do backend, nunca colunas legadas.
+        streaming_url:         midia.streaming_url,
+        download_url:          midia.download_url,
+        audio_source_url:      row['audio_source_url'] as string | null,
+        audio_source_provider: row['audio_source_provider'] as string | null,
+        audio_source_page_url: row['audio_source_page_url'] as string | null,
+        work_title:            row['work_title'] as string,
+        artist_id:             row['artist_id'] as number,
+        artist_name:           row['artist_name'] as string,
+        artist_country:        row['artist_country'] as string | null,
+        original_release_year: row['original_release_year'] as number | null,
+      };
+    });
 
+    const work = worksRows[0]!;
     res.json({
       success: true,
       data: {
         work: {
-          id:    worksRows[0]!['id'],
-          title: worksRows[0]!['title'],
+          id:                    work['id'],
+          title:                 work['title'],
+          original_release_year: work['effective_year'],
+          effective_year:        work['effective_year'],
+          artist: {
+            id:      work['artist_id'],
+            name:    work['artist_name'],
+            country: work['artist_country'],
+          },
         },
         results:  releases,
         total,
@@ -159,7 +194,6 @@ export async function listarReleasesDeWork(
   }
 }
 
-
 // GET /api/works/by-decade/:decade — obras de uma década específica
 export async function listarWorksPorDecada(
   req: Request,
@@ -171,9 +205,9 @@ export async function listarWorksPorDecada(
     const limit  = Math.min(parseInt(req.query['limit']  as string || '100', 10), 100);
     const offset = Math.max(parseInt(req.query['offset'] as string || '0',   10), 0);
 
-    // Valida a década (0000s, 1900s, 1910s, etc)
-    if (isNaN(decada) || decada < 0 || decada % 10 !== 0) {
-      throw new ErroAplicacao('Década deve ser um múltiplo de 10 (ex: 1990, 2000, 2010).', 400);
+    // Valida a década (1900, 1910, 1920...) — nunca aceita valores soltos.
+    if (isNaN(decada) || decada < 1900 || decada > 2100 || decada % 10 !== 0) {
+      throw new ErroAplicacao('Década inválida. Use um múltiplo de 10 entre 1900 e 2100 (ex.: 1990).', 400);
     }
 
     const anoInicio = decada;
@@ -183,28 +217,28 @@ export async function listarWorksPorDecada(
       `SELECT
          w.id,
          w.title,
-         w.original_release_year,
+         ${ANO_EFETIVO_SQL} AS effective_year,
          w.created_at,
          a.id      AS artist_id,
          a.name    AS artist_name,
          a.country AS artist_country
        FROM works w
        JOIN artists a ON w.artist_id = a.id
-       WHERE w.original_release_year >= ? AND w.original_release_year <= ?
+       WHERE ${ANO_EFETIVO_SQL} BETWEEN ? AND ?
          -- Regra do usuário: obra só aparece se tiver ao menos uma versão
          -- com fonte de áudio aberta resolvida
          AND EXISTS (
            SELECT 1 FROM releases r2
            WHERE r2.work_id = w.id AND r2.audio_source_url IS NOT NULL
          )
-       ORDER BY w.original_release_year DESC, w.title ASC
+       ORDER BY effective_year DESC, w.title ASC
        LIMIT ? OFFSET ?`,
       [anoInicio, anoFim, limit, offset]
     );
 
     const [countRows] = await pool.execute<RowDataPacket[]>(
       `SELECT COUNT(*) AS total FROM works w
-       WHERE w.original_release_year >= ? AND w.original_release_year <= ?
+       WHERE ${ANO_EFETIVO_SQL} BETWEEN ? AND ?
          AND EXISTS (
            SELECT 1 FROM releases r2
            WHERE r2.work_id = w.id AND r2.audio_source_url IS NOT NULL
@@ -213,15 +247,15 @@ export async function listarWorksPorDecada(
     );
     const total = (countRows[0]?.['total'] as number) ?? 0;
 
-    const works = (rows as any[]).map(row => ({
-      id:                   row['id'],
-      title:                row['title'],
-      original_release_year: row['original_release_year'],
-      created_at:           row['created_at'],
+    const works = rows.map(row => ({
+      id:                    row['id'] as number,
+      title:                 row['title'] as string,
+      original_release_year: row['effective_year'] as number | null,
+      created_at:            row['created_at'] as Date,
       artist: {
-        id:      row['artist_id'],
-        name:    row['artist_name'],
-        country: row['artist_country'],
+        id:      row['artist_id'] as number,
+        name:    row['artist_name'] as string,
+        country: row['artist_country'] as string | null,
       },
     }));
 

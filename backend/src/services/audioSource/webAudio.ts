@@ -11,7 +11,10 @@
 //   4. Interpretação de nomes de arquivo no padrão "Artista - Título".
 
 import dns from 'dns/promises';
+import type { LookupAddress, LookupOptions } from 'dns';
 import net from 'net';
+import http from 'http';
+import https from 'https';
 import * as cheerio from 'cheerio';
 
 // User agent de navegador — sites abertos bloqueiam UAs de bots genéricos.
@@ -55,6 +58,97 @@ export function dominioPlataformaProibida(hostname: string): boolean {
   );
 }
 
+// Converte um endereço IPv6 (já validado por net.isIP) em BigInt de 128 bits.
+// Suporta "::" e IPv4 embutido no final (ex.: ::ffff:127.0.0.1).
+function ipv6ParaBigInt(ip: string): bigint | null {
+  let endereco = ip.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0] ?? '';
+  if (!endereco) return null;
+
+  // Converte um IPv4 no final para dois grupos hexadecimais
+  const comIPv4 = endereco.match(/^(.*:)(\d+\.\d+\.\d+\.\d+)$/);
+  if (comIPv4) {
+    const octetos = comIPv4[2]!.split('.').map(Number);
+    if (octetos.length !== 4 || octetos.some((o) => !Number.isInteger(o) || o < 0 || o > 255)) {
+      return null;
+    }
+    const alto = ((octetos[0]! << 8) | octetos[1]!).toString(16);
+    const baixo = ((octetos[2]! << 8) | octetos[3]!).toString(16);
+    endereco = `${comIPv4[1]}${alto}:${baixo}`;
+  }
+
+  const partes = endereco.split('::');
+  if (partes.length > 2) return null;
+
+  const inicio = partes[0] ? partes[0].split(':') : [];
+  const fim = partes.length === 2 && partes[1] ? partes[1].split(':') : [];
+  const faltam = 8 - (inicio.length + fim.length);
+  if (faltam < 0) return null;
+  if (partes.length === 1 && faltam !== 0) return null;
+
+  const grupos = [
+    ...inicio,
+    ...Array<string>(partes.length === 2 ? faltam : 0).fill('0'),
+    ...fim,
+  ];
+  if (grupos.length !== 8) return null;
+
+  let valor = 0n;
+  for (const grupo of grupos) {
+    if (!/^[0-9a-f]{1,4}$/.test(grupo)) return null;
+    valor = (valor << 16n) | BigInt(parseInt(grupo, 16));
+  }
+  return valor;
+}
+
+// Verifica se os primeiros `bits` de um IPv6 batem com o prefixo informado.
+function prefixoIpv6(valor: bigint, bits: number, prefixo: bigint): boolean {
+  return (valor >> BigInt(128 - bits)) === prefixo;
+}
+
+// Faixas IPv6 que nunca podem ser acessadas (reservadas, privadas ou de
+// transição que permitiriam alcançar destinos internos).
+function ipv6NaoRoteavel(ip: string): boolean {
+  const valor = ipv6ParaBigInt(ip);
+  if (valor === null) return true; // não foi possível interpretar — inseguro
+
+  if (valor === 0n || valor === 1n) return true;                     // :: e ::1
+  if (prefixoIpv6(valor, 10, 0x3fan)) return true;                   // fe80::/10 link-local
+  if (prefixoIpv6(valor, 10, 0x3fbn)) return true;                   // fec0::/10 site-local
+  if (prefixoIpv6(valor, 7, 0x7en)) return true;                     // fc00::/7 ULA
+  if (prefixoIpv6(valor, 8, 0xffn)) return true;                     // ff00::/8 multicast
+  if (prefixoIpv6(valor, 32, 0x20010db8n)) return true;              // 2001:db8::/32 documentação
+  if (prefixoIpv6(valor, 32, 0x20010000n)) return true;              // 2001::/32 Teredo
+  if (prefixoIpv6(valor, 28, 0x2001001n)) return true;               // 2001:10::/28 ORCHID
+  if (prefixoIpv6(valor, 28, 0x2001002n)) return true;               // 2001:20::/28 ORCHIDv2
+  if (prefixoIpv6(valor, 16, 0x2002n)) return true;                  // 2002::/16 6to4
+  if (prefixoIpv6(valor, 64, 0x0100000000000000n)) return true;      // 100::/64 discard
+  if (prefixoIpv6(valor, 96, 0x0064ff9b0000000000000000n)) return true; // NAT64
+  if (prefixoIpv6(valor, 48, 0x0064ff9b0001n)) return true;          // NAT64 local-use
+  if (prefixoIpv6(valor, 96, 0xffffn)) {
+    // IPv4 mapeado (::ffff:a.b.c.d) — valida o IPv4 embutido
+    const ipv4 = Number(valor & 0xffffffffn);
+    const octetos = [
+      (ipv4 >>> 24) & 255,
+      (ipv4 >>> 16) & 255,
+      (ipv4 >>> 8) & 255,
+      ipv4 & 255,
+    ].join('.');
+    return enderecoNaoRoteavel(octetos);
+  }
+  if (prefixoIpv6(valor, 96, 0n)) {
+    // IPv4 compatível (::a.b.c.d, obsoleto) — mesma validação
+    const ipv4 = Number(valor & 0xffffffffn);
+    const octetos = [
+      (ipv4 >>> 24) & 255,
+      (ipv4 >>> 16) & 255,
+      (ipv4 >>> 8) & 255,
+      ipv4 & 255,
+    ].join('.');
+    return enderecoNaoRoteavel(octetos);
+  }
+  return false;
+}
+
 // Detecta endereços IP que não podem ser acessados (proteção anti-SSRF):
 // loopback, privados, link-local, multicast e faixas reservadas.
 export function enderecoNaoRoteavel(ip: string): boolean {
@@ -63,29 +157,22 @@ export function enderecoNaoRoteavel(ip: string): boolean {
 
   if (versao === 4) {
     const partes = ip.split('.').map(Number);
-    const [a, b] = partes;
+    const [a, b, c] = partes;
     if (a === 0 || a === 10 || a === 127) return true;            // este/privado/loopback
     if (a === 169 && b === 254) return true;                       // link-local
-    if (a === 172 && b >= 16 && b <= 31) return true;              // privado
+    if (a === 172 && b !== undefined && b >= 16 && b <= 31) return true; // privado
     if (a === 192 && b === 168) return true;                       // privado
-    if (a === 192 && b === 0) return true;                         // TEST-NET
+    if (a === 192 && b === 0) return true;                         // IETF/TEST-NET-1
+    if (a === 192 && b === 88 && c === 99) return true;            // 6to4 relay anycast
     if (a === 198 && (b === 18 || b === 19)) return true;          // benchmark
-    if (a === 198 && b === 51) return true;                        // TEST-NET-2
-    if (a === 203 && b === 0) return true;                         // TEST-NET-3
-    if (a === 224 || a === 239 || a >= 240) return true;           // multicast/reservado
-    if (a === 100 && b >= 64 && b <= 127) return true;             // CGNAT
+    if (a === 198 && b === 51 && c === 100) return true;           // TEST-NET-2
+    if (a === 203 && b === 0 && c === 113) return true;            // TEST-NET-3
+    if (a !== undefined && a >= 224) return true;                  // multicast/reservado/broadcast
+    if (a === 100 && b !== undefined && b >= 64 && b <= 127) return true; // CGNAT
     return false;
   }
 
-  // IPv6
-  const v6 = ip.toLowerCase().replace(/^\[|\]$/g, '');
-  if (v6 === '::1' || v6 === '::') return true;                    // loopback
-  if (v6.startsWith('fe80') || v6.startsWith('fc') || v6.startsWith('fd')) return true; // link-local/ULA
-  if (v6.startsWith('ff')) return true;                             // multicast
-  // Endereços IPv4 mapeados em IPv6 (::ffff:x.x.x.x)
-  const mapeado = v6.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapeado) return enderecoNaoRoteavel(mapeado[1]);
-  return false;
+  return ipv6NaoRoteavel(ip);
 }
 
 export interface ResultadoAuditoriaUrl {
@@ -113,15 +200,25 @@ export async function auditarUrl(candidato: string): Promise<ResultadoAuditoriaU
     return { ok: false, motivo: 'URL com credenciais embutidas' };
   }
 
-  const host = url.hostname;
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
   if (!host) return { ok: false, motivo: 'URL sem hostname' };
 
   if (dominioPlataformaProibida(host)) {
     return { ok: false, motivo: `Plataforma proibida pela Regra 3: ${host}` };
   }
 
-  if (host.toLowerCase() === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
-    return { ok: false, motivo: 'Host interno não permitido' };
+  if (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host.endsWith('.home.arpa') ||
+    host.endsWith('.test') ||
+    host.endsWith('.invalid') ||
+    host.endsWith('.example') ||
+    host.endsWith('.onion')
+  ) {
+    return { ok: false, motivo: 'Host interno ou reservado não permitido' };
   }
 
   // Se o host é um IP literal, valida direto; senão resolve o DNS.
@@ -144,6 +241,86 @@ export async function auditarUrl(candidato: string): Promise<ResultadoAuditoriaU
   }
 
   return { ok: true, url };
+}
+
+// Cria agentes HTTP/HTTPS que revalidam o DNS no momento da conexão.
+// O guard `auditarUrl` resolve o hostname antes da requisição; sem esta
+// checagem de conexão, um DNS rebinding poderia trocar o IP entre a auditoria
+// e o connect (TOCTOU). Todo IP resolvido precisa ser publicamente roteável.
+export function criarAgentesSeguros(): { httpAgent: http.Agent; httpsAgent: http.Agent } {
+  const lookupSeguro = (
+    hostname: string,
+    options: LookupOptions,
+    callback: (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void
+  ): void => {
+    dns
+      .lookup(hostname, { all: true, verbatim: true })
+      .then((registros) => {
+        if (registros.length === 0) {
+          const erro: NodeJS.ErrnoException = new Error(`DNS sem registros para ${hostname}`);
+          erro.code = 'ENOTFOUND';
+          callback(erro, '', 0);
+          return;
+        }
+
+        const bloqueado = registros.find((registro) => enderecoNaoRoteavel(registro.address));
+        if (bloqueado) {
+          const erro: NodeJS.ErrnoException = new Error(
+            `DNS resolve para endereço não roteável: ${bloqueado.address}`
+          );
+          erro.code = 'EACCES';
+          callback(erro, '', 0);
+          return;
+        }
+
+        if (options.all) {
+          callback(null, registros);
+          return;
+        }
+
+        const primeiro = registros[0]!;
+        callback(null, primeiro.address, primeiro.family);
+      })
+      .catch((erro: unknown) => {
+        const err = erro instanceof Error ? erro : new Error('Falha ao resolver DNS');
+        callback(err, '', 0);
+      });
+  };
+
+  return {
+    httpAgent: new http.Agent({ lookup: lookupSeguro, keepAlive: false }),
+    httpsAgent: new https.Agent({ lookup: lookupSeguro, keepAlive: false }),
+  };
+}
+
+// Extrai mensagem/status/código de um erro desconhecido sem recorrer a `any`.
+// Funciona tanto para Error quanto para AxiosError (que tem response.status).
+export function detalharErro(erro: unknown): {
+  mensagem: string;
+  status?: number;
+  codigo?: string;
+} {
+  if (typeof erro !== 'object' || erro === null) {
+    return { mensagem: String(erro) };
+  }
+
+  const bruto = erro as {
+    message?: unknown;
+    code?: unknown;
+    response?: { status?: unknown };
+  };
+
+  const mensagem =
+    typeof bruto.message === 'string' && bruto.message
+      ? bruto.message
+      : String(erro);
+
+  const status =
+    typeof bruto.response?.status === 'number' ? bruto.response.status : undefined;
+
+  const codigo = typeof bruto.code === 'string' ? bruto.code : undefined;
+
+  return { mensagem, ...(status !== undefined ? { status } : {}), ...(codigo ? { codigo } : {}) };
 }
 
 // Verificação leve (síncrona) para redirects do axios: checa protocolo,

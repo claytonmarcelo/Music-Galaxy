@@ -12,6 +12,28 @@ export interface AudioIdentity {
   catalogNumber?: string;
 }
 
+// Metadados complementares de um candidato de áudio.
+// Valores simples (texto/número/booleano) para poderem ser serializados e
+// exibidos sem casts soltos.
+export type AudioCandidateMetadataValue = string | number | boolean | null | undefined;
+
+export interface AudioCandidateMetadata {
+  sourcePageUrl?: string;
+  fileName?: string;
+  pageTitle?: string;
+  contentType?: string;
+  contentLength?: number;
+  size?: string | number;
+  identifier?: string;
+  itemTitle?: string;
+  itemCreator?: string;
+  formatLabel?: string;
+  rankingScore?: number;
+  exactMatch?: boolean;
+  qualityScore?: number;
+  [chave: string]: AudioCandidateMetadataValue;
+}
+
 // Candidato encontrado por um provider
 export interface AudioCandidate {
   providerId: string;
@@ -30,7 +52,7 @@ export interface AudioCandidate {
   url?: string;
   downloadUrl?: string;
   streamUrl?: string;
-  metadata: Record<string, any>;
+  metadata: AudioCandidateMetadata;
 }
 
 // Resultado da busca de um provider

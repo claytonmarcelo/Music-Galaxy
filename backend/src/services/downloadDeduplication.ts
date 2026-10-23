@@ -8,7 +8,7 @@
 // a partir do resultado compartilhado.
 
 interface InFlightDownload {
-  promise: Promise<any>;
+  promise: Promise<unknown>;
   timestamp: number;
 }
 
@@ -17,10 +17,12 @@ class DownloadDeduplication {
   private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor() {
-    // Limpar downloads órfãos a cada 5 minutos
+    // Limpar downloads órfãos a cada 5 minutos. unref() evita que este timer
+    // sozinho mantenha o processo Node vivo (importante em testes e scripts).
     this.cleanupInterval = setInterval(() => {
       this.cleanup();
     }, 5 * 60 * 1000);
+    this.cleanupInterval.unref();
   }
 
   private getDownloadKey(releaseId: number, format: string): string {

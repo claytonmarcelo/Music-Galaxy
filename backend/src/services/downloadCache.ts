@@ -14,6 +14,9 @@ interface CacheEntry {
   size: number;
   createdAt: number;
   expiresAt: number;
+  // Indica se o áudio entregue é realmente sem perdas. Um FLAC gerado a
+  // partir de fonte lossy continua sendo FLAC, mas NÃO é lossless.
+  lossless?: boolean;
 }
 
 class DownloadCache {
@@ -116,7 +119,12 @@ class DownloadCache {
   // Devolve o caminho DEFINITIVO dentro do cache (ou null em falha) — o
   // chamador deve usar esse caminho para servir o cliente e pode apagar com
   // segurança qualquer arquivo temporário que tenha restado.
-  async set(releaseId: number, format: string, filePath: string): Promise<string | null> {
+  async set(
+    releaseId: number,
+    format: string,
+    filePath: string,
+    lossless?: boolean
+  ): Promise<string | null> {
     try {
       const stats = await fs.stat(filePath);
       const key = this.getCacheKey(releaseId, format);
@@ -144,6 +152,7 @@ class DownloadCache {
         size: stats.size,
         createdAt: Date.now(),
         expiresAt: Date.now() + this.maxAge,
+        ...(lossless !== undefined ? { lossless } : {}),
       };
 
       this.entries.set(key, entry);

@@ -75,12 +75,15 @@ export interface ReleaseCompleto {
   // Fonte de áudio aberta resolvida (Regra 3). null = versão ainda sem áudio;
   // nesse caso a busca NÃO a exibe no app (regra do usuário).
   audio_source_url: string | null;
+  audio_source_provider?: string | null;
+  audio_source_page_url?: string | null;
   // URLs de mídia - null quando não disponível
   audio_preview_url: string | null;
   streaming_url: string | null;
   download_url: string | null;
   // Dados da obra
   work_title: string;
+  artist_id: number;
   artist_name: string;
   artist_country: string | null;
   original_release_year: number | null;

@@ -32,7 +32,7 @@ import { DirectLinkProvider } from '../services/audioSource/providers/directLink
 import { GenericWebProvider } from '../services/audioSource/providers/genericWebProvider';
 import { InternetArchiveProvider } from '../services/audioSource/providers/internetArchiveProvider';
 import { AudioIdentity } from '../services/audioSource/types';
-import { USER_AGENT, auditarUrl, criarBeforeRedirect } from '../services/audioSource/webAudio';
+import { USER_AGENT, auditarUrl, criarAgentesSeguros, criarBeforeRedirect } from '../services/audioSource/webAudio';
 
 // Providers permitidos pela Regra 3 — apenas web aberta, sem plataformas.
 const directLinkProvider = new DirectLinkProvider();
@@ -49,6 +49,17 @@ const sourceOrchestrator = new SourceOrchestrator({
 sourceOrchestrator.registerProvider(internetArchiveProvider);
 sourceOrchestrator.registerProvider(genericWebProvider);
 sourceOrchestrator.registerProvider(directLinkProvider);
+
+// Agentes com DNS revalidado no momento da conexão (anti-SSRF/rebinding).
+const AGENTES_SEGUROS = criarAgentesSeguros();
+
+// Resultado da produção de um arquivo no cache permanente.
+interface ResultadoArquivoCache {
+  filePath: string;
+  // true = áudio realmente sem perdas; false = transcodificado de fonte
+  // lossy; null = não foi possível determinar.
+  lossless: boolean | null;
+}
 
 // Tipos de erro para classificação do pipeline de download
 enum DownloadErrorType {
@@ -309,12 +320,28 @@ export async function streamAudio(req: Request, res: Response): Promise<void> {
       maxRedirects: 3,
       beforeRedirect: criarBeforeRedirect(),
       validateStatus: (s) => s < 500,
+      ...AGENTES_SEGUROS,
     });
 
     if (upstream.status >= 400) {
       (upstream.data as NodeJS.ReadableStream & { resume?: () => void }).resume?.();
       await limparFonte(releaseId);
       res.status(502).json({ success: false, error: `A fonte externa respondeu HTTP ${upstream.status}` });
+      return;
+    }
+
+    // A fonte pode responder HTML/JSON com status 200 (página de bloqueio,
+    // captcha, erro amigável). Isso nunca deve ser entregue como áudio.
+    const contentType = String(upstream.headers['content-type'] ?? '').toLowerCase();
+    const urlPareceAudio = /\.(mp3|flac|wav|m4a|aac|ogg|opus|webm|wma)(\?|$)/i.test(fonte.url);
+    const tipoInvalido = /^(text\/|application\/(json|xml|xhtml\+xml|javascript))/.test(contentType);
+    if (tipoInvalido && !urlPareceAudio) {
+      (upstream.data as NodeJS.ReadableStream & { resume?: () => void }).resume?.();
+      await limparFonte(releaseId);
+      res.status(502).json({
+        success: false,
+        error: 'A fonte externa não entregou áudio (conteúdo HTML/JSON)',
+      });
       return;
     }
 
@@ -392,7 +419,10 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
     const cached = await downloadCache.get(releaseId, formatoAudio);
     if (cached) {
       console.log(`[AudioDownload] releaseId=${releaseId} status=cache-hit format=${formatoAudio}`);
-      await servirArquivo(req, res, cached.filePath, nomeArquivo, mimeType, 'HIT', releaseId);
+      await servirArquivo(
+        req, res, cached.filePath, nomeArquivo, mimeType, 'HIT', releaseId,
+        cached.lossless ?? null
+      );
       return;
     }
 
@@ -406,7 +436,10 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
       const pronto = await downloadCache.get(releaseId, formatoAudio);
       if (pronto) {
         console.log(`[AudioDownload] releaseId=${releaseId} status=cache-hit-by-follower format=${formatoAudio}`);
-        await servirArquivo(req, res, pronto.filePath, nomeArquivo, mimeType, 'HIT', releaseId);
+        await servirArquivo(
+          req, res, pronto.filePath, nomeArquivo, mimeType, 'HIT', releaseId,
+          pronto.lossless ?? null
+        );
         return;
       }
       // O líder falhou: segue o fluxo normal e tenta por conta própria
@@ -414,14 +447,26 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
 
     // Passo 2: deduplicação — o produtor devolve o CAMINHO em cache e nunca
     // escreve na Response. Líder e seguidores servem cada um ao seu req/res.
-    const caminhoCache = await downloadDeduplication.execute(releaseId, formatoAudio, async () => {
-      // Re-confere o cache dentro do lock: quem chegou depois do líder acerta aqui
-      const recemProduzido = await downloadCache.get(releaseId, formatoAudio);
-      if (recemProduzido) return recemProduzido.filePath;
-      return produzirArquivoCache(release, formatoAudio);
-    });
+    const produzido = await downloadDeduplication.execute<ResultadoArquivoCache>(
+      releaseId,
+      formatoAudio,
+      async () => {
+        // Re-confere o cache dentro do lock: quem chegou depois do líder acerta aqui
+        const recemProduzido = await downloadCache.get(releaseId, formatoAudio);
+        if (recemProduzido) {
+          return {
+            filePath: recemProduzido.filePath,
+            lossless: recemProduzido.lossless ?? null,
+          };
+        }
+        return produzirArquivoCache(release, formatoAudio);
+      }
+    );
 
-    await servirArquivo(req, res, caminhoCache, nomeArquivo, mimeType, 'MISS', releaseId);
+    await servirArquivo(
+      req, res, produzido.filePath, nomeArquivo, mimeType, 'MISS', releaseId,
+      produzido.lossless
+    );
 
     const totalDuration = (Date.now() - startTime) / 1000;
     console.log(`[AudioDownload] releaseId=${releaseId} status=completed total=${totalDuration}s`);
@@ -445,7 +490,7 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
 async function produzirArquivoCache(
   release: ReleaseAudioRow,
   formatoAudio: string
-): Promise<string> {
+): Promise<ResultadoArquivoCache> {
   const releaseId = release.id;
 
   const fonte = await resolverFonte(release);
@@ -476,11 +521,21 @@ async function produzirArquivoCache(
     const formatoFonte = await detectAudioFormat(sourceFile);
     let arquivoFinal = outputFile;
     let needsConversion = true;
+    // Honestidade da qualidade: FLAC gerado de MP3/AAC não é áudio sem perdas.
+    let lossless: boolean | null = null;
 
     if (formatoFonte) {
       console.log(`[AudioDownload] releaseId=${releaseId} stage=detect format=${formatoFonte.format} codec=${formatoFonte.codec}`);
       if (formatoAudio === 'mp3' && formatoFonte.codec === 'mp3') needsConversion = false;
       else if (formatoAudio === 'flac' && formatoFonte.codec === 'flac') needsConversion = false;
+
+      const codecFonte = formatoFonte.codec.toLowerCase();
+      const fonteSemPerdas =
+        codecFonte === 'flac' ||
+        codecFonte === 'alac' ||
+        codecFonte === 'wavpack' ||
+        codecFonte.startsWith('pcm_');
+      lossless = formatoAudio === 'flac' ? fonteSemPerdas : false;
     }
 
     if (needsConversion) {
@@ -523,12 +578,17 @@ async function produzirArquivoCache(
 
     // Passo 5: mover para o cache PERMANENTE e devolver o caminho definitivo.
     // set() move o arquivo (rename) — o unlink do finally vira no-op seguro.
-    const caminhoCache = await downloadCache.set(releaseId, formatoAudio, arquivoFinal);
+    const caminhoCache = await downloadCache.set(
+      releaseId,
+      formatoAudio,
+      arquivoFinal,
+      lossless ?? undefined
+    );
     if (!caminhoCache) {
       throw erroDownload('Falha ao gravar arquivo no cache', DownloadErrorType.INTERNAL_ERROR, false);
     }
 
-    return caminhoCache;
+    return { filePath: caminhoCache, lossless };
   } finally {
     // Limpeza: SOMENTE temporários — o cache permanente nunca é tocado aqui
     for (const arquivo of temporarios) {
@@ -555,6 +615,7 @@ async function baixarComRetry(url: string, destino: string, releaseId: number): 
         maxRedirects: 3,
         beforeRedirect: criarBeforeRedirect(),
         validateStatus: (s) => s < 400,
+        ...AGENTES_SEGUROS,
       });
 
       // Rejeita cedo respostas que não são áudio
@@ -653,9 +714,11 @@ async function detectAudioFormat(filePath: string): Promise<{ format: string; co
           .setFfprobePath(ffprobePath || 'ffprobe')
           .ffprobe((err, metadata) => {
             if (err) return reject(err);
+            // Primeira faixa de ÁUDIO — um vídeo com áudio não pode definir o codec
+            const faixaAudio = metadata.streams?.find((s) => s.codec_type === 'audio');
             resolve({
               format: metadata.format?.format_name || '',
-              codec: metadata.streams?.[0]?.codec_name || '',
+              codec: faixaAudio?.codec_name || '',
             });
           });
       }),
@@ -674,20 +737,28 @@ async function validarArquivo(arquivo: string, formato: string, releaseId: numbe
 
   await withTimeout(
     (async () => {
-      const buffer = await fs.readFile(arquivo);
+      // Lê apenas os primeiros bytes — validar não pode carregar o arquivo
+      // inteiro (um FLAC grande estouraria a memória do processo).
+      const handle = await fs.open(arquivo, 'r');
+      try {
+        const buffer = Buffer.alloc(12);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
 
-      if (formato === 'flac') {
-        const assinatura = buffer.subarray(0, 4).toString('ascii');
-        if (assinatura !== 'fLaC') {
-          throw erroDownload('Arquivo gerado não é um FLAC válido', DownloadErrorType.VALIDATION_FAILED, false);
+        if (formato === 'flac') {
+          const assinatura = buffer.subarray(0, 4).toString('ascii');
+          if (bytesRead < 4 || assinatura !== 'fLaC') {
+            throw erroDownload('Arquivo gerado não é um FLAC válido', DownloadErrorType.VALIDATION_FAILED, false);
+          }
+        } else {
+          const b = buffer.subarray(0, 3);
+          const ehId3 = b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33;
+          const ehMpegSync = b[0] === 0xff && (b[1] !== undefined && (b[1] & 0xe0) === 0xe0);
+          if (bytesRead < 3 || (!ehId3 && !ehMpegSync)) {
+            throw erroDownload('Arquivo gerado não é um MP3 válido', DownloadErrorType.VALIDATION_FAILED, false);
+          }
         }
-      } else {
-        const b = buffer.subarray(0, 3);
-        const ehId3 = b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33;
-        const ehMpegSync = b[0] === 0xff && (b[1] & 0xe0) === 0xe0;
-        if (!ehId3 && !ehMpegSync) {
-          throw erroDownload('Arquivo gerado não é um MP3 válido', DownloadErrorType.VALIDATION_FAILED, false);
-        }
+      } finally {
+        await handle.close();
       }
     })(),
     TIMEOUTS.VALIDATION,
@@ -697,7 +768,9 @@ async function validarArquivo(arquivo: string, formato: string, releaseId: numbe
   console.log(`[AudioDownload] releaseId=${releaseId} stage=validation status=complete`);
 }
 
-// Entrega o arquivo em cache ao cliente (stream em disco, sem ler tudo em memória)
+// Entrega o arquivo em cache ao cliente com suporte a Range (206), sem ler
+// tudo em memória. `lossless` é exposto em cabeçalho para o app poder ser
+// honesto quando um FLAC foi gerado a partir de fonte lossy.
 async function servirArquivo(
   req: Request,
   res: Response,
@@ -705,28 +778,100 @@ async function servirArquivo(
   nomeArquivo: string,
   mimeType: string,
   statusCache: 'HIT' | 'MISS',
-  releaseId: number
+  releaseId: number,
+  lossless: boolean | null
 ): Promise<void> {
   const stats = await fs.stat(caminho);
+  const total = stats.size;
   const extensao = caminho.split('.').pop() ?? 'mp3';
 
   res.setHeader('Content-Type', mimeType);
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(nomeArquivo)}.${extensao}"`);
-  res.setHeader('Content-Length', String(stats.size));
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.setHeader('X-Cache', statusCache);
+  res.setHeader('X-Audio-Lossless', lossless === null ? 'unknown' : String(lossless));
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Accept-Ranges', 'bytes');
+
+  // Range: permite retomar/reproduzir a partir de um ponto do arquivo.
+  const range = typeof req.headers.range === 'string' ? req.headers.range : undefined;
+  let inicio = 0;
+  let fim = total - 1;
+  let parcial = false;
+
+  if (range) {
+    const casamento = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+    if (!casamento) {
+      res.setHeader('Content-Range', `bytes */${total}`);
+      res.status(416).json({ success: false, error: 'Cabeçalho Range inválido' });
+      return;
+    }
+
+    const inicioTexto = casamento[1] ?? '';
+    const fimTexto = casamento[2] ?? '';
+
+    if (inicioTexto === '' && fimTexto === '') {
+      res.setHeader('Content-Range', `bytes */${total}`);
+      res.status(416).json({ success: false, error: 'Range sem posições' });
+      return;
+    }
+
+    if (inicioTexto === '') {
+      // Sufixo: bytes=-N (últimos N bytes)
+      const sufixo = parseInt(fimTexto, 10);
+      if (!Number.isFinite(sufixo) || sufixo <= 0) {
+        res.status(416).json({ success: false, error: 'Range inválido' });
+        return;
+      }
+      inicio = Math.max(0, total - sufixo);
+    } else {
+      inicio = parseInt(inicioTexto, 10);
+      if (fimTexto !== '') fim = parseInt(fimTexto, 10);
+    }
+
+    if (
+      !Number.isFinite(inicio) ||
+      !Number.isFinite(fim) ||
+      inicio < 0 ||
+      inicio >= total ||
+      fim < inicio
+    ) {
+      res.setHeader('Content-Range', `bytes */${total}`);
+      res.status(416).json({ success: false, error: 'Range fora do arquivo' });
+      return;
+    }
+
+    fim = Math.min(fim, total - 1);
+    parcial = true;
+  }
+
+  const tamanhoResposta = fim - inicio + 1;
+  res.setHeader('Content-Length', String(tamanhoResposta));
+  if (parcial) {
+    res.status(206);
+    res.setHeader('Content-Range', `bytes ${inicio}-${fim}/${total}`);
+  } else {
+    res.status(200);
+  }
+
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
+  }
 
   await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(caminho);
+    const stream = createReadStream(caminho, { start: inicio, end: fim });
     stream.on('error', reject);
     req.on('close', () => stream.destroy());
     stream.on('end', () => resolve());
     stream.pipe(res);
   });
 
-  console.log(`[AudioDownload] releaseId=${releaseId} stage=send status=sent cache=${statusCache} size=${stats.size}`);
+  console.log(
+    `[AudioDownload] releaseId=${releaseId} stage=send status=sent cache=${statusCache} ` +
+    `bytes=${tamanhoResposta} range=${parcial ? `${inicio}-${fim}` : 'full'}`
+  );
 }
 
 // ============================================================

@@ -11,6 +11,7 @@ import { ingerirPorTermo } from '../services/ingestion/searchOrchestrator';
 import { resolverFonte, DadosReleaseParaAudio } from './audioController';
 import { RespostaPaginada, ReleaseCompleto } from '../types';
 import { ErroAplicacao } from '../middleware/errorHandler';
+import { baseUrlDaRequisicao, urlsDeMidia } from '../utils/urls';
 
 // Quantidade mínima de releases no banco local para considerar que o termo
 // já foi ingerido antes. Abaixo disso, força nova ingestão.
@@ -145,11 +146,14 @@ async function buscarReleasesLocal(
        r.source_reference_url,
        r.audio_preview_url,
        r.audio_source_url,
+       r.audio_source_provider,
+       r.audio_source_page_url,
        rt.name        AS release_type,
        rt.category    AS release_type_category,
        ms.name        AS metadata_source,
        w.title        AS work_title,
        w.original_release_year,
+       a.id           AS artist_id,
        a.name         AS artist_name,
        a.country      AS artist_country
      FROM releases r
@@ -175,33 +179,37 @@ async function buscarReleasesLocal(
 
   const total = (countRows[0]?.['total'] as number) ?? 0;
 
-  const releases: ReleaseCompleto[] = (rows as any[]).map(row => {
-    const id = row['id'];
+  const releases: ReleaseCompleto[] = rows.map(row => {
+    const id = row['id'] as number;
+    const midia = urlsDeMidia(baseUrl, id);
     return {
-      id:                   id,
-      work_id:              row['work_id'],
-      version_name:         row['version_name'],
-      album_name:           row['album_name'],
-      release_year:         row['release_year'],
-      label:                row['label'],
-      country:              row['country'],
-      quality:              row['quality'],
-      cover_url:            row['cover_url'],      // null = sem capa oficial (Regra 1)
-      source_reference_url: row['source_reference_url'],
-      audio_preview_url:    row['audio_preview_url'],
+      id,
+      work_id:              row['work_id'] as number,
+      version_name:         row['version_name'] as string,
+      album_name:           row['album_name'] as string | null,
+      release_year:         row['release_year'] as number | null,
+      label:                row['label'] as string | null,
+      country:              row['country'] as string | null,
+      quality:              row['quality'] as string | null,
+      cover_url:            row['cover_url'] as string | null,      // null = sem capa oficial (Regra 1)
+      source_reference_url: row['source_reference_url'] as string | null,
+      audio_preview_url:    row['audio_preview_url'] as string | null,
       // Sempre aponta para os endpoints do backend (stream completo / download).
       // Os campos streaming_url/download_url do banco podem conter previews de 30s
       // (dados legados) e não devem ser usados como link de reprodução ou download.
-      streaming_url:        `${baseUrl}/api/releases/${id}/stream`,
-      download_url:         `${baseUrl}/api/releases/${id}/download`,
-      audio_source_url:     row['audio_source_url'] ?? null,
-      release_type:         row['release_type'],
-      release_type_category: row['release_type_category'],
-      metadata_source:      row['metadata_source'],
-      work_title:           row['work_title'],
-      artist_name:          row['artist_name'],
-      artist_country:       row['artist_country'],
-      original_release_year: row['original_release_year'],
+      streaming_url:        midia.streaming_url,
+      download_url:         midia.download_url,
+      audio_source_url:     row['audio_source_url'] as string | null,
+      audio_source_provider: row['audio_source_provider'] as string | null,
+      audio_source_page_url: row['audio_source_page_url'] as string | null,
+      release_type:         row['release_type'] as string,
+      release_type_category: row['release_type_category'] as string,
+      metadata_source:      row['metadata_source'] as string,
+      work_title:           row['work_title'] as string,
+      artist_id:            row['artist_id'] as number,
+      artist_name:          row['artist_name'] as string,
+      artist_country:       row['artist_country'] as string | null,
+      original_release_year: row['original_release_year'] as number | null,
     };
   });
 
@@ -265,9 +273,7 @@ export async function buscarMusicas(
     const offset = Math.max(parseInt(req.query['offset'] as string || '0',  10), 0);
     const page   = Math.floor(offset / limit) + 1;
 
-    const host = req.get('host') || 'localhost:3001';
-    const protocol = req.protocol || 'http';
-    const baseUrl = `${protocol}://${host}`;
+    const baseUrl = baseUrlDaRequisicao(req);
 
     // Tenta busca local primeiro (já filtrada pela Regra 7 no SQL)
     const local = await buscarReleasesLocal(termo, limit, offset, baseUrl, true);

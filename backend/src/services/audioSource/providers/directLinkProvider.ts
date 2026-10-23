@@ -18,9 +18,14 @@ import {
   USER_AGENT,
   AUDIO_EXTENSIONS,
   auditarUrl,
+  criarAgentesSeguros,
   criarBeforeRedirect,
+  detalharErro,
   interpretarNomeDeArquivo,
 } from '../webAudio';
+
+// Agentes com DNS revalidado no momento da conexão (anti-SSRF/rebinding).
+const AGENTES_SEGUROS = criarAgentesSeguros();
 
 export class DirectLinkProvider extends BaseAudioSourceProvider {
   readonly providerId = 'direct-link';
@@ -81,18 +86,19 @@ export class DirectLinkProvider extends BaseAudioSourceProvider {
         status: 'SUCCESS',
         durationMs: Date.now() - startTime,
       };
-    } catch (error: any) {
+    } catch (error) {
       const durationMs = Date.now() - startTime;
-      console.error(`[DirectLinkProvider] Falha ao validar URL:`, error.message);
+      const detalhe = detalharErro(error);
+      console.error(`[DirectLinkProvider] Falha ao validar URL:`, detalhe.mensagem);
 
       let status: SearchResult['status'] = 'FAILED';
-      if (error.code === 'ECONNABORTED' || error.message?.includes('Timeout')) {
+      if (detalhe.codigo === 'ECONNABORTED' || detalhe.mensagem.includes('Timeout')) {
         status = 'TIMEOUT';
-      } else if (error.response?.status === 403) {
+      } else if (detalhe.status === 403) {
         status = 'FORBIDDEN';
       }
 
-      return { providerId: this.providerId, candidates: [], status, error: error.message, durationMs };
+      return { providerId: this.providerId, candidates: [], status, error: detalhe.mensagem, durationMs };
     }
   }
 
@@ -111,6 +117,7 @@ export class DirectLinkProvider extends BaseAudioSourceProvider {
         maxRedirects: 3,
         beforeRedirect: criarBeforeRedirect(),
         validateStatus: (status) => status < 500,
+        ...AGENTES_SEGUROS,
       });
 
       if (resposta.status === 404 || resposta.status === 403) {
@@ -153,8 +160,9 @@ export class DirectLinkProvider extends BaseAudioSourceProvider {
           fileName: nomeArquivo,
         },
       };
-    } catch (error: any) {
-      console.error(`[DirectLinkProvider] Metadata falhou para ${candidateId}: ${error.message}`);
+    } catch (error) {
+      const detalhe = detalharErro(error);
+      console.error(`[DirectLinkProvider] Metadata falhou para ${candidateId}: ${detalhe.mensagem}`);
       return null;
     }
   }

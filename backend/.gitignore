@@ -4,6 +4,7 @@ package-lock.json
 
 # Build output
 dist/
+dist-test/
 *.js
 *.js.map
 *.d.ts
@@ -47,7 +48,6 @@ config/
 database/
 routes/
 storage/
-tests/
 composer.json
 
 # Temporary player scripts (to be removed manually with admin permissions)

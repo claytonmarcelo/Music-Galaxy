@@ -5,6 +5,7 @@ import { Request, Response, NextFunction } from 'express';
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/database';
 import { ErroAplicacao } from '../middleware/errorHandler';
+import { ANO_EFETIVO_SQL } from '../utils/urls';
 
 // GET /api/artists/:id — detalhes de um artista específico
 export async function detalharArtista(
@@ -70,33 +71,49 @@ export async function listarObrasArtista(
          w.id,
          w.title,
          w.original_release_year,
+         ${ANO_EFETIVO_SQL} AS effective_year,
          w.created_at,
          a.id      AS artist_id,
          a.name    AS artist_name,
          a.country AS artist_country
        FROM works w
        JOIN artists a ON w.artist_id = a.id
+       -- Regra 7: obra só aparece se tiver ao menos uma versão com áudio
        WHERE w.artist_id = ?
-       ORDER BY w.original_release_year DESC, w.title ASC
+         AND EXISTS (
+           SELECT 1 FROM releases r_audio
+            WHERE r_audio.work_id = w.id
+              AND r_audio.audio_source_url IS NOT NULL
+         )
+       ORDER BY effective_year DESC, w.title ASC
        LIMIT ? OFFSET ?`,
       [id, limit, offset]
     );
 
     const [countRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) AS total FROM works WHERE artist_id = ?`,
+      // Contagem com o mesmo filtro da listagem, para a paginação bater
+      `SELECT COUNT(*) AS total
+         FROM works w
+        WHERE w.artist_id = ?
+          AND EXISTS (
+            SELECT 1 FROM releases r_audio
+             WHERE r_audio.work_id = w.id
+               AND r_audio.audio_source_url IS NOT NULL
+          )`,
       [id]
     );
     const total = (countRows[0]?.['total'] as number) ?? 0;
 
-    const works = (rows as any[]).map(row => ({
-      id:                   row['id'],
-      title:                row['title'],
-      original_release_year: row['original_release_year'],
-      created_at:           row['created_at'],
+    const works = (rows as RowDataPacket[]).map(row => ({
+      id:                    row['id'] as number,
+      title:                 row['title'] as string,
+      original_release_year: row['original_release_year'] as number | null,
+      effective_year:        row['effective_year'] as number | null,
+      created_at:            row['created_at'] as Date,
       artist: {
-        id:      row['artist_id'],
-        name:    row['artist_name'],
-        country: row['artist_country'],
+        id:      row['artist_id'] as number,
+        name:    row['artist_name'] as string,
+        country: row['artist_country'] as string | null,
       },
     }));
 

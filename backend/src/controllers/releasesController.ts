@@ -5,6 +5,7 @@ import { Request, Response, NextFunction } from 'express';
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/database';
 import { ErroAplicacao } from '../middleware/errorHandler';
+import { baseUrlDaRequisicao, urlsDeMidia, ANO_EFETIVO_SQL } from '../utils/urls';
 
 // GET /api/releases/:id — detalhes de uma versão específica
 export async function detalharRelease(
@@ -27,6 +28,9 @@ export async function detalharRelease(
          r.cover_url,
          r.source_reference_url,
          r.external_id,
+         r.audio_source_url,
+         r.audio_source_provider,
+         r.audio_source_page_url,
          r.created_at,
          rt.name        AS release_type,
          rt.category    AS release_type_category,
@@ -35,6 +39,7 @@ export async function detalharRelease(
          w.id           AS work_id,
          w.title        AS work_title,
          w.original_release_year,
+         ${ANO_EFETIVO_SQL} AS effective_year,
          a.id           AS artist_id,
          a.name         AS artist_name,
          a.country      AS artist_country
@@ -52,11 +57,13 @@ export async function detalharRelease(
     }
 
     const row = rows[0]!;
+    const idRelease = row['id'] as number;
+    const midia = urlsDeMidia(baseUrlDaRequisicao(req), idRelease);
 
     res.json({
       success: true,
       data: {
-        id:            row['id'],
+        id:            idRelease,
         version_name:  row['version_name'],
         album_name:    row['album_name'],
         release_year:  row['release_year'],
@@ -70,10 +77,17 @@ export async function detalharRelease(
         source_reference_url: row['source_reference_url'],
         external_id:   row['external_id'],
         created_at:    row['created_at'],
+        // URLs de mídia são sempre construídas pelo backend (Regra 3).
+        streaming_url: midia.streaming_url,
+        download_url:  midia.download_url,
+        audio_source_url: row['audio_source_url'],
+        audio_source_provider: row['audio_source_provider'],
+        audio_source_page_url: row['audio_source_page_url'],
         work: {
           id:                   row['work_id'],
           title:                row['work_title'],
           original_release_year: row['original_release_year'],
+          effective_year:       row['effective_year'],
         },
         artist: {
           id:      row['artist_id'],
@@ -97,6 +111,7 @@ export async function listarReleasesPorData(
   try {
     const limit  = Math.min(parseInt(req.query['limit']  as string || '100', 10), 100);
     const offset = Math.max(parseInt(req.query['offset'] as string || '0',   10), 0);
+    const baseUrl = baseUrlDaRequisicao(req);
 
     const [rows] = await pool.execute<RowDataPacket[]>(
       `SELECT
@@ -110,11 +125,16 @@ export async function listarReleasesPorData(
          r.quality,
          r.cover_url,
          r.source_reference_url,
+         r.audio_source_url,
+         r.audio_source_provider,
+         r.audio_source_page_url,
          rt.name        AS release_type,
          rt.category    AS release_type_category,
          ms.name        AS metadata_source,
          w.title        AS work_title,
          w.original_release_year,
+         ${ANO_EFETIVO_SQL} AS effective_year,
+         a.id           AS artist_id,
          a.name         AS artist_name,
          a.country      AS artist_country
        FROM releases r
@@ -135,25 +155,36 @@ export async function listarReleasesPorData(
     );
     const total = (countRows[0]?.['total'] as number) ?? 0;
 
-    const releases = (rows as any[]).map(row => ({
-      id:                    row['id'],
-      work_id:               row['work_id'],
-      version_name:          row['version_name'],
-      album_name:            row['album_name'],
-      release_year:          row['release_year'],
-      label:                 row['label'],
-      country:               row['country'],
-      quality:               row['quality'],
-      cover_url:             row['cover_url'],
-      release_type:          row['release_type'],
-      release_type_category: row['release_type_category'],
-      metadata_source:       row['metadata_source'],
-      source_reference_url:  row['source_reference_url'],
-      work_title:            row['work_title'],
-      artist_name:           row['artist_name'],
-      artist_country:        row['artist_country'],
-      original_release_year: row['original_release_year'],
-    }));
+    const releases = (rows as RowDataPacket[]).map(row => {
+      const idRelease = row['id'] as number;
+      const midia = urlsDeMidia(baseUrl, idRelease);
+      return {
+        id:                    idRelease,
+        work_id:               row['work_id'] as number,
+        version_name:          row['version_name'] as string,
+        album_name:            row['album_name'] as string | null,
+        release_year:          row['release_year'] as number | null,
+        label:                 row['label'] as string | null,
+        country:               row['country'] as string | null,
+        quality:               row['quality'] as string | null,
+        cover_url:             row['cover_url'] as string | null,
+        release_type:          row['release_type'] as string,
+        release_type_category: row['release_type_category'] as string,
+        metadata_source:       row['metadata_source'] as string,
+        source_reference_url:  row['source_reference_url'] as string | null,
+        audio_source_url:      row['audio_source_url'] as string,
+        audio_source_provider: row['audio_source_provider'] as string | null,
+        audio_source_page_url: row['audio_source_page_url'] as string | null,
+        streaming_url:         midia.streaming_url,
+        download_url:          midia.download_url,
+        work_title:            row['work_title'] as string,
+        artist_id:             row['artist_id'] as number,
+        artist_name:           row['artist_name'] as string,
+        artist_country:        row['artist_country'] as string | null,
+        original_release_year: row['original_release_year'] as number | null,
+        effective_year:        row['effective_year'] as number | null,
+      };
+    });
 
     res.json({
       success: true,

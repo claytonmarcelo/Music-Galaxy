@@ -4,8 +4,6 @@
 import { IAudioSourceProvider, AudioIdentity, SearchResult, AudioCandidate, CandidateScore, ProviderError } from './types';
 import { ExactMatchEngine } from './exactMatchEngine';
 import { SourceRanker } from './sourceRanker';
-import { downloadCache } from '../downloadCache';
-import { downloadDeduplication } from '../downloadDeduplication';
 
 export interface OrchestratorConfig {
   enableParallelSearch: boolean;
@@ -61,7 +59,30 @@ export class SourceOrchestrator {
 
   // Gerar ID único para requisição
   private generateRequestId(): string {
-    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+  }
+
+  // Executa a busca de um provider com timeout próprio — um provider lento
+  // nunca segura a descoberta inteira.
+  private async executarBuscaComTimeout(
+    provider: IAudioSourceProvider,
+    identity: AudioIdentity
+  ): Promise<SearchResult> {
+    const timeoutMs = provider.timeouts.search + 2000;
+    let timer: NodeJS.Timeout | undefined;
+
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`Timeout de busca (${timeoutMs}ms)`)),
+        timeoutMs
+      );
+    });
+
+    try {
+      return await Promise.race([provider.search(identity), timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   // Executar busca em um único provider
@@ -73,7 +94,7 @@ export class SourceOrchestrator {
     console.log(`[SourceOrchestrator] Searching provider: ${provider.providerId}`);
 
     try {
-      const result = await provider.search(identity);
+      const result = await this.executarBuscaComTimeout(provider, identity);
       const durationMs = Date.now() - startTime;
       
       console.log(
@@ -82,27 +103,45 @@ export class SourceOrchestrator {
       );
       
       return result;
-    } catch (error: any) {
+    } catch (error) {
       const durationMs = Date.now() - startTime;
-      console.error(`[SourceOrchestrator] Provider ${provider.providerId} failed:`, error.message);
-      
+      const mensagem = error instanceof Error ? error.message : 'Falha desconhecida no provider';
+      const ehTimeout = mensagem.includes('Timeout');
+      console.error(`[SourceOrchestrator] Provider ${provider.providerId} failed:`, mensagem);
+
       return {
         providerId: provider.providerId,
         candidates: [],
-        status: 'FAILED',
-        error: error.message,
+        status: ehTimeout ? 'TIMEOUT' : 'FAILED',
+        error: mensagem,
         durationMs,
       };
     }
   }
 
-  // Executar busca paralela em múltiplos providers
+  // Executar busca paralela respeitando o limite de concorrência configurado
   private async parallelSearch(
     providers: IAudioSourceProvider[],
     identity: AudioIdentity
   ): Promise<SearchResult[]> {
-    const promises = providers.map(provider => this.searchProvider(provider, identity));
-    return Promise.all(promises);
+    const results: SearchResult[] = new Array(providers.length);
+    const limite = Math.max(1, Math.min(this.config.maxConcurrentProviders, providers.length));
+    let proximo = 0;
+
+    const trabalhadores = Array.from({ length: limite }, async () => {
+      while (true) {
+        const indice = proximo;
+        proximo += 1;
+        if (indice >= providers.length) return;
+
+        const provider = providers[indice];
+        if (!provider) return;
+        results[indice] = await this.searchProvider(provider, identity);
+      }
+    });
+
+    await Promise.all(trabalhadores);
+    return results;
   }
 
   // Executar busca sequencial em múltiplos providers

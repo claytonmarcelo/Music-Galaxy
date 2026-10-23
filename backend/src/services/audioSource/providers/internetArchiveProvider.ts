@@ -30,10 +30,14 @@ import axios from 'axios';
 import {
   USER_AGENT,
   auditarUrl,
+  criarAgentesSeguros,
   criarBeforeRedirect,
   interpretarNomeDeArquivo,
   NomeInterpretado,
 } from '../webAudio';
+
+// Agentes com DNS revalidado no momento da conexão (anti-SSRF/rebinding).
+const AGENTES_SEGUROS = criarAgentesSeguros();
 
 // Endpoints públicos do Internet Archive (nenhuma chave necessária).
 const URL_BUSCA = 'https://archive.org/advancedsearch.php';
@@ -458,6 +462,7 @@ export class InternetArchiveProvider extends BaseAudioSourceProvider {
         maxRedirects: 3,
         beforeRedirect: criarBeforeRedirect(),
         maxContentLength: TAMANHO_MAX_RESPOSTA,
+        ...AGENTES_SEGUROS,
       }
     );
 
@@ -478,6 +483,7 @@ export class InternetArchiveProvider extends BaseAudioSourceProvider {
         maxRedirects: 3,
         beforeRedirect: criarBeforeRedirect(),
         maxContentLength: TAMANHO_MAX_RESPOSTA,
+        ...AGENTES_SEGUROS,
       }
     );
 
@@ -820,6 +826,7 @@ export class InternetArchiveProvider extends BaseAudioSourceProvider {
         maxRedirects: 3,
         beforeRedirect: criarBeforeRedirect(),
         validateStatus: (status) => status < 500,
+        ...AGENTES_SEGUROS,
       });
 
       if (resposta.status >= 400) return null;

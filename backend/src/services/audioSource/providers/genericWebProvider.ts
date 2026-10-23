@@ -23,7 +23,9 @@ import { promisify } from 'util';
 import {
   USER_AGENT,
   auditarUrl,
+  criarAgentesSeguros,
   criarBeforeRedirect,
+  detalharErro,
   dominioPlataformaProibida,
   extrairLinksDeAudio,
   interpretarNomeDeArquivo,
@@ -33,6 +35,9 @@ import {
 // execFile com array de argumentos não passa por shell — elimina qualquer
 // risco de injeção de comando no termo buscado pelo usuário.
 const execFileAsync = promisify(execFile);
+
+// Agentes com DNS revalidado no momento da conexão (anti-SSRF/rebinding).
+const AGENTES_SEGUROS = criarAgentesSeguros();
 
 // O tsconfig do backend usa moduleResolution "node" (legado), que não enxerga
 // os re-exports de TIPO do cheerio (ex.: CheerioAPI). Derivamos o tipo do
@@ -232,15 +237,16 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
         status: 'SUCCESS',
         durationMs: Date.now() - startTime,
       };
-    } catch (error: any) {
+    } catch (error) {
+      const { mensagem, status: httpStatus } = detalharErro(error);
       const durationMs = Date.now() - startTime;
-      console.error(`[GenericWebProvider] Descoberta falhou:`, error.message);
+      console.error(`[GenericWebProvider] Descoberta falhou:`, mensagem);
 
       let status: SearchResult['status'] = 'FAILED';
-      if (error.message?.includes('Timeout')) status = 'TIMEOUT';
-      else if (error.response?.status === 403) status = 'FORBIDDEN';
+      if (mensagem.includes('Timeout')) status = 'TIMEOUT';
+      else if (httpStatus === 403) status = 'FORBIDDEN';
 
-      return { providerId: this.providerId, candidates: [], status, error: error.message, durationMs };
+      return { providerId: this.providerId, candidates: [], status, error: mensagem, durationMs };
     }
   }
 
@@ -280,9 +286,9 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
           url,
         ], { maxBuffer: TAMANHO_MAX_HTML + 1024, windowsHide: true });
         html = stdout;
-      } catch (error: any) {
+      } catch (error) {
         console.warn(
-          `[GenericWebProvider] curl indisponível para o motor ${motor.id}: ${error.message} — tentando axios`
+          `[GenericWebProvider] curl indisponível para o motor ${motor.id}: ${detalharErro(error).mensagem} — tentando axios`
         );
       }
     }
@@ -318,9 +324,10 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
           maxRedirects: 3,
           beforeRedirect: criarBeforeRedirect(),
           maxContentLength: TAMANHO_MAX_HTML,
+          ...AGENTES_SEGUROS,
         });
-      } catch (error: any) {
-        const ehRateLimit = error.response?.status === 429;
+      } catch (error) {
+        const ehRateLimit = detalharErro(error).status === 429;
         if (!ehRateLimit || i === esperas.length - 1) throw error;
         console.warn(`[GenericWebProvider] Motor respondeu 429 (rate limit); aguardando ${esperas[i + 1]}ms`);
       }
@@ -381,8 +388,8 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
         `(${descartadosPorFaltaDaMusica} ignoradas por não terem a música no bloco)`
       );
       return urls;
-    } catch (error: any) {
-      console.warn(`[GenericWebProvider] Motor ${motor.id} indisponível: ${error.message}`);
+    } catch (error) {
+      console.warn(`[GenericWebProvider] Motor ${motor.id} indisponível: ${detalharErro(error).mensagem}`);
       return [];
     }
   }
@@ -402,6 +409,7 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
         maxRedirects: 3,
         beforeRedirect: criarBeforeRedirect(),
         maxContentLength: TAMANHO_MAX_HTML,
+        ...AGENTES_SEGUROS,
       });
 
       const html = typeof resposta.data === 'string' ? resposta.data : String(resposta.data ?? '');
@@ -460,8 +468,8 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
 
       console.log(`[GenericWebProvider] ${candidatos.length} candidatos extraídos de ${paginaUrl}`);
       return candidatos;
-    } catch (error: any) {
-      console.warn(`[GenericWebProvider] Falha ao visitar ${paginaUrl}: ${error.message}`);
+    } catch (error) {
+      console.warn(`[GenericWebProvider] Falha ao visitar ${paginaUrl}: ${detalharErro(error).mensagem}`);
       return [];
     }
   }
@@ -515,6 +523,7 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
         maxRedirects: 3,
         beforeRedirect: criarBeforeRedirect(),
         maxContentLength: TAMANHO_MAX_HTML,
+        ...AGENTES_SEGUROS,
       });
 
       const html = typeof resposta.data === 'string' ? resposta.data : String(resposta.data ?? '');
@@ -538,12 +547,13 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
       }
 
       return { providerId: this.providerId, candidates: candidatos, status: 'SUCCESS', durationMs: Date.now() - startTime };
-    } catch (error: any) {
+    } catch (error) {
+      const { mensagem } = detalharErro(error);
       return {
         providerId: this.providerId,
         candidates: [],
-        status: error.message?.includes('Timeout') ? 'TIMEOUT' : 'FAILED',
-        error: error.message,
+        status: mensagem.includes('Timeout') ? 'TIMEOUT' : 'FAILED',
+        error: mensagem,
         durationMs: Date.now() - startTime,
       };
     }
@@ -563,6 +573,7 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
         timeout: this.timeouts.metadata,
         maxRedirects: 3,
         beforeRedirect: criarBeforeRedirect(),
+        ...AGENTES_SEGUROS,
       });
 
       const contentType = (resposta.headers['content-type'] as string) || '';
@@ -580,8 +591,8 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
         format: this.extrairFormatoDaUrl(candidateId),
         metadata: { contentType, contentLength: tamanho },
       };
-    } catch (error: any) {
-      console.error(`[GenericWebProvider] Metadata falhou para ${candidateId}: ${error.message}`);
+    } catch (error) {
+      console.error(`[GenericWebProvider] Metadata falhou para ${candidateId}: ${detalharErro(error).mensagem}`);
       return null;
     }
   }

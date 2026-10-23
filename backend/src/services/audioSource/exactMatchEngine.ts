@@ -6,7 +6,66 @@ import { AudioIdentity, AudioCandidate, MatchClassification, CandidateScore } fr
 export class ExactMatchEngine {
   // Pontuação mínima para EXACT_MATCH
   private readonly EXACT_MATCH_THRESHOLD = 90;
-  
+
+  // Marcadores de versões alternativas. Um lançamento original NUNCA pode
+  // receber áudio de uma dessas variantes (Regra 2 + integridade da versão).
+  private readonly MARCADORES_VERSAO: ReadonlyArray<{ nome: string; padrao: RegExp }> = [
+    { nome: 'live', padrao: /\blive\b/ },
+    { nome: 'remix', padrao: /\bremix(es|ed)?\b|\brmx\b/ },
+    { nome: 'instrumental', padrao: /\binstrumental\b/ },
+    { nome: 'acapella', padrao: /\bacapella\b|\ba cappella\b/ },
+    { nome: 'cover', padrao: /\bcover\b/ },
+    { nome: 'tribute', padrao: /\btribute\b/ },
+    { nome: 'karaoke', padrao: /\bkaraoke\b/ },
+    { nome: 'demo', padrao: /\bdemo\b/ },
+    { nome: 'bootleg', padrao: /\bbootleg\b/ },
+    { nome: 'mashup', padrao: /\bmashup\b/ },
+    { nome: 'medley', padrao: /\bmedley\b/ },
+    { nome: 'megamix', padrao: /\bmega\s?mix\b/ },
+    { nome: 'acoustic', padrao: /\bacoustic\b|\bunplugged\b/ },
+    { nome: 'edit', padrao: /\bedit(ed)?\b/ },
+    { nome: 'dub', padrao: /\bdub\b/ },
+    { nome: 'vip', padrao: /\bvip\b/ },
+    { nome: 'extended', padrao: /\bextended\b/ },
+    { nome: 'rework', padrao: /\brework(ed)?\b/ },
+    { nome: 'sped up', padrao: /\bsped up\b|\bspeed up\b/ },
+    { nome: 'slowed', padrao: /\bslowed\b/ },
+  ];
+
+  // Rótulos que representam a versão "de fábrica" da música, não uma variante.
+  private versaoNeutra(versao?: string): boolean {
+    if (!versao) return true;
+    const v = this.normalize(versao);
+    if (!v) return true;
+    return /^(original|album|single|main|standard|explicit)( version)?$/.test(v)
+      || /^original mix$/.test(v)
+      || /^(digital )?remaster(ed)?( \d{4})?$/.test(v)
+      || /^album edit$/.test(v);
+  }
+
+  // Detecta marcadores de variante em um texto já normalizado.
+  private detectarMarcadores(texto?: string): string[] {
+    if (!texto) return [];
+    const normalizado = this.normalize(texto);
+    return this.MARCADORES_VERSAO
+      .filter(({ padrao }) => padrao.test(normalizado))
+      .map(({ nome }) => nome);
+  }
+
+  // Texto que descreve a versão do candidato: o campo version e o que sobra
+  // do título depois de remover artista e título da música procurada.
+  private evidenciaDeVersao(identity: AudioIdentity, candidate: AudioCandidate): string {
+    const titulo = this.normalize(candidate.title);
+    const tituloBase = this.normalize(identity.title);
+    const artistaBase = this.normalize(identity.artist);
+
+    let sobra = titulo;
+    if (artistaBase) sobra = sobra.split(artistaBase).join(' ');
+    if (tituloBase) sobra = sobra.split(tituloBase).join(' ');
+
+    return `${candidate.version ?? ''} ${sobra}`.trim();
+  }
+
   // Pontuação mínima para PROBABLE_MATCH
   private readonly PROBABLE_MATCH_THRESHOLD = 60;
 
@@ -173,39 +232,25 @@ export class ExactMatchEngine {
       reasons.push('Título muito diferente');
     }
 
-    // Regra 3: Versão explícita incompatível
-    if (identity.version && candidate.version) {
-      const normalizedExpected = this.normalize(identity.version);
-      const normalizedCandidate = this.normalize(candidate.version);
+    // Regra 3: integridade da versão.
+    // Compara os marcadores presentes na identidade pedida com os do candidato
+    // (campo version + sobra do título). Qualquer variante não solicitada é
+    // rejeitada — um lançamento original nunca recebe live/remix/instrumental.
+    const marcadoresEsperados = this.detectarMarcadores(identity.version);
+    const marcadoresCandidato = this.detectarMarcadores(
+      this.evidenciaDeVersao(identity, candidate)
+    );
+    const naoEsperados = marcadoresCandidato.filter(
+      (marcador) => !marcadoresEsperados.includes(marcador)
+    );
+    if (naoEsperados.length > 0) {
+      reasons.push(`Versão alternativa não solicitada: ${naoEsperados.join(', ')}`);
+    }
 
-      // Rejeitar cover quando foi solicitada versão original
-      if (normalizedExpected.includes('original') && 
-          (normalizedCandidate.includes('cover') || 
-           normalizedCandidate.includes('tribute') ||
-           normalizedCandidate.includes('karaoke'))) {
-        reasons.push('Cover/tribute quando foi solicitada versão original');
-      }
-
-      // Rejeitar remix quando foi solicitada versão original
-      if (normalizedExpected.includes('original') && 
-          (normalizedCandidate.includes('remix') || 
-           normalizedCandidate.includes('edit') ||
-           normalizedCandidate.includes('mix'))) {
-        reasons.push('Remix/edit quando foi solicitada versão original');
-      }
-
-      // Rejeitar live quando foi solicitada versão de estúdio
-      if (!normalizedExpected.includes('live') && normalizedCandidate.includes('live')) {
-        reasons.push('Versão live quando foi solicitada versão de estúdio');
-      }
-
-      // Rejeitar instrumental quando foi solicitada versão vocal
-      if (!normalizedExpected.includes('instrumental') && 
-          !normalizedExpected.includes('acapella') &&
-          (normalizedCandidate.includes('instrumental') || 
-           normalizedCandidate.includes('acapella'))) {
-        reasons.push('Instrumental/acapella quando foi solicitada versão completa');
-      }
+    // Quando a versão pedida é uma variante real (ex.: Instrumental), o
+    // candidato precisa comprovar que também é aquela variante.
+    if (!this.versaoNeutra(identity.version) && marcadoresCandidato.length === 0) {
+      reasons.push('Versão solicitada não identificada no candidato');
     }
 
     // Regra 4: Duração muito incompatível

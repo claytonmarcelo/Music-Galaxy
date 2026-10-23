@@ -12,12 +12,14 @@
     "web": "npm --workspace mobile run web",
     "android": "npm --workspace mobile run android",
     "ios": "npm --workspace mobile run ios",
-    "install:all": "npm install && cd mobile && npm install && cd ../backend && composer install",
+    "install:all": "npm install",
     "dev:mobile": "npm --workspace mobile run start",
-    "dev:backend": "cd backend && php artisan serve",
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:mobile\"",
-    "build:mobile": "npm --workspace mobile run build",
-    "build:backend": "cd backend && npm run build"
+    "dev:backend": "npm --workspace backend run dev",
+    "dev": "concurrently --names backend,mobile --prefix-colors cyan,magenta \"npm run dev:backend\" \"npm run dev:mobile\"",
+    "build:backend": "npm --workspace backend run build",
+    "typecheck": "npm --workspace backend run typecheck && npm --workspace mobile run typecheck",
+    "test": "npm --workspace backend run test",
+    "test:api": "npm --workspace backend run test:api"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
