@@ -125,13 +125,18 @@ export default function BuscaScreen(): React.JSX.Element {
     };
   }, [atualizarResumoFila]);
 
-  // Web: o navegador (Chrome, Edge e Firefox) pinta o campo de busca de
-  // amarelo quando o preenchimento automático age sobre ele, e recorta esse
-  // amarelo no texto — o retângulo que aparecia dentro do placeholder. O
-  // truque antigo (sombra interna com o token translúcido) não resolvia,
-  // porque uma cor com alfa não encobre o fundo imposto pelo navegador.
-  // Aqui a cor do campo é composta em um rgb opaco e o estilo nativo de
-  // preenchimento automático é neutralizado de forma definitiva, sempre com
+  // Web: o navegador pinta o campo de busca de amarelo quando o
+  // preenchimento automático age sobre ele, e recorta esse amarelo no
+  // texto. Além disso, o Chrome desenha o próprio anel de foco no campo,
+  // na cor de destaque do navegador (laranja nesta máquina): era esse
+  // retângulo que aparecia em volta de onde o usuário escreve.
+  //
+  // O truque antigo (sombra interna com o token translúcido) não resolvia
+  // o amarelo, porque uma cor com alfa não encobre o fundo imposto pelo
+  // navegador. Aqui a cor do campo é composta em um rgb opaco e o estilo
+  // nativo de preenchimento automático é neutralizado de forma definitiva.
+  // O anel de foco do navegador também é desligado, porque a identidade do
+  // app já sinaliza o foco no contorno e na sombra da pílula — sempre com
   // os tokens do tema (nunca cores fixas).
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -148,6 +153,19 @@ export default function BuscaScreen(): React.JSX.Element {
     const fundoOpaco = opacizar(colors.input, colors.background);
 
     estilo.textContent = `
+      /* Anel de foco do navegador: some com o retângulo laranja que ele
+         desenhava ao redor da área de escrita do campo de busca. */
+      #campo-busca-musicgalaxy,
+      #campo-busca-musicgalaxy:hover,
+      #campo-busca-musicgalaxy:focus,
+      #campo-busca-musicgalaxy:focus-visible,
+      #campo-busca-musicgalaxy:active {
+        outline: none !important;
+        outline-offset: 0 !important;
+      }
+
+      /* Preenchimento automático do navegador: pinta o campo de amarelo e
+         recorta esse amarelo no texto escrito pelo usuário. */
       input:-webkit-autofill,
       input:-webkit-autofill:hover,
       input:-webkit-autofill:focus,
@@ -564,6 +582,9 @@ export default function BuscaScreen(): React.JSX.Element {
                 // Campo de pesquisa não tem nada a ver com preenchimento
                 // automático: desligar evita o amarelo do navegador.
                 autoComplete="off"
+                // Identificador usado pela folha de estilo da web para
+                // desligar o anel de foco do navegador só neste campo.
+                nativeID="campo-busca-musicgalaxy"
                 accessibilityLabel="Campo de busca musical"
               />
               {termo.length === 0 && (
