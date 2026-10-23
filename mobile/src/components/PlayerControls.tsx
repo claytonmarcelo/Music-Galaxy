@@ -16,7 +16,7 @@ import SliderModule from '@react-native-community/slider';
 import { playerAudio, EstadoPlayer } from '../services/playerAudio';
 import { useModal } from '../contexts/ModalContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { TIMINGS, EASING } from '../utils/animacoes';
+import { TIMINGS, EASING, USE_NATIVE_DRIVER } from '../utils/animacoes';
 
 interface Props {
   url: string;
@@ -48,7 +48,7 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
     Animated.timing(fadeInAnim, {
       toValue: 1,
       duration: TIMINGS.normal,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
 
     return () => unsubscribe();
@@ -69,12 +69,12 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
           Animated.timing(pulseAnim, {
             toValue: 1.1,
             duration: 800,
-            useNativeDriver: true,
+            useNativeDriver: USE_NATIVE_DRIVER,
           }),
           Animated.timing(pulseAnim, {
             toValue: 1,
             duration: 800,
-            useNativeDriver: true,
+            useNativeDriver: USE_NATIVE_DRIVER,
           }),
         ])
       ).start();
@@ -96,12 +96,12 @@ export default function PlayerControls({ url, titulo, artista }: Props): React.J
       Animated.sequence([
         Animated.spring(playButtonScaleAnim, {
           toValue: 0.9,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
           ...EASING.suave,
         }),
         Animated.spring(playButtonScaleAnim, {
           toValue: 1,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
           ...EASING.suave,
         }),
       ]).start();

@@ -27,7 +27,7 @@ import DownloadProgress from '../components/DownloadProgress';
 import AuroraBackground from '../components/AuroraBackground';
 import GlassCard from '../components/GlassCard';
 import { BASE_URL } from '../services/api';
-import { TIMINGS, EASING } from '../utils/animacoes';
+import { TIMINGS, EASING, USE_NATIVE_DRIVER } from '../utils/animacoes';
 import { traduzirTipoRelease } from '../utils/tiposRelease';
 
 type RouteProps = RouteProp<RootStackParamList, 'DetalheRelease'>;
@@ -71,18 +71,18 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
         Animated.timing(fadeInAnim, {
           toValue: 1,
           duration: TIMINGS.normal,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
         Animated.spring(scaleCapaAnim, {
           toValue: 1,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
           ...EASING.suave,
         }),
       ]),
       Animated.timing(slideConteudeAnim, {
         toValue: 0,
         duration: TIMINGS.normal,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }),
     ]).start();
   }, [fadeInAnim, scaleCapaAnim, slideConteudeAnim]);
@@ -161,7 +161,7 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
         scrollEventThrottle={16}
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: true }
+          { useNativeDriver: USE_NATIVE_DRIVER }
         )}
       >
         {/* Capa — Regra 1: só exibe se cover_url não for null */}

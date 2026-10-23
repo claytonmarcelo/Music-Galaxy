@@ -16,7 +16,7 @@ import {
 import { downloadManager, EstadoDownload } from '../services/downloadManager';
 import { useModal } from '../contexts/ModalContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { TIMINGS, EASING } from '../utils/animacoes';
+import { TIMINGS, EASING, USE_NATIVE_DRIVER } from '../utils/animacoes';
 
 interface Props {
   url: string;
@@ -53,7 +53,7 @@ export default function DownloadProgress({
     Animated.timing(fadeInAnim, {
       toValue: 1,
       duration: TIMINGS.normal,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
 
     const unsubscribe = downloadManager.subscribe(url, (novoEstado) => {
@@ -76,7 +76,7 @@ export default function DownloadProgress({
         // Anima checkmark
         Animated.spring(scaleCheckmarkAnim, {
           toValue: 1,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
           ...EASING.suave,
         }).start();
 

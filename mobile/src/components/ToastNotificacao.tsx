@@ -10,6 +10,7 @@ import {
   Animated,
   Platform,
 } from 'react-native';
+import { USE_NATIVE_DRIVER } from '../utils/animacoes';
 import { useTheme } from '../contexts/ThemeContext';
 
 export type TipoToast = 'sucesso' | 'erro' | 'aviso' | 'info';
@@ -56,12 +57,12 @@ export default function ToastNotificacao({
       Animated.timing(translateYAnim, {
         toValue: -100,
         duration: 300,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }),
       Animated.timing(opacidadeAnim, {
         toValue: 0,
         duration: 300,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }),
     ]).start(() => {
       onFechar?.();
@@ -74,14 +75,14 @@ export default function ToastNotificacao({
       Animated.parallel([
         Animated.spring(translateYAnim, {
           toValue: 0,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
           tension: 65,
           friction: 11,
         }),
         Animated.timing(opacidadeAnim, {
           toValue: 1,
           duration: 300,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
       ]).start();
 

@@ -11,6 +11,7 @@ import {
   StyleSheet,
   Animated,
 } from 'react-native';
+import { USE_NATIVE_DRIVER } from '../utils/animacoes';
 import { useTheme } from '../contexts/ThemeContext';
 
 export type TipoModal = 'sucesso' | 'erro' | 'aviso' | 'info' | 'confirmacao';
@@ -73,19 +74,19 @@ export default function ModalPersonalizado({
       Animated.parallel([
         Animated.spring(scaleAnim, {
           toValue: 1,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
           tension: 65,
           friction: 11,
         }),
         Animated.timing(opacidadeAnim, {
           toValue: 1,
           duration: 300,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
         Animated.timing(translateYAnim, {
           toValue: 0,
           duration: 400,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
       ]).start();
     } else {

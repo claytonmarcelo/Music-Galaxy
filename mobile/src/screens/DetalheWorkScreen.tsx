@@ -24,7 +24,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import ReleaseCard from '../components/ReleaseCard';
 import AuroraBackground from '../components/AuroraBackground';
 import GlassCard from '../components/GlassCard';
-import { TIMINGS } from '../utils/animacoes';
+import { TIMINGS, USE_NATIVE_DRIVER } from '../utils/animacoes';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DetalheWork'>;
 
@@ -60,7 +60,7 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
     Animated.timing(fadeInAnim, {
       toValue: 1,
       duration: TIMINGS.normal,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
   }, [fadeInAnim]);
 

@@ -11,6 +11,7 @@ import {
   Animated,
   ActivityIndicator,
 } from 'react-native';
+import { USE_NATIVE_DRIVER } from '../utils/animacoes';
 import { useTheme } from '../contexts/ThemeContext';
 
 interface CustomButtonProps {
@@ -44,14 +45,14 @@ export default function CustomButton({
   const handlePressIn = () => {
     Animated.spring(scaleAnim, {
       toValue: 0.95,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
   };
 
   const handlePressOut = () => {
     Animated.spring(scaleAnim, {
       toValue: 1,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
   };
 

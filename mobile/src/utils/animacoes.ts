@@ -6,8 +6,10 @@ import { Animated, Platform } from 'react-native';
 
 // Detectar se está em Web
 const IS_WEB = Platform.OS === 'web';
-// Em Web, não usar useNativeDriver (não é suportado)
-const USE_NATIVE_DRIVER = !IS_WEB;
+// Em Web, não usar useNativeDriver (o módulo nativo de animação não existe e o
+// React Native Web avisa e cai para animação em JS). Exportado para que os
+// componentes usem animação nativa no Android/iOS sem gerar o aviso na web.
+export const USE_NATIVE_DRIVER = !IS_WEB;
 
 /**
  * Configurações de timing padrão para animações
@@ -245,9 +247,9 @@ export const bounce = (animValue: Animated.Value) => {
  */
 export const shake = (animValue: Animated.Value, intensity = 10) => {
   Animated.sequence([
-    Animated.timing(animValue, { toValue: intensity, duration: 100, useNativeDriver: true }),
-    Animated.timing(animValue, { toValue: -intensity, duration: 100, useNativeDriver: true }),
-    Animated.timing(animValue, { toValue: intensity, duration: 100, useNativeDriver: true }),
-    Animated.timing(animValue, { toValue: 0, duration: 100, useNativeDriver: true }),
+    Animated.timing(animValue, { toValue: intensity, duration: 100, useNativeDriver: USE_NATIVE_DRIVER }),
+    Animated.timing(animValue, { toValue: -intensity, duration: 100, useNativeDriver: USE_NATIVE_DRIVER }),
+    Animated.timing(animValue, { toValue: intensity, duration: 100, useNativeDriver: USE_NATIVE_DRIVER }),
+    Animated.timing(animValue, { toValue: 0, duration: 100, useNativeDriver: USE_NATIVE_DRIVER }),
   ]).start();
 };

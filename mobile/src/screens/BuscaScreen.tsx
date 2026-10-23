@@ -28,7 +28,7 @@ import { useHistorico, ItemHistorico } from '../contexts/HistoricoContext';
 import { useModal } from '../contexts/ModalContext';
 import { useTheme } from '../contexts/ThemeContext';
 import FiltrosModal, { Filtros } from '../components/FiltrosModal';
-import { TIMINGS, EASING } from '../utils/animacoes';
+import { TIMINGS, EASING, USE_NATIVE_DRIVER } from '../utils/animacoes';
 import { MusicEmojis } from '../components/AnimatedIcon';
 import AuroraBackground from '../components/AuroraBackground';
 import GlassCard from '../components/GlassCard';
@@ -122,7 +122,7 @@ export default function BuscaScreen(): React.JSX.Element {
       Animated.timing(fadeListaAnim, {
         toValue: 1,
         duration: TIMINGS.normal,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }).start();
     } else {
       fadeListaAnim.setValue(0);
@@ -136,12 +136,12 @@ export default function BuscaScreen(): React.JSX.Element {
         Animated.timing(slideEstadoAnim, {
           toValue: 0,
           duration: TIMINGS.normal,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
         Animated.timing(opacidadeEstadoAnim, {
           toValue: 1,
           duration: TIMINGS.normal,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
       ]).start();
     }
@@ -212,13 +212,13 @@ export default function BuscaScreen(): React.JSX.Element {
     if (novoTermo.length > 0) {
       Animated.spring(scaleHeaderAnim, {
         toValue: 0.95,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
         ...EASING.suave,
       }).start();
     } else {
       Animated.spring(scaleHeaderAnim, {
         toValue: 1,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
         ...EASING.suave,
       }).start();
     }
@@ -267,7 +267,7 @@ export default function BuscaScreen(): React.JSX.Element {
     // Reset animations
     Animated.spring(scaleHeaderAnim, {
       toValue: 1,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
       ...EASING.suave,
     }).start();
   }, [scaleHeaderAnim]);

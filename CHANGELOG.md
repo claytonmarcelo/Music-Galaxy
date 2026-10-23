@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (Animações na web)
+- **Aviso de `useNativeDriver` eliminado** — O React Native Web exibia "Animated: useNativeDriver is not supported because the native animated module is missing" a cada animação (no navegador não existe módulo nativo de animação). Os 9 arquivos de tela/componente que ainda passavam `useNativeDriver: true` fixo agora usam a constante `USE_NATIVE_DRIVER` exportada por `mobile/src/utils/animacoes.ts` (`Platform.OS !== 'web'`): no Android/iOS a animação continua nativa; na web roda em JS sem aviso. Verificado no console do Expo web após busca real ("daft punk"): zero warnings/erros. `npx tsc --noEmit` limpo no mobile.
+
 ### Fixed (Interface)
 - **Plural de "versão" corrigido** — o app montava o plural como `"versão" + "ões"`, exibindo "versãoões" na tela de busca ("30 versãoões encontradas"), no rodapé da lista, nos detalhes da obra e em Favoritos; agora o texto usa `versão`/`versões` (e `encontrada`/`encontradas`) corretamente. Verificado no app: "30 versões encontradas, aguardando a descoberta do áudio em sites abertos".
 
