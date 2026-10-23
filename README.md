@@ -109,7 +109,10 @@ O mecanismo de pesquisa localiza e apresenta todas as versões existentes de uma
 - **Envio ao backend** — a amostra é lida em base64 (`expo-file-system/legacy` no Android/iOS, `FileReader` na web) e enviada para `POST /api/recognize`. O arquivo temporário é apagado logo após a análise, em qualquer caminho de saída.
 - **Provedor AudD** — `auddProvider` fala com a API pública do AudD usando `api_token` no corpo da requisição (nunca na URL) e o áudio em `multipart/form-data`. A credencial fica **apenas** no backend (`AUDD_TOKEN` no `.env`) e nunca é exposta ao aplicativo.
 - **Contrato honesto** — o painel só exibe título, artista, álbum e confiança **exatamente** como o serviço respondeu. Sem correspondência, o app avisa que não encontrou a música e **não** preenche o campo de busca com nenhuma sugestão inventada.
-- **Erros tratados em português** — permissão negada, microfone indisponível, falta de internet, credencial inválida, excesso de tentativas e falha do provedor viram mensagens claras, com "Tentar novamente" e "Cancelar" no painel.
+- **Erros tratados em português** — permissão negada, microfone indisponível, falta de internet, credencial inválida, excesso de tentativas e falha do provedor viram mensagens claras, com "Tentar novamente" e "Cancelar" no painel. Cada falha tem um título próprio ("Microfone bloqueado", "Sem conexão com o servidor"…) e o painel lembra que a busca por texto continua funcionando.
+- **Destino da amostra informado** — como o reconhecimento usa um serviço externo, o app **diz** para onde o trecho vai: ele sai do aparelho, passa pelo servidor do Music Galaxy e é analisado pelo serviço de reconhecimento. O aviso aparece no painel durante a captura, está no manual do aplicativo e na permissão de microfone do sistema. Nada é gravado: nem no aparelho depois da análise, nem no banco, nem em log.
+- **Faixa fora do catálogo** — quando a música tocada ainda não existe no Music Galaxy, a tela avisa "Essa faixa ainda não está no catálogo" e sugere buscar pelo artista, em vez de um "nada encontrado" genérico. O histórico e os filtros não são apagados.
+- **Tecnologia escolhida** — AudD (API HTTP pelo backend). A comparação com ShazamKit (SDK Android em AAR, token de desenvolvedor Apple e módulo nativo em Kotlin) e ACRCloud está registrada em `AGENTS.md`, com o que foi verificado e o que ficou **NÃO VERIFICADO**. Trocar de provedor é uma linha de configuração (`RECOGNITION_PROVIDER`).
 
 ### Ingestão de Dados Externos
 - Orquestrador de ingestão consulta MusicBrainz, Cover Art Archive e Discogs
@@ -227,9 +230,10 @@ musicgalaxy/
 │   │   ├── components/       → Componentes reutilizáveis (vidro fosco, player, cards)
 │   │   ├── contexts/         → Tema, favoritos, playlists, históricos e modais
 │   │   ├── screens/          → Telas do aplicativo
-│   │   ├── services/         → API, player, downloads e busca
+│   │   ├── services/         → API, player, downloads, busca e reconhecimento
 │   │   ├── types/            → Definições TypeScript
 │   │   └── navigation/       → Configuração de navegação
+│   ├── tests/                → Testes do contrato puro do reconhecimento (node:test)
 │   ├── App.tsx
 │   ├── package.json
 │   └── index.ts
@@ -506,6 +510,7 @@ Identifica a música de um trecho de áudio. Corpo: `{ "audio_base64": "<base64>
 - Sem correspondência, `status` é `no_match` **sem** título, artista ou qualquer outro metadado inventado.
 - A credencial do provedor (`AUDD_TOKEN`) fica somente no backend. Sem ela, o endpoint responde `503` com a mensagem de que o reconhecimento não está configurado neste servidor.
 - Limitador de requisições próprio (20 por 15 minutos, configurável por `RECOGNITION_RATE_LIMIT_*`).
+- O áudio vive só na memória do processo: não é gravado em disco, no MariaDB nem em log, e é apagado do aparelho logo após a análise.
 
 ### Sistema
 
@@ -549,9 +554,13 @@ TypeScript compilar sem erro não comprova que a lógica funciona. Antes de cons
 cd backend && npx tsc --noEmit
 cd ../mobile && npx tsc --noEmit
 
-# 2. Testes automatizados do backend (unitários + API com banco real)
+# 2. Testes automatizados (unitários + API com banco real + contrato do app)
 cd backend && npm test
 npm run test:api
+cd ../mobile && npm test
+
+# 2-bis. Suíte completa em um comando, na raiz do projeto
+npm run test:all
 
 # 3. Busca real: só versões com áudio aparecem (Regra 7)
 curl "http://localhost:3001/api/search?q=daft%20punk"

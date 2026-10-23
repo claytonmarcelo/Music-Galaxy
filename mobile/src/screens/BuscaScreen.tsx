@@ -80,6 +80,11 @@ export default function BuscaScreen(): React.JSX.Element {
   const [filtros, setFiltros]       = useState<Filtros>({});
   const [resumoFila, setResumoFila] = useState({ baixando: 0, erros: 0, total: 0 });
 
+  // Termo que veio de uma faixa reconhecida pelo microfone. Serve para
+  // avisar, com honestidade, quando a música tocada ainda não existe no
+  // catálogo do Music Galaxy (a busca por texto segue normal).
+  const [termoDoReconhecimento, setTermoDoReconhecimento] = useState<string | null>(null);
+
   // Reconhecimento sonoro: identifica a música que está tocando no ambiente.
   const reconhecimento = useReconhecimentoSonoro();
 
@@ -272,6 +277,8 @@ export default function BuscaScreen(): React.JSX.Element {
   const aoMudarTermo = useCallback((novoTermo: string) => {
     setTermo(novoTermo);
     setOffset(0);
+    // Texto digitado pelo usuário não vem do reconhecimento.
+    setTermoDoReconhecimento(null);
 
     if (timerDebounce.current) clearTimeout(timerDebounce.current);
 
@@ -308,6 +315,7 @@ export default function BuscaScreen(): React.JSX.Element {
     Keyboard.dismiss();
     setFocoInput(false);
     setOffset(0);
+    setTermoDoReconhecimento(null);
     void executarBusca(termo, 0, false);
   }, [termo, executarBusca, toastInfo]);
 
@@ -327,13 +335,21 @@ export default function BuscaScreen(): React.JSX.Element {
     setErro(null);
     setPendentesAudio(0);
     setOffset(0);
+    setTermoDoReconhecimento(null);
   }, []);
 
-  const selecionarSugestao = useCallback((termoSugerido: string) => {
+  // `viaReconhecimento` marca a busca que nasceu de uma faixa identificada
+  // pelo microfone — assim o estado vazio consegue explicar que a música
+  // tocada ainda não está no catálogo.
+  const selecionarSugestao = useCallback((
+    termoSugerido: string,
+    viaReconhecimento = false
+  ) => {
     setTermo(termoSugerido);
     setFocoInput(false);
     Keyboard.dismiss();
     setOffset(0);
+    setTermoDoReconhecimento(viaReconhecimento ? termoSugerido : null);
     void executarBusca(termoSugerido, 0, false);
   }, [executarBusca]);
 
@@ -352,7 +368,7 @@ export default function BuscaScreen(): React.JSX.Element {
   // pelas sugestões e pelo histórico, sem inventar termos.
   const pesquisarFaixaReconhecida = useCallback((termoFaixa: string) => {
     reconhecimento.limparResultado();
-    selecionarSugestao(termoFaixa);
+    selecionarSugestao(termoFaixa, true);
   }, [reconhecimento, selecionarSugestao]);
 
   const repetirReconhecimento = useCallback(() => {
@@ -628,6 +644,7 @@ export default function BuscaScreen(): React.JSX.Element {
           contagem={reconhecimento.contagem}
           resultado={reconhecimento.resultado}
           mensagemErro={reconhecimento.mensagemErro}
+          statusErro={reconhecimento.statusErro}
           aoPesquisar={pesquisarFaixaReconhecida}
           aoTentarNovamente={repetirReconhecimento}
           aoCancelar={encerrarReconhecimento}
@@ -889,23 +906,45 @@ export default function BuscaScreen(): React.JSX.Element {
               ]}
             >
               <Icone
-                nome={pendentesAudio > 0 ? 'ondas' : 'musica'}
+                nome={
+                  pendentesAudio > 0
+                    ? 'ondas'
+                    : termoDoReconhecimento
+                      ? 'microfone'
+                      : 'musica'
+                }
                 tamanho={26}
                 cor={pendentesAudio > 0 ? colors.primary : colors.textSecondary}
               />
             </View>
             <Text style={[styles.estadoTitulo, { color: colors.text }]}>
-              {pendentesAudio > 0 ? 'Localizando fontes de áudio' : 'Nenhuma versão encontrada'}
+              {pendentesAudio > 0
+                ? 'Localizando fontes de áudio'
+                : termoDoReconhecimento
+                  ? 'Essa faixa ainda não está no catálogo'
+                  : 'Nenhuma versão encontrada'}
             </Text>
             <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
               {pendentesAudio > 0
                 ? `${pendentesAudio} ${pendentesAudio === 1 ? 'versão encontrada aguarda' : 'versões encontradas aguardam'} a descoberta do áudio em sites abertos.`
-                : 'Tente outro artista, título ou jeito de escrever.'}
+                : termoDoReconhecimento
+                  ? 'A música identificada pelo microfone não tem versões cadastradas no Music Galaxy. Tente buscar só pelo nome do artista.'
+                  : 'Tente outro artista, título ou jeito de escrever.'}
             </Text>
             {pendentesAudio > 0 && (
               <View style={styles.estadoAcao}>
                 <CustomButton
                   title="Buscar novamente"
+                  variant="secondary"
+                  icone="recarregar"
+                  onPress={() => void executarBusca(termo, 0, false)}
+                />
+              </View>
+            )}
+            {pendentesAudio === 0 && termoDoReconhecimento && (
+              <View style={styles.estadoAcao}>
+                <CustomButton
+                  title="Tentar de novo"
                   variant="secondary"
                   icone="recarregar"
                   onPress={() => void executarBusca(termo, 0, false)}

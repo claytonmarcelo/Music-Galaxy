@@ -10,6 +10,11 @@
 
 import { BASE_URL } from './api';
 import { RecognitionResult, RecognitionStatus, RespostaReconhecimento } from '../types';
+import {
+  mensagemDoCorpo,
+  statusPeloCodigoHttp,
+  statusValido,
+} from './reconhecimentoContrato';
 
 // O servidor pode demorar até 20s com o serviço externo, então a espera no
 // aplicativo é maior que a das buscas normais.
@@ -24,42 +29,6 @@ export class ErroReconhecimento extends Error {
     this.name = 'ErroReconhecimento';
     this.status = status;
   }
-}
-
-// Status válidos do contrato — usada para validar o que veio do servidor.
-const STATUS_VALIDOS: RecognitionStatus[] = [
-  'matched',
-  'no_match',
-  'permission_denied',
-  'microphone_unavailable',
-  'network_error',
-  'provider_error',
-  'cancelled',
-];
-
-/** Confere se o status recebido pertence ao contrato conhecido. */
-function statusValido(valor: unknown): valor is RecognitionStatus {
-  return typeof valor === 'string' && STATUS_VALIDOS.includes(valor as RecognitionStatus);
-}
-
-/**
- * Deduz o status a partir do código HTTP quando o corpo não traz um status
- * válido. Mantém a resposta do aplicativo coerente com o contrato.
- */
-function statusPeloCodigoHttp(codigo: number): RecognitionStatus {
-  if (codigo === 408 || codigo === 504) return 'network_error';
-  if (codigo === 503) return 'provider_error';
-  return 'provider_error';
-}
-
-/** Lê a mensagem de erro do corpo da resposta, com um texto padrão. */
-function mensagemDoCorpo(corpo: unknown, padrao: string): string {
-  if (corpo && typeof corpo === 'object') {
-    const registro = corpo as { error?: unknown; message?: unknown };
-    if (typeof registro.error === 'string' && registro.error.trim()) return registro.error;
-    if (typeof registro.message === 'string' && registro.message.trim()) return registro.message;
-  }
-  return padrao;
 }
 
 /**

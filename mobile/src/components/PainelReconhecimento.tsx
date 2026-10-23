@@ -10,42 +10,37 @@
 //     serviço de reconhecimento, e sem correspondência o painel diz que não
 //     encontrou a música.
 //   - O botão de pesquisa só aparece quando existe título reconhecido.
+//   - Enquanto a identificação acontece, o painel avisa para onde vai o
+//     trecho capturado (servidor do Music Galaxy e serviço de reconhecimento).
+//   - Cada falha tem um título próprio, conforme a situação normalizada.
 //   - Todas as cores vêm dos tokens do tema.
 
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, ActivityIndicator } from 'react-native';
 
 import { useTheme } from '../contexts/ThemeContext';
-import { RecognitionResult } from '../types';
+import { RecognitionResult, RecognitionStatus } from '../types';
 import GlassCard from './GlassCard';
 import Icone, { NomeIcone } from './Icone';
 import CustomButton from './CustomButton';
 import { TIMINGS, USE_NATIVE_DRIVER, pulsar } from '../utils/animacoes';
 import { comAlfa } from '../utils/cores';
 import { EstadoReconhecimento } from '../hooks/useReconhecimentoSonoro';
+import { montarTermoBusca } from '../services/reconhecimentoContrato';
 
 interface PainelReconhecimentoProps {
   estado: EstadoReconhecimento;
   contagem: number;
   resultado: RecognitionResult | null;
   mensagemErro: string | null;
+  /** Situação normalizada da falha (permissão, microfone, rede, serviço). */
+  statusErro?: RecognitionStatus | null;
   /** Chamado quando o usuário quer pesquisar a faixa reconhecida. */
   aoPesquisar: (termo: string) => void;
   /** Chamado para tentar a identificação outra vez. */
   aoTentarNovamente: () => void;
   /** Chamado para fechar o painel e liberar o microfone. */
   aoCancelar: () => void;
-}
-
-/** Monta o texto de busca a partir do que o serviço realmente identificou. */
-function montarTermoBusca(resultado: RecognitionResult | null): string {
-  if (!resultado) return '';
-
-  const partes = [resultado.title, resultado.artist].filter(
-    (parte): parte is string => typeof parte === 'string' && parte.trim().length > 0
-  );
-
-  return partes.join(' ').trim();
 }
 
 /** Descrição do que o painel mostra em cada etapa da captura. */
@@ -88,11 +83,65 @@ function descricaoDoEstado(estado: EstadoReconhecimento): {
   }
 }
 
+/**
+ * Descrição do erro conforme a situação normalizada do contrato.
+ *
+ * Cada caso tem um título próprio: o usuário passa a saber se o problema é
+ * a permissão do microfone, o próprio aparelho, a internet ou o serviço de
+ * reconhecimento — em vez de uma frase genérica para tudo.
+ */
+function descricaoDoErro(
+  status: RecognitionStatus | null | undefined,
+  mensagem: string | null
+): { titulo: string; detalhe: string; icone: NomeIcone } {
+  const texto = mensagem ?? 'Não foi possível identificar a música agora.';
+  const avisoBusca = 'A busca por texto continua funcionando normalmente.';
+
+  switch (status) {
+    case 'permission_denied':
+      return {
+        titulo: 'Microfone bloqueado',
+        detalhe: `${texto} ${avisoBusca}`,
+        icone: 'aviso',
+      };
+    case 'microphone_unavailable':
+      return {
+        titulo: 'Microfone indisponível',
+        detalhe: `${texto} ${avisoBusca}`,
+        icone: 'aviso',
+      };
+    case 'network_error':
+      return {
+        titulo: 'Sem conexão com o servidor',
+        detalhe: `${texto} ${avisoBusca}`,
+        icone: 'wifiOff',
+      };
+    case 'cancelled':
+      return {
+        titulo: 'Identificação cancelada',
+        detalhe: 'A captura foi interrompida e o microfone já foi liberado.',
+        icone: 'info',
+      };
+    default:
+      return {
+        titulo: 'Não foi possível identificar',
+        detalhe: texto,
+        icone: 'aviso',
+      };
+  }
+}
+
+// Transparência sobre o destino da amostra: ela sai do aparelho e é
+// analisada por um serviço de reconhecimento, sem ser gravada.
+const AVISO_ENVIO_AMOSTRA =
+  'O trecho capturado é enviado ao servidor do Music Galaxy e analisado por um serviço de reconhecimento. Ele não é gravado nem fica guardado.';
+
 export default function PainelReconhecimento({
   estado,
   contagem,
   resultado,
   mensagemErro,
+  statusErro,
   aoPesquisar,
   aoTentarNovamente,
   aoCancelar,
@@ -128,6 +177,7 @@ export default function PainelReconhecimento({
   if (!visivel) return null;
 
   const descricao = descricaoDoEstado(estado);
+  const erro = descricaoDoErro(statusErro, mensagemErro);
   const termo = montarTermoBusca(resultado);
 
   const corDestaque =
@@ -155,7 +205,7 @@ export default function PainelReconhecimento({
               <ActivityIndicator size="small" color={corDestaque} />
             ) : (
               <Icone
-                nome={comErro ? 'aviso' : semCorrespondencia ? 'info' : 'sucessoCirculo'}
+                nome={comErro ? erro.icone : semCorrespondencia ? 'info' : 'sucessoCirculo'}
                 tamanho={18}
                 cor={corDestaque}
               />
@@ -165,7 +215,7 @@ export default function PainelReconhecimento({
           <View style={styles.textos}>
             <Text style={[styles.titulo, { color: colors.text }]}>
               {comErro
-                ? 'Não foi possível identificar'
+                ? erro.titulo
                 : semCorrespondencia
                   ? 'Música não encontrada'
                   : comFaixa
@@ -175,7 +225,7 @@ export default function PainelReconhecimento({
 
             <Text style={[styles.detalhe, { color: colors.textSecondary }]}>
               {comErro
-                ? mensagemErro ?? 'Não foi possível identificar a música agora.'
+                ? erro.detalhe
                 : semCorrespondencia
                   ? 'O trecho capturado não corresponde a nenhuma faixa do catálogo. Nada foi preenchido na busca.'
                   : comFaixa
@@ -184,6 +234,22 @@ export default function PainelReconhecimento({
             </Text>
           </View>
         </View>
+
+        {/* Transparência: enquanto a identificação acontece, o usuário sabe
+            para onde vai o trecho capturado. */}
+        {emAndamento && (
+          <View
+            style={[
+              styles.avisoEnvio,
+              { backgroundColor: comAlfa(colors.textSecondary, 0.08), borderColor: comAlfa(colors.textSecondary, 0.18) },
+            ]}
+          >
+            <Icone nome="escudo" tamanho={14} cor={colors.textSecondary} />
+            <Text style={[styles.avisoEnvioTexto, { color: colors.textSecondary }]}>
+              {AVISO_ENVIO_AMOSTRA}
+            </Text>
+          </View>
+        )}
 
         {/* Contagem regressiva e estado de gravação */}
         {(estado === 'contando' || estado === 'gravando') && (
@@ -349,6 +415,21 @@ const styles = StyleSheet.create({
   },
   contagemTexto: {
     fontSize: 12,
+    flex: 1,
+  },
+  avisoEnvio: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 12,
+    paddingVertical: 9,
+    paddingHorizontal: 11,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  avisoEnvioTexto: {
+    fontSize: 11,
+    lineHeight: 16,
     flex: 1,
   },
   pulso: {

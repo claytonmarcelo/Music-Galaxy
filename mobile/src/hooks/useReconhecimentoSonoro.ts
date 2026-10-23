@@ -26,7 +26,7 @@ import {
 } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 
-import { RecognitionResult } from '../types';
+import { RecognitionResult, RecognitionStatus } from '../types';
 import { ErroReconhecimento, reconhecerMusica } from '../services/reconhecimento';
 
 // Duração da captura. O serviço de reconhecimento analisa trechos curtos e
@@ -55,6 +55,13 @@ export interface ResultadoUseReconhecimentoSonoro {
   resultado: RecognitionResult | null;
   /** Mensagem de erro em português, quando estado = 'erro'. */
   mensagemErro: string | null;
+  /**
+   * Situação normalizada da falha, no mesmo contrato do backend.
+   *
+   * Permite que a interface diferencie "permissão negada" de "microfone
+   * indisponível" ou "sem conexão" em vez de mostrar sempre a mesma frase.
+   */
+  statusErro: RecognitionStatus | null;
   /** Verdadeiro enquanto uma identificação está em andamento. */
   ocupado: boolean;
   /** Inicia a identificação (pede a permissão se for preciso). */
@@ -116,6 +123,7 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
   const [contagem, setContagem] = useState(CONTAGEM_REGRESSIVA_SEGUNDOS);
   const [resultado, setResultado] = useState<RecognitionResult | null>(null);
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
+  const [statusErro, setStatusErro] = useState<RecognitionStatus | null>(null);
 
   // Arquivo informado pelo gravador ao terminar a captura. No Android e iOS
   // é o caminho do arquivo; na web é a URL do blob criado.
@@ -129,6 +137,7 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
 
     if (status.hasError) {
       setMensagemErro('A gravação foi interrompida pelo sistema. Tente novamente.');
+      setStatusErro('microphone_unavailable');
       setEstado('erro');
     }
   });
@@ -179,11 +188,13 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
     setEstado('ocioso');
     setContagem(CONTAGEM_REGRESSIVA_SEGUNDOS);
     setMensagemErro(null);
+    setStatusErro(null);
   }, [limparTemporizadores, pararGravacao, limparRecursos]);
 
   const limparResultado = useCallback(() => {
     setResultado(null);
     setMensagemErro(null);
+    setStatusErro(null);
     setEstado('ocioso');
   }, []);
 
@@ -211,6 +222,12 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
       const mensagem =
         erro instanceof Error ? erro.message : 'Não foi possível identificar a música agora.';
       setMensagemErro(mensagem);
+      // O status vem do próprio serviço de reconhecimento; quando a falha
+      // aconteceu antes do servidor (por exemplo, microfone indisponível),
+      // o contrato normalizado continua valendo.
+      setStatusErro(
+        erro instanceof ErroReconhecimento ? erro.status : 'network_error'
+      );
       setEstado('erro');
     } finally {
       controladorRequisicao.current = null;
@@ -243,6 +260,7 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
       setMensagemErro(
         'Não foi possível acessar o microfone. Verifique as permissões do aplicativo.'
       );
+      setStatusErro('microphone_unavailable');
       setEstado('erro');
     }
   }, [gravador, pararGravacao, enviarAmostra]);
@@ -257,6 +275,7 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
     tentativaAtiva.current = true;
     setResultado(null);
     setMensagemErro(null);
+    setStatusErro(null);
     setEstado('preparando');
 
     try {
@@ -270,6 +289,7 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
         setMensagemErro(
           'O microfone está bloqueado. Libere a permissão nas configurações do aparelho para identificar músicas.'
         );
+        setStatusErro('permission_denied');
         setEstado('erro');
         return;
       }
@@ -301,6 +321,7 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
     } catch (erro) {
       console.error('Falha no reconhecimento sonoro:', erro);
       setMensagemErro('Não foi possível iniciar a identificação. Tente novamente.');
+      setStatusErro('microphone_unavailable');
       setEstado('erro');
     } finally {
       tentativaAtiva.current = false;
@@ -335,6 +356,7 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
     contagem,
     resultado,
     mensagemErro,
+    statusErro,
     ocupado: estado === 'preparando' || estado === 'contando' || estado === 'gravando' || estado === 'enviando',
     iniciar,
     cancelar,

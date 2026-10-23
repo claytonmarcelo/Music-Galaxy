@@ -19,7 +19,9 @@
     "build:backend": "npm --workspace backend run build",
     "typecheck": "npm --workspace backend run typecheck && npm --workspace mobile run typecheck",
     "test": "npm --workspace backend run test",
-    "test:api": "npm --workspace backend run test:api"
+    "test:api": "npm --workspace backend run test:api",
+    "test:mobile": "npm --workspace mobile run test",
+    "test:all": "npm run test && npm run test:api && npm run test:mobile"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

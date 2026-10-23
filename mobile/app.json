@@ -39,7 +39,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "O Music Galaxy usa o microfone para identificar a música que está tocando. A gravação é temporária e apagada logo após a análise.",
+          "microphonePermission": "O Music Galaxy usa o microfone para identificar a música que está tocando. O trecho capturado é enviado ao servidor do Music Galaxy e analisado por um serviço de reconhecimento; nada é gravado nem guardado.",
           "recordAudioAndroid": true,
           "enableBackgroundRecording": false
         }

@@ -34,6 +34,13 @@
 | 13 | Sem segredo, PII ou gravação de áudio no repositório | **CONFORME** | varredura do HEAD sem achados; nenhum `.wav`/`.mp3` versionado |
 | 14 | Compatibilidade universal com versões futuras | **NÃO APLICÁVEL / NÃO PROMETIDO** | o relatório não afirma compatibilidade com Android não testado |
 | 15 | Busca de atualização pela internet | **CONFORME** | `GET /api/app/versao` + checagem automática ao abrir + "Procurar atualizações" em Ajustes → Sobre · modal "Nova versão disponível" verificado no navegador |
+| 16 | O destino da amostra é informado ao usuário (spec. §9) | **CONFORME** | cartão de aviso no painel durante a captura + texto novo de `microphonePermission` em `mobile/app.json` (vale no próximo APK) · verificado no navegador |
+| 17 | Cada falha tem situação própria (spec. §6.1 e §12) | **CONFORME** | `permission_denied`, `microphone_unavailable`, `network_error` e `cancelled` com títulos próprios no painel · verificado no navegador |
+| 18 | Faixa identificada fora do catálogo é comunicada (spec. §7) | **CONFORME** | estado "Essa faixa ainda não está no catálogo" + sugestão de buscar pelo artista · verificado no navegador |
+| 19 | Auditoria do subsistema classificada (spec. §2.2) | **CONFORME** | seção 3-bis deste relatório (17 critérios de aceitação + funcionalidades + tabela de erros) |
+| 20 | Tecnologia escolhida por comparação (spec. §4) | **PARCIAL** | matriz AudD × ShazamKit × ACRCloud registrada (3-quater) e decisão de manter o AudD justificada · **prova de conceito lado a lado NÃO VERIFICADA** |
+| 21 | Suíte de testes no aplicativo | **CONFORME** | `mobile/tests/reconhecimento.test.ts` → 11/11 com `node --test`, sem dependência nova · `npm run test:all` → 90/90 |
+| 22 | Contradição `README.md` × `AGENTS.md` | **CONFORME (não existe mais)** | varredura real: nenhum vestígio de `yt-dlp`/YouTube no código; os dois documentos concordam (3-ter) |
 
 ---
 
@@ -59,6 +66,18 @@ npm run test:api  → tests 20 · pass 20 · fail 0 · skipped 0
 npm run test:unit → tests 55 · pass 55 · fail 0 · skipped 0
 npm run test:api  → tests 24 · pass 24 · fail 0 · skipped 0   (4 novos de appVersion)
 npx tsc --noEmit  → BACKEND_EXIT=0 · MOBILE_EXIT=0
+```
+
+**Suítes na árvore de trabalho, depois da rodada do reconhecimento sonoro (23/10/2026, execução mais recente):**
+
+```
+npm run test       → tests 55 · pass 55 · fail 0 · skipped 0   (backend, unitárias)
+npm run test:api   → tests 24 · pass 24 · fail 0 · skipped 0   (integração contra o MariaDB real)
+npm run test:mobile→ tests 11 · pass 11 · fail 0 · skipped 0   (contrato do reconhecimento, no aplicativo)
+npm run test:all   → 90 verificações, 0 falhas, 0 ignoradas
+backend: npx tsc --noEmit → BACKEND_EXIT=0
+mobile:  npx tsc --noEmit → MOBILE_EXIT=0
+mobile:  npx tsc -p tests/tsconfig.json --noEmit → exit 0
 ```
 
 **API no servidor em execução** (`http://127.0.0.1:3001`):
@@ -111,6 +130,126 @@ O pedido previa "busca de atualização pela internet". A auditoria encontrou qu
 **Caminho de acerto (faixa reconhecida) — NÃO VERIFICADO:** exige `AUDD_TOKEN` válido, que não existe no ambiente (`grep -c AUDD_TOKEN backend/.env` → `0`). A implementação do adaptador, do contrato e da normalização está coberta por testes unitários com respostas reais do formato do AudD, mas **nenhuma chamada ao serviço de produção foi feita** — não há como declarar esse caminho validado.
 
 **Captura por microfone em aparelho Android físico — NÃO VERIFICADO:** não há aparelho Android físico disponível nesta sessão. O manifesto e a configuração do plugin foram conferidos no projeto nativo gerado.
+
+---
+
+## 3-bis. Classificação do subsistema de reconhecimento contra a especificação
+
+A especificação "Music Galaxy — Especificação Técnica de Reconhecimento Musical por Áudio" exige (seção 2.2) que **cada recurso relevante seja classificado com evidências** em cinco níveis: **Confirmado** (executado ou testado com resultado reproduzível), **Parcial** (funciona em determinadas condições, com limitação comprovada), **Não funcional** (há evidência de falha), **Não verificado** (há código ou documentação, mas não foi possível comprovar o funcionamento) e **Inexistente** (a ausência foi confirmada após inspeção adequada).
+
+Estado inicial registrado antes de qualquer alteração: branch `main`, commit `75e9bb1`, arquivos inspecionados — `README.md`, `AGENTS.md`, `mobile/package.json`, `mobile/app.json`, `mobile/src/screens/BuscaScreen.tsx`, `mobile/src/services/api.ts`, `mobile/src/types/`, `mobile/src/contexts/`, `backend/package.json`, rotas/controladores/serviços do backend, `backend/src/services/audioSource/` (com `providers/`), scripts e schema do MariaDB, manifesto e `build.gradle` do projeto nativo gerado, e as suítes de teste existentes.
+
+### 3-bis.1. Critérios de aceitação da especificação (seção 14)
+
+| # | Critério | Classificação | Evidência |
+|---|---|---|---|
+| 1 | A auditoria do código e da documentação estiver registrada | **CONFIRMADO** | esta seção 3-bis, a seção 3 e a seção 10 do relatório; comandos e saídas reproduzíveis transcritos |
+| 2 | A contradição entre `README.md` e `AGENTS.md` estar documentada e encaminhada | **CONFIRMADO** | ver 3-ter: a contradição **não existe mais** no estado atual; varredura por `yt-dlp`/YouTube no código sem nenhum vestígio |
+| 3 | A tecnologia ter sido selecionada com base em comparação e prova de conceito | **PARCIAL** | a comparação está escrita e verificada (ver 3-quater), mas a **prova de conceito lado a lado** ShazamKit × AudD com as mesmas amostras **não foi executada** — logo, a seleção se apoia em análise técnica documentada, não em medição comparativa |
+| 4 | O usuário puder iniciar e cancelar o reconhecimento pela interface | **CONFIRMADO** | botão de microfone dentro do campo de busca (`aria-label` "Identificar a música que está tocando") e "Cancelar"/"Fechar" no painel; verificado no navegador |
+| 5 | A permissão de microfone for solicitada corretamente | **PARCIAL** | a permissão é pedida **em tempo de execução, no clique**, nunca na inicialização (`useReconhecimentoSonoro.iniciar`); `RECORD_AUDIO` no manifesto gerado. O diálogo nativo **não foi visto em aparelho** |
+| 6 | O reconhecimento funcionar em APK instalado em aparelho Android real | **NÃO VERIFICADO** | `adb devices` devolve lista vazia; o APK de release existe (101.765.239 bytes, `sdkVersion:'36'`) mas **não foi instalado nem executado** |
+| 7 | Os resultados serem apresentados sem inventar metadados | **CONFIRMADO** | `normalizarRespostaAudD` não cria título/artista/álbum; sem título vira `no_match` (teste unitário "não inventa metadados ausentes"); a confiança só aparece quando o provedor devolve pontuação documentada; a interface mostra "Título não informado" quando falta |
+| 8 | O usuário puder enviar título e artista reconhecidos à lupa | **CONFIRMADO** | botão "Pesquisar no Music Galaxy" → `montarTermoBusca` (só título + artista reais) → `executarBusca`; 11 testes automatizados no aplicativo + verificado no navegador |
+| 9 | A busca por texto continuar funcionando quando o reconhecimento estiver indisponível | **CONFIRMADO** | erro do provedor e falha de permissão exibidos **sem** derrubar a tela de busca; a mensagem de erro sempre acrescenta "A busca por texto continua funcionando normalmente." |
+| 10 | Credenciais privadas não expostas no APK | **CONFIRMADO** | `AUDD_TOKEN` lido de `process.env` no backend; `git ls-files mobile/` sem nenhum token; `backend/.env` ignorado; `backend/.env.example` só com marcadores |
+| 11 | O áudio não ser persistido sem justificativa | **CONFIRMADO** | o arquivo da captura é apagado no `finally` de `enviarAmostra`; nenhuma tabela de áudio no MariaDB; nenhum `.wav`/`.mp3` versionado |
+| 12 | O fluxo de erros liberar o microfone e não deixar operações penduradas | **PARCIAL** | `cancelar()` encerra a gravação, aborta a requisição (`AbortController`), limpa os temporizadores e apaga o arquivo; a liberação ao sair da tela e ao mandar o app para o fundo está implementada (`AppState`). **A interrupção por chamada ou por outro aplicativo só não foi observada em aparelho** |
+| 13 | TypeScript, build e testes automatizados executados e documentados | **PARCIAL** | TypeScript e testes **executados agora** (exit 0 nas duas camadas; 90/90). O **build** do APK com o código desta rodada **não** foi refeito — o APK em `C:/Users/Public/mgbuild/` é anterior a ela |
+| 14 | Matriz de versões Android registrada, incluindo API 35 ou superior | **PARCIAL** | a configuração está registrada e confirmada no próprio pacote (`sdkVersion:'36'`, `targetSdkVersion:'36'`, `compileSdkVersion='36'`). A **matriz de aparelhos testados está vazia**: nenhuma versão do Android foi exercitada em aparelho |
+| 15 | iOS testado separadamente em dispositivo real | **NÃO VERIFICADO** | o código permanece compatível com iOS (React Native 0.86 → iOS 15.1+), mas **nenhum iPhone físico** foi usado e não há build de iOS validado |
+| 16 | Nenhuma funcionalidade, provider, tela, rota, tabela ou dado removido sem autorização | **CONFIRMADO** | esta rodada foi **aditiva**: nada foi removido; os três provedores de áudio (`internetArchiveProvider`, `genericWebProvider`, `directLinkProvider`) seguem intactos; nenhuma rota, tela ou tabela foi apagada |
+| 17 | A documentação final distinguir implementado / testado / pendente | **CONFIRMADO** | este relatório (cada item classificado), `CHANGELOG.md`, `AGENTS.md`, `README.md` e o manual dentro do aplicativo |
+
+### 3-bis.2. Funcionalidades do subsistema
+
+| Recurso | Classificação | Evidência |
+|---|---|---|
+| Captura do microfone pelo `expo-audio` | **PARCIAL** | funciona no navegador (Expo web) com fluxo de permissão, contagem de 3 s e gravação de 12 s; o caminho **nativo** não foi exercitado em aparelho |
+| Envio da amostra ao backend | **CONFIRMADO** | `POST /api/recognize` real: **503** com WAV válido de 3 s sem credencial; **400** com WAV de 44 bytes ("A amostra de áudio é curta demais para ser analisada."); **400** sem o campo `audio_base64`; limite de 3 MB na rota e limitador próprio (20 tentativas / 15 min) com teste de integração confirmando o **429** |
+| Normalização da resposta do provedor | **CONFIRMADO** | 17 testes unitários em `backend/tests/Unit/recognition.test.ts`, com o formato real de resposta do AudD |
+| Envio do resultado à lupa | **CONFIRMADO** | 11 testes no aplicativo (`mobile/tests/reconhecimento.test.ts`) + verificação no navegador |
+| Mensagem de faixa fora do catálogo | **CONFIRMADO** | "Essa faixa ainda não está no catálogo" + "Tente buscar só pelo nome do artista." + botão "Tentar de novo" — verificado no navegador |
+| Transparência sobre o destino da amostra | **CONFIRMADO** | cartão de aviso durante a captura ("O trecho capturado é enviado ao servidor do Music Galaxy e analisado por um serviço de reconhecimento. Ele não é gravado nem fica guardado.") + o mesmo aviso na permissão nativa de `mobile/app.json` |
+| Falhas diferenciadas por situação | **CONFIRMADO** | `permission_denied` → "Microfone bloqueado"; `microphone_unavailable` → "Microfone indisponível"; `network_error` → "Sem conexão com o servidor"; `cancelled` → "Identificação cancelada" — verificado no navegador |
+| Cancelamento e liberação do microfone | **PARCIAL** | implementado e exercitado no navegador; sem observação em aparelho |
+| Privacidade (segredo, retenção, sem áudio no banco) | **CONFIRMADO** | varredura do `HEAD` sem segredo; `backend/.env` ignorado; áudio apagado no `finally`; nenhuma tabela de áudio |
+| Reconhecimento em iOS | **NÃO VERIFICADO** | sem aparelho e sem build de iOS |
+| Comparação ShazamKit × AudD × ACRCloud | **PARCIAL** | matriz documentada (ver 3-quater); **sem** prova de conceito executada |
+| Ausência de Python no projeto (regra da seção 5.2) | **CONFIRMADO** | `git ls-files` não devolve nenhum arquivo `.py` |
+| Ausência de YouTube/`yt-dlp` no código (Regra 3) | **CONFIRMADO** | varredura: as únicas menções são a proibição em prosa e a lista negra do guard `auditarUrl()` |
+
+**Nenhum item foi classificado como "Não funcional"** — não há evidência de falha em nenhum comportamento do subsistema. **Nenhum item foi classificado como "Inexistente"** entre os recursos esperados pela especificação: todos existem no código; o que falta é execução em aparelho e credencial do provedor.
+
+### 3-bis.3. Tabela de erros da especificação (seção 12) — comportamento real
+
+| Situação | Comportamento exigido | Classificação | Comportamento real no projeto |
+|---|---|---|---|
+| Permissão negada | Explicar como habilitar e manter a busca por texto | **CONFIRMADO** | "Microfone bloqueado" + orientação para as configurações do aparelho + "A busca por texto continua funcionando normalmente." |
+| Microfone indisponível | Informar e permitir tentar novamente | **CONFIRMADO** | "Microfone indisponível" + botão "Tentar novamente" |
+| Nenhuma música reconhecida | Informar sem inventar título ou artista | **CONFIRMADO** | "Música não encontrada" + "Nada foi preenchido na busca."; o campo de busca não é tocado |
+| Internet indisponível | Aviso de conexão sem travar a interface | **CONFIRMADO** | `network_error` → "Sem conexão com o servidor"; o endereço do servidor é ajustável em Ajustes |
+| Token inválido ou expirado | Registrar erro técnico sem revelar credenciais | **PARCIAL** | o adaptador troca a mensagem do serviço por "O serviço de reconhecimento está indisponível. A credencial configurada no servidor não é válida." (nunca repassa o texto do provedor, que poderia citar o token) e há teste garantindo que a mensagem não contém "token". **A chamada real com credencial inválida não foi exercitada** (não há credencial no ambiente) |
+| Limite de API atingido | Informar indisponibilidade temporária e evitar repetição | **CONFIRMADO** | limitador próprio: 20 tentativas por 15 min → **429** com "Muitas tentativas de reconhecimento. Aguarde alguns minutos antes de tentar de novo." (teste de integração) |
+| Timeout | Encerrar a tentativa, liberar o microfone e oferecer nova tentativa | **PARCIAL** | timeout de 45 s no aplicativo (`AbortController`) e no backend (`axios` com `TIMEOUT_MS`); o microfone é liberado no caminho de erro. **Não exercitado contra um provedor que demore** |
+| Formato de áudio incompatível | Registrar diagnóstico e não esconder o erro | **CONFIRMADO** | erros reais de validação: "A amostra de áudio é curta demais…", "A amostra de áudio é longa demais…", "O formato capturado (X) não é aceito…" — todos com HTTP 400 |
+| Usuário cancela | Interromper a captura e as operações canceláveis | **CONFIRMADO** | "Cancelar" durante a captura e "Fechar" depois; `cancelar()` para a gravação, aborta a requisição e apaga o arquivo; status `cancelled` no contrato |
+| Aplicativo vai para segundo plano | Interromper a captura | **PARCIAL** | listener de `AppState` interrompe a captura quando o app sai de `active`; **não observado em aparelho** |
+| Falha no backend | Mensagem compreensível e preservar a busca por texto | **CONFIRMADO** | **503** real do servidor com mensagem explicativa; o painel mostra "Não foi possível identificar" + "Tentar novamente" |
+| Resultado sem metadados suficientes | Exibir só o que foi devolvido e permitir nova tentativa | **CONFIRMADO** | "Título não informado" quando falta o título; artista e álbum aparecem só se existirem; "Tentar novamente" sempre disponível |
+
+---
+
+## 3-ter. A contradição entre `README.md` e `AGENTS.md` — procedimento e resultado
+
+A especificação tratou a divergência entre os dois documentos como **bloqueio** para qualquer alteração no subsistema de descoberta de áudio (§3). O procedimento exigido foi executado item a item:
+
+| Passo (§3.3) | Verificação real | Resultado |
+|---|---|---|
+| 1. Localizar os módulos citados nos dois documentos | `grep -rniE "yt-dlp\|ytdlp\|youtu"` em `backend/src`, `mobile/src`, `mobile/app.json` | **Nenhum** adaptador, import, flag ou chamada de YouTube/`yt-dlp` no código. As dez ocorrências são todas comentários de proibição ou a lista negra do guard |
+| 2. Confirmar imports, chamadas, flags e fluxos | `backend/src/services/audioSource/providers/` | Três provedores, nenhum deles de plataforma: `internetArchiveProvider.ts`, `genericWebProvider.ts`, `directLinkProvider.ts` |
+| 3. Verificar quais fontes são consultadas em execução | `SourceOrchestrator` + `searchOrchestrator` | Fontes abertas: Internet Archive, páginas web abertas e links diretos |
+| 4. Inspecionar o guard de URLs | `backend/src/services/audioSource/webAudio.ts` | `auditarUrl()` bloqueia domínios de plataforma, protocolos não-HTTP, IP não roteável, IPv6, DNS rebinding e redirect suspeito; tem testes unitários próprios |
+| 5. Registrar a divergência com evidências | esta seção | **A divergência descrita pela especificação não existe mais no estado atual.** O `README.md` (linha 87) já afirma: *"Áudio exclusivamente de sites abertos … YouTube, Spotify, Deezer, Apple Music e qualquer plataforma de música são proibidos e não aparecem no código do fluxo."* — o mesmo que a Regra 3 do `AGENTS.md` |
+| 6. Propor atualização documental coerente | esta rodada | Nenhuma mudança de documentação foi necessária nesse ponto: os dois documentos já concordam |
+| 7. Não reativar/excluir/substituir providers | esta rodada | Nada foi reativado, excluído nem substituído |
+| 8. Solicitar autorização antes de flexibilizar a Regra 3 | esta rodada | Nenhuma flexibilização foi proposta |
+
+**Conclusão:** a contradição apontada pela especificação era **histórica** (o `README` e o `AGENTS.md` foram atualizados em rodadas anteriores, quando o projeto passou a usar apenas fontes abertas). O que a especificação acrescenta é a exigência de que o **reconhecimento sonoro seja uma capacidade independente** — e isso está respeitado: o endpoint `POST /api/recognize` devolve **identificação**, nunca áudio; o áudio do aplicativo continua vindo exclusivamente de `audio_source_url` (Regra 7).
+
+---
+
+## 3-quater. Decisão de tecnologia: AudD × ShazamKit × ACRCloud
+
+A especificação (§4) exige comparar as três tecnologias **antes** de fixar a definitiva. A comparação foi feita e está registrada no `AGENTS.md`, na seção "Decisão de tecnologia do reconhecimento (AudD × ShazamKit × ACRCloud)".
+
+| Critério (§4.4) | ShazamKit | AudD | ACRCloud |
+|---|---|---|---|
+| Tipo de integração | SDK nativo (AAR) + token de desenvolvedor | API HTTP (formulário) | API HTTP (assinatura da requisição) ou SDK |
+| Kotlin no Android | Obrigatório (ponte nativa) | Não obrigatório | Não obrigatório |
+| Swift no iOS | Necessário se usado | Não obrigatório | Não obrigatório |
+| Envio do áudio original | Não é o modelo central (assinatura acústica) | **Sim** — a API recebe o arquivo | Pode receber áudio ou fingerprint |
+| Credencial | Token de desenvolvedor Apple | `api_token` | Chave + segredo de assinatura |
+| Dependência nativa no app | Sim (AAR + config plugin) | **Não** | Não |
+| Custo | A especificação trouxe a captura de tela da tabela de preços do AudD (teste de 300 requisições; planos a partir de US$ 5/mês) — **não reconferido no site nesta sessão** | **NÃO VERIFICADO** | **NÃO VERIFICADO** |
+| Ajuste à stack existente | Exige prova de conceito nativa | **Natural pelo backend Node.js** | Natural pelo backend Node.js |
+| Compatibilidade com Expo | Exige módulo nativo | **Sem SDK no cliente** | Sem SDK no cliente |
+
+**Decisão: o AudD foi mantido.** Os motivos, todos verificáveis no código:
+
+1. **A credencial não entra no aplicativo.** O `api_token` é lido de `process.env` dentro do backend e enviado no corpo do formulário ao AudD (`auddProvider.reconhecer`). O aplicativo fala apenas com o backend — cumpre o critério 10 e a seção 9 da especificação.
+2. **Não exige SDK nativo nem AAR.** Nenhuma dependência nativa nova, nenhum módulo Kotlin, nenhum plugin de configuração — o projeto permanece 100 % React Native + TypeScript, como manda a seção 5 da especificação.
+3. **O `expo-audio` já entrega o áudio.** A captura, a contagem regressiva e a liberação do microfone existem e funcionam; a tecnologia do reconhecimento não interfere na parte difícil do aparelho.
+4. **O provedor é trocável.** `RECOGNITION_PROVIDER` decide o adaptador (`recognitionService.criarProvedor`) — um módulo nativo entraria ali sem alterar o controlador, o contrato nem o aplicativo.
+5. **O contrato de falha já está normalizado** nos sete status da seção 6.1 da especificação, com o provedor isolado em `backend/src/services/recognition/`.
+
+**O ShazamKit não foi descartado** e está registrado como alternativa. Ele tem duas vantagens reais sobre o AudD: **não envia o arquivo de áudio original** (usa assinatura acústica) e **não cobra por requisição**. Em contrapartida, exige SDK nativo, token de desenvolvedor Apple e integração nativa em Kotlin (e Swift no iOS), o que contraria a simplificação pedida pela seção 5 da especificação.
+
+**A prova de conceito lado a lado (§4.5, §13.4) NÃO FOI EXECUTADA** — sem credencial do AudD e sem build nativo do ShazamKit, qualquer número de acerto, latência ou custo seria inventado. A tabela acima registra **análise técnica documentada**, não medição. É por isso que o critério 3 da seção 14 está classificado como **PARCIAL**.
+
+**O ACRCloud não foi descartado** e também não foi escolhido: a documentação pública consultada (`docs.acrcloud.com/reference/identification-api`) devolveu "Page Not Found" ou conteúdo montado por script, sem texto conferível — **preços, franquias e limites de uso são NÃO VERIFICADOS**.
+
+**Divergência de linha de base do Android:** a especificação (§10.1) pede Android 15 (API 35) ou posterior. O projeto, por regra permanente do `AGENTS.md`, atende **somente 2025 em diante** — Android 16 (API 36). A exigência do projeto é **mais restritiva**, então ela prevalece: `minSdkVersion 36`, e a divergência está registrada aqui e no `AGENTS.md` em vez de ser resolvida em silêncio.
 
 ---
 
@@ -359,7 +498,7 @@ No navegador: boas-vindas medida em 3,26 s · modal "Limpar a lista de Explorar?
 | Servidor configurável | "Testar conexão" | `GET http://localhost:3001/health` → **200** (3 requisições observadas) |
 | Busca de atualização | "Procurar atualizações" + checagem automática | `GET /api/app/versao` → **200**; modal de nova versão e botão "Baixar" verificados |
 | TypeScript | backend e mobile | exit 0 nos dois, também em clone limpo |
-| Testes | unitários e de integração | 55/55 e 24/24 (20/20 no clone limpo + 4 novos de `appVersion`) |
+| Testes | unitários, de integração e do aplicativo | 55/55 + 24/24 + 11/11 = **90/90** (20/20 no clone limpo + 4 novos de `appVersion`) |
 | Aviso (toast) | medida do cartão no navegador | **antes**: topo 483 px em janela de 473 px (fora da tela) · **depois**: topo 10 px, esquerda 16 px, 428 × 64 px, dentro da tela |
 | Modal de confirmação | "Limpar a lista de Explorar" | abre o modal com título, explicação e os botões "Manter a lista" / "Limpar a lista" |
 | Décadas | `GET /api/works/by-decade/{d}` | 3 / 3 / 4 / 2 / 2 / 2 / 0 obras com áudio (2020s → 1960s); a de 1960 tem 62 obras no catálogo e nenhuma com fonte resolvida |
@@ -380,13 +519,18 @@ No navegador: boas-vindas medida em 3,26 s · modal "Limpar a lista de Explorar?
 
 ## 7. Tratamento de falhas (recuperação sem reinstalar)
 
+Cada situação da tabela de erros da especificação (seção 12) tem um comportamento próprio, verificado no navegador ou por resposta real da API. Detalhe completo em 3-bis.3.
+
 1. **Sem credencial no servidor** → 503 com mensagem explicativa; o aplicativo explica ao usuário e a busca por texto continua funcionando.
-2. **Permissão de microfone negada** → painel com a orientação de liberar nas configurações do aparelho.
-3. **Amostra inválida/corrompida/sem título** → 400 com mensagem específica; o painel oferece "Tentar novamente".
-4. **Sem internet ou servidor fora do ar** → `network_error` com "Não foi possível conectar ao servidor. Verifique a internet e o endereço em Ajustes."; o endereço é ajustável em Ajustes → "Servidor da API", com "Testar conexão" e "Restaurar endereço padrão".
-5. **Servidor demorou** → timeout de 45 s no aplicativo e "O servidor demorou demais para responder. Tente novamente."
-6. **Excesso de tentativas** → 429 e "Muitas tentativas de reconhecimento. Aguarde alguns minutos antes de tentar de novo."
-7. **Falha do provedor** → `provider_error` com "Não foi possível identificar a música agora." e o botão de nova tentativa.
+2. **Permissão de microfone negada** → status `permission_denied` → painel **"Microfone bloqueado"**, com a orientação de liberar nas configurações do aparelho e a frase *"A busca por texto continua funcionando normalmente."*
+3. **Microfone indisponível** (gravador ausente, arquivo em uso, navegador sem suporte) → status `microphone_unavailable` → **"Microfone indisponível"** + botão "Tentar novamente".
+4. **Amostra inválida/corrompida/sem título** → 400 com mensagem específica ("A amostra de áudio é curta demais para ser analisada.", "Envie a amostra de áudio no campo \"audio_base64\"."); o painel oferece "Tentar novamente".
+5. **Sem internet ou servidor fora do ar** → `network_error` → título **"Sem conexão com o servidor"** e a mensagem "Não foi possível conectar ao servidor. Verifique a internet e o endereço em Ajustes."; o endereço é ajustável em Ajustes → "Servidor da API", com "Testar conexão" e "Restaurar endereço padrão".
+6. **Servidor demorou** → timeout de 45 s no aplicativo e "O servidor demorou demais para responder. Tente novamente."
+7. **Excesso de tentativas** → 429 e "Muitas tentativas de reconhecimento. Aguarde alguns minutos antes de tentar de novo."
+8. **Falha do provedor** → `provider_error` com "Não foi possível identificar a música agora." e o botão de nova tentativa.
+9. **Usuário cancelou** → status `cancelled` → **"Identificação cancelada"**, com a promessa explícita de que o microfone já foi liberado.
+10. **A faixa identificada não existe no catálogo** → a tela de Busca troca o estado vazio genérico por **"Essa faixa ainda não está no catálogo"**, com a sugestão de buscar só pelo nome do artista e o botão "Tentar de novo".
 
 ---
 
@@ -425,8 +569,11 @@ A auditoria tinha listado como defeito duas coisas que **já estavam resolvidas 
 |---|---|---|
 | Login na conta EAS e `eas build` (APK assinado de produção) | o usuário | **Bloqueado pela credencial, com evidência real:** `npx eas-cli@latest whoami` → "Not logged in"; `npx eas-cli@latest build --platform android --profile preview --non-interactive --no-wait` → "An Expo user account is required to proceed." O `eas.json` já gera APK nos três perfis; depois do login, `npx eas build --platform android --profile preview` resolve o `extra.eas.projectId` sozinho |
 | APK de release para instalar e testar em aparelho | o usuário | **Pronto:** `C:/Users/Public/mgbuild/MusicGalaxy-1.0.0-android16.apk` (101.765.239 bytes, `sdkVersion:'36'` — só instala em Android 16 / 2025 em diante, assinado com o keystore de depuração, mesma chave do APK anterior) |
-| Credencial do AudD para o caminho de acerto | o usuário | `AUDD_TOKEN` no `backend/.env` |
+| Credencial do AudD para o caminho de acerto | o usuário | `AUDD_TOKEN` no `backend/.env` — sem isso a rota responde 503 e o aplicativo explica que o serviço não está configurado |
 | Teste com microfone em aparelho Android físico | o usuário | aparelho Android 2025+ (`adb devices` não encontrou aparelho nesta máquina) |
+| Novo APK com o código desta rodada | o usuário / build local | o APK em `C:/Users/Public/mgbuild/` **predate** esta rodada: o texto novo da permissão nativa (`microphonePermission`) e o manual revisado só chegam ao aparelho depois de uma nova compilação (`npm run build:android` fora do repositório, conforme o `AGENTS.md`) |
+| Prova de conceito comparativa ShazamKit × AudD | o usuário | exige credencial do AudD **e** um build nativo com o AAR do ShazamKit; sem os dois, a decisão se apoia na comparação técnica documentada (3-quater) |
+| Teste em iPhone físico | o usuário | o código é compatível com iOS (React Native 0.86 → iOS 15.1+), mas não há aparelho nem build de iOS validado |
 | Publicar a primeira versão no servidor | o usuário | `APP_VERSAO_PUBLICADA` e `APP_URL_DOWNLOAD` no `backend/.env` — sem isso o aplicativo continua funcionando e apenas não avisa de versão nova |
 | Push para o repositório público | o usuário | **nenhum push foi feito nesta sessão** |
 
@@ -436,12 +583,14 @@ A auditoria tinha listado como defeito duas coisas que **já estavam resolvidas 
 
 **APROVADO COM RESSALVAS.**
 
-O que está **comprovado**: o backend e o aplicativo compilam sem erro de TypeScript (inclusive em clone limpo do repositório), as 79 verificações automatizadas passam (55 unitárias + 24 de integração contra o MariaDB real), a API real responde como documentado, o reconhecimento sonoro está implementado ponta a ponta com credencial isolada no servidor e mensagens em pt-BR, a busca de atualização pela internet funciona nos dois gatilhos (automático e manual) com aviso honesto e sem laço de requisições, a busca e a reprodução seguem funcionando, o artefato Android compila com `targetSdk 36` e a permissão de microfone declarada no manifesto.
+O que está **comprovado**: o backend e o aplicativo compilam sem erro de TypeScript (inclusive em clone limpo do repositório), as **90 verificações automatizadas** passam (55 unitárias do backend + 24 de integração contra o MariaDB real + 11 do aplicativo), a API real responde como documentado, o reconhecimento sonoro está implementado ponta a ponta com credencial isolada no servidor e mensagens em pt-BR, a busca de atualização pela internet funciona nos dois gatilhos (automático e manual) com aviso honesto e sem laço de requisições, a busca e a reprodução seguem funcionando, o artefato Android compila com `targetSdk 36` e a permissão de microfone declarada no manifesto.
 
 Nesta rodada os **achados de código** da auditoria foram corrigidos na íntegra (restos de Laravel, `as any[]`, `eslint-disable`, função sem consumidor, dependências não importadas, duplicações, pasta vazia e a duração do toast). Dois **achados novos** apareceram no caminho e também foram resolvidos: o aviso (toast) era desenhado fora da tela — a camada global tinha altura zero, então o aviso renderizava 483 px abaixo do topo de uma janela de 473 px — e o padrão `cache/` do `.gitignore` do backend alcançava `backend/src/services/cache/`, que é código-fonte, e esconderia de qualquer arquivo novo criado ali. Os dois estão documentados em `AGENTS.md`. Dois achados anteriores ("décadas vazias" e "tela do artista sem entrada") foram refutados com execução real e medição no banco: estavam **antigos**, não são defeitos do código atual.
 
-**Nesta última rodada** (rodapé, botão claro/escuro, Android 2025+, manual) o que está comprovado: o rodapé virou uma cápsula de vidro com bolha deslizante e 14 px livres até a borda (medido), o botão e o seletor de tema foram refeitos e funcionam nos dois temas (medido), as boas-vindas duram 3,26 s na tela com um temporizador de 3.000 ms (medido), o `minSdkVersion` é 36 e o APK gerado declara `sdkVersion:'36'` (lido do próprio pacote), o aplicativo explica a incompatibilidade em vez de quebrar, e o manual tem catorze assuntos em pt-BR incluindo as cinco recusas de instalação. As 79 verificações automatizadas continuam passando e o TypeScript está limpo nas duas camadas.
+**Nesta última rodada** (rodapé, botão claro/escuro, Android 2025+, manual) o que está comprovado: o rodapé virou uma cápsula de vidro com bolha deslizante e 14 px livres até a borda (medido), o botão e o seletor de tema foram refeitos e funcionam nos dois temas (medido), as boas-vindas duram 3,26 s na tela com um temporizador de 3.000 ms (medido), o `minSdkVersion` é 36 e o APK gerado declara `sdkVersion:'36'` (lido do próprio pacote), o aplicativo explica a incompatibilidade em vez de quebrar, e o manual tem catorze assuntos em pt-BR incluindo as cinco recusas de instalação. As 90 verificações automatizadas continuam passando e o TypeScript está limpo nas duas camadas.
 
-As **ressalvas** (impedem aprovação integral, conforme exigido): o caminho de acerto do reconhecimento não foi exercitado contra o serviço real por falta de credencial; a captura por microfone, a instalação do APK e a instalação do APK indicado pelo botão "Baixar" não foram executadas em aparelho Android físico (`adb devices` não encontrou aparelho); e o APK de produção assinado depende do login do usuário no EAS — bloqueio comprovado pela própria CLI ("An Expo user account is required to proceed."). Nenhuma dessas ressalvas foi escondida por suposição — cada uma está marcada como **NÃO VERIFICADO** acima, com o motivo exato.
+**Nesta rodada de reconhecimento sonoro** (especificação técnica de reconhecimento musical por áudio) o que está comprovado: a auditoria do subsistema foi registrada e **classificada item a item** em Confirmado / Parcial / Não verificado / Inexistente, com evidência (3-bis); a contradição `README.md` × `AGENTS.md` apontada pela especificação **não existe mais** — varredura real por `yt-dlp` e YouTube no código não encontra vestígio, e os dois documentos dizem a mesma coisa (3-ter); o aplicativo **passa a informar para onde vai o trecho capturado** (cartão de aviso durante a captura e texto novo da permissão nativa); cada falha do microfone ganhou **status e título próprios** (`permission_denied` → "Microfone bloqueado", `microphone_unavailable` → "Microfone indisponível", `network_error` → "Sem conexão com o servidor", `cancelled` → "Identificação cancelada"); a faixa identificada que não existe no catálogo deixou de aparecer como "Nenhuma versão encontrada" genérica e passou a ter aviso próprio com sugestão; o contrato do reconhecimento foi extraído para um módulo puro (`mobile/src/services/reconhecimentoContrato.ts`) e ganhou **11 testes automatizados no aplicativo**, sem nenhuma dependência nova; e a comparação **AudD × ShazamKit × ACRCloud** foi feita e registrada antes de qualquer mudança de código, com a justificativa de manter o AudD e as ressalvas do que ficou sem prova (3-quater).
+
+As **ressalvas** (impedem aprovação integral, conforme exigido): o caminho de acerto do reconhecimento não foi exercitado contra o serviço real por falta de credencial; a **prova de conceito comparativa** entre ShazamKit e AudD com as mesmas amostras não foi executada (exigiria credencial e build nativo com o AAR), então a seleção do provedor apoia-se em análise técnica documentada, não em medição; a captura por microfone, a instalação do APK e a instalação do APK indicado pelo botão "Baixar" não foram executadas em aparelho Android físico (`adb devices` não encontrou aparelho); o iOS não foi testado em aparelho; o APK de produção assinado depende do login do usuário no EAS — bloqueio comprovado pela própria CLI ("An Expo user account is required to proceed."); e o APK de release existente **predate esta rodada**, então o texto novo da permissão nativa e o manual revisado ainda não chegaram a um aparelho. Nenhuma dessas ressalvas foi escondida por suposição — cada uma está marcada como **NÃO VERIFICADO** ou **PARCIAL** acima, com o motivo exato.
 
 **O artefato entregável está em dia com o código:** o APK de release foi recompilado com o rodapé, o botão de tema e a restrição de Android 2025+ (`BUILD SUCCESSFUL in 28m 26s`, 101.765.239 bytes, `sdkVersion:'36'`, assinatura conferida com `apksigner` — a mesma chave do APK anterior) e o bundle Hermes dentro do pacote contém as marcas desta rodada ("Atualize o Android do aparelho", "Quando a instalação é recusada", "Procurar versão mais nova", "Limpar a lista de Explorar?"). O crescimento de 17 MB do pacote tem causa medida e explicada — o dex passa a ser gravado sem compressão porque `minSdk >= 28` ([`DexPackagingOptions`](https://developer.android.com/reference/tools/gradle-api/8.3/null/com/android/build/api/variant/DexPackagingOptions)) — e as bibliotecas nativas foram auditadas sem tabela de depuração. O que falta para fechar a entrega é a ação do dono: entrar na conta Expo, rodar o `eas build` para assinar com a chave de produção e instalar o APK em um aparelho Android 16 ou mais novo.

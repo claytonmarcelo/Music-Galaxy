@@ -280,6 +280,17 @@ backend/src/services/
     └── ingestionLogger.ts
 ```
 
+O lado do aplicativo do reconhecimento sonoro:
+```
+mobile/src/
+├── hooks/useReconhecimentoSonoro.ts      # captura, contagem, cancelamento, limpeza
+├── components/PainelReconhecimento.tsx   # painel de estado e resultado
+└── services/
+    ├── reconhecimento.ts                  # transporte (POST /api/recognize)
+    └── reconhecimentoContrato.ts         # contrato puro (status, mensagens, termo de busca)
+mobile/tests/reconhecimento.test.ts       # testes do contrato puro (node:test)
+```
+
 ### Descoberta de Áudio em Sites Abertos
 - `SourceOrchestrator` consulta os provedores em paralelo e só aceita candidato com classificação `EXACT_MATCH` (pontuação ≥ 90 no `ExactMatchEngine`).
 - `InternetArchiveProvider` usa três consultas Lucene progressivas no `advancedsearch.php` (artista+título, artista+título restrito ao creator, artista), com parada antecipada quando já há fonte forte; metadados têm cache em memória de 30 min (100 itens) e o orçamento total da busca é de 28s.
@@ -292,8 +303,31 @@ backend/src/services/
 - **Contrato** — status possíveis: `matched`, `no_match`, `permission_denied`, `microphone_unavailable`, `network_error`, `provider_error`, `cancelled`. O campo `confidence` só aparece quando o provedor entrega uma medida documentada; nenhum metadado é inventado pelo Music Galaxy.
 - **Limites da amostra** — base64 de 1 KB a 2 MB, áudio de 2 a 30 segundos, formatos `mp3`, `m4a`, `wav`, `flac`, `ogg`, `webm`, `aac`. Amostra inválida é recusada com mensagem em português.
 - **Privacidade** — a credencial do provedor fica somente no `backend/.env`; ela nunca vai para o aplicativo, para o APK, para o código nativo ou para log. A gravação é temporária, apagada logo após a análise e não é gravada no banco.
+- **O destino da amostra é informado ao usuário** — a tecnologia escolhida (API externa) exige o envio do áudio: o trecho sai do aparelho, vai ao servidor do Music Galaxy e dali ao serviço de reconhecimento. Isso está escrito no painel (durante a captura), no manual do aplicativo e na permissão de microfone do sistema (`microphonePermission` do plugin `expo-audio`). Nada é gravado, nem no aparelho depois da análise, nem no MariaDB, nem em log.
+- **Situações diferenciadas na interface** — o aplicativo produz o status normalizado de cada falha (permissão negada, microfone indisponível, sem conexão, serviço indisponível, cancelamento) e o painel mostra um título específico para cada uma, sempre lembrando que a busca por texto continua funcionando. O contrato puro vive em `mobile/src/services/reconhecimentoContrato.ts`, testado fora do aparelho (`mobile/tests`).
+- **Faixa fora do catálogo** — quando a busca vem de uma faixa reconhecida e o catálogo não devolve versões, a tela mostra "Essa faixa ainda não está no catálogo" em vez de um "nada encontrado" genérico; histórico, filtros e busca por texto não são apagados.
 - **Sem credencial** — sem `AUDD_TOKEN` a rota responde 503 com mensagem de serviço não configurado e o aplicativo explica isso ao usuário; a busca por texto continua funcionando normalmente.
-- **Fora do escopo da Regra 3** — o reconhecimento identifica a obra, mas **não** fornece áudio: as versões exibidas continuam vindo do catálogo e sendo filtradas por `audio_source_url` (Regra 7).
+- **Fora do escopo da Regra 3** — o reconhecimento identifica a obra, mas **não** fornece áudio: as versões exibidas continuam vindo do catálogo e sendo filtradas por `audio_source_url` (Regra 7). Identificar uma música nunca autoriza obter, baixar ou reproduzir áudio de plataforma proibida.
+
+### Decisão de tecnologia do reconhecimento (AudD × ShazamKit × ACRCloud)
+Comparação feita em 23/10/2026 contra a documentação oficial de cada fornecedor. O que está **verificado** nesta rodada:
+
+| Critério | AudD (escolhido) | ShazamKit (Apple) | ACRCloud |
+|---|---|---|---|
+| Integração | API HTTP pelo backend Node.js | SDK Android em AAR + token de desenvolvedor | API HTTP (ou SDK) |
+| Credencial | `api_token` no corpo do formulário | Token de desenvolvedor da conta Apple (Media Identifier + chave privada) | Chave e segredo de assinatura |
+| Depósito do SDK | — | Arquivo `shazamkit-android-release.aar` baixado à mão, colocado em `libs/`, com `flatDir` no Gradle | — |
+| Dependências nativas | nenhuma | `kotlinx-coroutines`, `okhttp`, `retrofit` + módulo nativo em Kotlin | nenhuma |
+| Áudio de entrada | arquivo (mp3, m4a, wav, flac, ogg, webm, aac) | PCM 16 bits mono, 48/44,1/32/16 kHz | arquivo ou *fingerprint* |
+| Internet | sim | sim, para consultar o catálogo | sim |
+| Custo | teste de 300 requisições; planos a partir de US$ 5/mês (1.000 requisições) | conta de desenvolvedor Apple | cotação a consultar |
+| Linha de base do projeto | já atendida (minSdk 36) | o SDK exige API 21, abaixo da linha do projeto | a avaliar |
+
+- **Por que AudD agora** — o fluxo já é nativo do backend Node.js existente, não exige módulo nativo em Kotlin nem AAR baixado à mão, não exige conta de desenvolvedor Apple para funcionar, mantém a credencial só no servidor e a taxa é previsível. Trocar de provedor continua possível: `criarProvedor()` (`backend/src/services/recognition/recognitionService.ts`) escolhe o adaptador por `RECOGNITION_PROVIDER`.
+- **ShazamKit fica registrado como alternativa** — exigiria AAR manual, token de desenvolvedor e um módulo nativo em Kotlin dentro de um projeto que hoje não tem módulo nativo e não aceita dependência nativa nova sem autorização do dono. **A prova de conceito lado a lado não foi executada** (classificada como **NÃO VERIFICADO**): depende de conta de desenvolvedor Apple e da comparação de taxa de acerto com as mesmas amostras.
+- **ACRCloud não foi descartada** — é a alternativa mais próxima em modelo (API com assinatura). A documentação de referência não entregou conteúdo textual verificável na consulta desta rodada, então preço, limite de amostra e latência estão **NÃO VERIFICADOS**.
+- **Linha de base do Android** — a especificação técnica pede "Android 15 (API 35) e posteriores"; o projeto exige **somente 2025 em diante**, ou seja, Android 16 (API 36). A regra do projeto é mais restritiva e continua valendo: baixar o `minSdkVersion` para 35 autorizaria a instalação em aparelhos de 2024, contrariando o pedido do dono. A divergência fica registrada, não "corrigida" por conta própria.
+- **iOS** — permanece no escopo. A permissão de microfone é declarada pelo plugin `expo-audio` (`NSMicrophoneUsageDescription`), com o mesmo texto do Android. A versão mínima de iOS segue a do React Native 0.86 (iOS 15.1+); **o reconhecimento em iPhone físico continua NÃO VERIFICADO**, porque não há aparelho iOS nesta máquina.
 
 ### Configuração
 Adicionar ao `backend/.env`:
@@ -342,6 +376,19 @@ npx tsc --noEmit
 cd mobile
 npx tsc --noEmit
 ```
+
+### Testes automatizados
+```bash
+# Toda a suíte (backend unitário + backend API + contrato do aplicativo)
+npm run test:all
+
+# Separados
+npm run test        # backend, testes unitários
+npm run test:api    # backend, testes de integração contra o app Express
+npm run test:mobile # aplicativo, contrato do reconhecimento (node:test, sem emulador)
+```
+- O aplicativo não tem runner de testes de interface: o que é testado sem aparelho é o **contrato puro** (`mobile/src/services/reconhecimentoContrato.ts`), compilado pelo `mobile/tests/tsconfig.json` e executado com o `node --test` do próprio Node — nenhuma dependência nova.
+- `mobile/tsconfig.json` exclui `tests/` e `dist-tests/`: o `tsc --noEmit` do aplicativo continua verificando só o código do app, e os testes têm a própria checagem (`npx tsc -p tests/tsconfig.json --noEmit`).
 
 ### Funcional
 - Testar endpoints da API via curl ou Postman

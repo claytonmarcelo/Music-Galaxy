@@ -63,8 +63,10 @@ const ASSUNTOS: Assunto[] = [
     passos: [
       'Toque no botão de microfone dentro do campo de busca. O aplicativo pede a permissão do microfone na primeira vez.',
       'Quando a contagem terminar, deixe a música tocar perto do aparelho por alguns segundos.',
+      'O trecho capturado é enviado ao servidor do Music Galaxy e analisado por um serviço de reconhecimento. Ele não é gravado, não fica guardado e some do aparelho assim que a análise termina.',
       'Se a música for reconhecida, o nome aparece no painel. Toque em "Pesquisar no Music Galaxy" para ver todas as versões dela.',
       'Se o trecho não for reconhecido, o aplicativo avisa que não encontrou nada e o campo de busca continua vazio — nenhuma sugestão é inventada.',
+      'Se a música tocada ainda não existir no catálogo, o aplicativo avisa isso e sugere buscar só pelo nome do artista.',
       'Se o servidor não estiver configurado ou sem acesso à internet, o painel explica o motivo e permite tentar de novo.',
     ],
   },
@@ -197,6 +199,7 @@ const ASSUNTOS: Assunto[] = [
       'Na primeira vez, o Android pergunta se o aplicativo pode gravar. Toque em "Permitir".',
       'Para mudar depois: Configurações do Android → Aplicativos → Music Galaxy → Permissões → Microfone.',
       'A gravação é apagada assim que a identificação termina. O aplicativo não guarda nem envia as suas gravações para o banco de dados.',
+      'Se você recusou a permissão, o painel avisa que o microfone está bloqueado. A busca por texto continua funcionando: só a identificação pelo som fica indisponível até você permitir.',
     ],
   },
   {
