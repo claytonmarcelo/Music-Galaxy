@@ -51,6 +51,28 @@ export function mensagemDoCorpo(corpo: unknown, padrao: string): string {
 }
 
 /**
+ * Diz o que aconteceu quando a requisição foi interrompida no meio.
+ *
+ * O navegador e o React Native entregam **o mesmo erro** (`AbortError`)
+ * quando o usuário cancela e quando o tempo de espera se esgota. Só o sinal
+ * do usuário separa os dois casos. Tratar tudo como "cancelado" esconderia
+ * um servidor mudo atrás de uma frase que sugere uma ação do usuário.
+ */
+export function descreverInterrupcao(sinalDoUsuarioAbortado: boolean): {
+  status: RecognitionStatus;
+  mensagem: string;
+} {
+  if (sinalDoUsuarioAbortado) {
+    return { status: 'cancelled', mensagem: 'Identificação cancelada.' };
+  }
+
+  return {
+    status: 'network_error',
+    mensagem: 'O servidor demorou demais para responder. Tente novamente.',
+  };
+}
+
+/**
  * Monta o texto de busca a partir do que o serviço realmente identificou.
  *
  * Regras de honestidade: só entram título e artista devolvidos pelo

@@ -12,8 +12,10 @@
 //     mandar o aplicativo para o fundo, a captura é interrompida.
 //   - O áudio capturado nunca é gravado no banco nem enviado a outro lugar
 //     além do backend do Music Galaxy.
-//   - Um pedido por vez: iniciar durante uma tentativa apenas cancela a
-//     anterior.
+//   - Um pedido por vez: iniciar durante uma tentativa cancela a anterior.
+//   - Cada tentativa tem um número (geração). Tudo o que chega atrasado de
+//     uma tentativa cancelada — contagem, gravação, resposta do servidor — é
+//     descartado em vez de escrever por cima do estado atual.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus, Platform } from 'react-native';
@@ -129,25 +131,19 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
   // é o caminho do arquivo; na web é a URL do blob criado.
   const urlDaCaptura = useRef<string | null>(null);
 
-  // O gravador é criado uma única vez e reaproveitado nas tentativas.
-  const gravador = useAudioRecorder(RecordingPresets.HIGH_QUALITY, (status: RecordingStatus) => {
-    if (status.url) {
-      urlDaCaptura.current = status.url;
-    }
-
-    if (status.hasError) {
-      setMensagemErro('A gravação foi interrompida pelo sistema. Tente novamente.');
-      setStatusErro('microphone_unavailable');
-      setEstado('erro');
-    }
-  });
-
   // Temporizadores e requisições em andamento — tudo cancelável.
   const temporizadorContagem = useRef<ReturnType<typeof setTimeout> | null>(null);
   const temporizadorCaptura = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controladorRequisicao = useRef<AbortController | null>(null);
   const arquivoTemporario = useRef<string | null>(null);
-  const tentativaAtiva = useRef(false);
+
+  // Número da tentativa atual. Cancelar avança o número, então qualquer
+  // continuação atrasada de uma tentativa antiga percebe que ficou para trás.
+  const geracao = useRef(0);
+  // Trava de reentrada: vale do começo da preparação até o fim do envio.
+  const emAndamento = useRef(false);
+  // Libera a contagem regressiva quando a tentativa é cancelada.
+  const resolverContagem = useRef<(() => void) | null>(null);
 
   const limparTemporizadores = useCallback(() => {
     if (temporizadorContagem.current) {
@@ -159,6 +155,32 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
       temporizadorCaptura.current = null;
     }
   }, []);
+
+  /** Registra a falha do próprio gravador e desarma o resto da tentativa. */
+  const registrarFalhaDoGravador = useCallback(
+    (mensagem: string) => {
+      geracao.current += 1;
+      emAndamento.current = false;
+      limparTemporizadores();
+      setMensagemErro(mensagem);
+      setStatusErro('microphone_unavailable');
+      setEstado('erro');
+    },
+    [limparTemporizadores]
+  );
+
+  // O gravador é criado uma única vez e reaproveitado nas tentativas.
+  const gravador = useAudioRecorder(RecordingPresets.HIGH_QUALITY, (status: RecordingStatus) => {
+    if (status.url) {
+      urlDaCaptura.current = status.url;
+    }
+
+    if (status.hasError) {
+      // Sem desarmar aqui, o temporizador de segurança ainda dispararia mais
+      // tarde e tentaria enviar um áudio que não existe.
+      registrarFalhaDoGravador('A gravação foi interrompida pelo sistema. Tente novamente.');
+    }
+  });
 
   // Interrompe a captura em andamento e devolve o microfone.
   const pararGravacao = useCallback(async () => {
@@ -181,41 +203,88 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
   }, []);
 
   const cancelar = useCallback(() => {
+    const estavaEmAndamento = emAndamento.current;
+
+    // Invalida tudo o que ainda estava em curso.
+    geracao.current += 1;
+    emAndamento.current = false;
+    resolverContagem.current?.();
+    resolverContagem.current = null;
     limparTemporizadores();
-    tentativaAtiva.current = false;
+
+    controladorRequisicao.current?.abort();
+    controladorRequisicao.current = null;
+
+    // O trecho gravado sai do aparelho mesmo quando a tentativa é cancelada
+    // antes do envio — inclusive o arquivo que o gravador ainda ia informar.
+    const uri = arquivoTemporario.current ?? urlDaCaptura.current;
+    arquivoTemporario.current = null;
+    urlDaCaptura.current = null;
+
     void pararGravacao();
-    void limparRecursos();
-    setEstado('ocioso');
+    void apagarArquivoTemporario(uri);
+
     setContagem(CONTAGEM_REGRESSIVA_SEGUNDOS);
+
+    if (estavaEmAndamento) {
+      // Cancelamento durante a captura ou o envio tem desfecho próprio na
+      // interface: o usuário vê que a tentativa foi interrompida de fato.
+      setResultado(null);
+      setMensagemErro('A identificação foi interrompida. O microfone já foi liberado.');
+      setStatusErro('cancelled');
+      setEstado('erro');
+      return;
+    }
+
+    setEstado('ocioso');
     setMensagemErro(null);
     setStatusErro(null);
-  }, [limparTemporizadores, pararGravacao, limparRecursos]);
+  }, [limparTemporizadores, pararGravacao]);
 
   const limparResultado = useCallback(() => {
+    geracao.current += 1;
+    emAndamento.current = false;
+    resolverContagem.current?.();
+    resolverContagem.current = null;
+    limparTemporizadores();
+    controladorRequisicao.current?.abort();
+    controladorRequisicao.current = null;
+    void limparRecursos();
+
     setResultado(null);
     setMensagemErro(null);
     setStatusErro(null);
+    setContagem(CONTAGEM_REGRESSIVA_SEGUNDOS);
     setEstado('ocioso');
-  }, []);
+  }, [limparRecursos, limparTemporizadores]);
 
   // Envia a amostra ao backend e trata o desfecho.
-  const enviarAmostra = useCallback(async (uri: string) => {
+  const enviarAmostra = useCallback(async (uri: string, minhaGeracao: number) => {
     setEstado('enviando');
+
+    let controlador: AbortController | null = null;
 
     try {
       const base64 = await lerAudioBase64(uri);
-      arquivoTemporario.current = uri;
+      if (geracao.current !== minhaGeracao) return;
 
-      const controlador = new AbortController();
+      controlador = new AbortController();
       controladorRequisicao.current = controlador;
 
       const resposta = await reconhecerMusica(base64, controlador.signal);
+      if (geracao.current !== minhaGeracao) return;
 
       setResultado(resposta);
       setEstado('concluido');
     } catch (erro) {
+      // A tentativa foi descartada enquanto a resposta vinha: nada a fazer.
+      if (geracao.current !== minhaGeracao) return;
+
       if (erro instanceof ErroReconhecimento && erro.status === 'cancelled') {
-        setEstado('ocioso');
+        setResultado(null);
+        setMensagemErro('A identificação foi interrompida. O microfone já foi liberado.');
+        setStatusErro('cancelled');
+        setEstado('erro');
         return;
       }
 
@@ -230,33 +299,56 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
       );
       setEstado('erro');
     } finally {
-      controladorRequisicao.current = null;
+      if (controladorRequisicao.current === controlador) {
+        controladorRequisicao.current = null;
+      }
       // O arquivo temporário sai do aparelho assim que a análise termina.
       await apagarArquivoTemporario(uri);
       if (arquivoTemporario.current === uri) arquivoTemporario.current = null;
+      if (geracao.current === minhaGeracao) emAndamento.current = false;
     }
   }, []);
 
   /** Inicia a captura depois da contagem regressiva. */
-  const comecarCaptura = useCallback(async () => {
+  const comecarCaptura = useCallback(async (minhaGeracao: number) => {
     try {
       setEstado('gravando');
       urlDaCaptura.current = null;
 
       await gravador.prepareToRecordAsync();
+      if (geracao.current !== minhaGeracao) return;
+
       gravador.record({ forDuration: DURACAO_CAPTURA_SEGUNDOS });
 
       // Rede de segurança: o gravador para sozinho ao chegar na duração,
       // mas este temporizador (com folga de 1,5 s) garante o encerramento em
       // qualquer plataforma, sem disputar o fim da gravação com o gravador.
       temporizadorCaptura.current = setTimeout(() => {
+        temporizadorCaptura.current = null;
         void pararGravacao().then(() => {
+          if (geracao.current !== minhaGeracao) return;
+
           const uri = gravador.uri ?? urlDaCaptura.current;
-          if (uri) void enviarAmostra(uri);
+
+          if (!uri) {
+            // Sem arquivo não há o que enviar: encerra com motivo, em vez de
+            // deixar a interface presa em "Ouvindo…".
+            emAndamento.current = false;
+            setMensagemErro('A gravação não produziu um áudio utilizável. Tente novamente.');
+            setStatusErro('microphone_unavailable');
+            setEstado('erro');
+            return;
+          }
+
+          arquivoTemporario.current = uri;
+          void enviarAmostra(uri, minhaGeracao);
         });
       }, DURACAO_CAPTURA_SEGUNDOS * 1000 + 1500);
     } catch (erro) {
       console.error('Falha ao iniciar a captura de áudio:', erro);
+      if (geracao.current !== minhaGeracao) return;
+
+      emAndamento.current = false;
       setMensagemErro(
         'Não foi possível acessar o microfone. Verifique as permissões do aplicativo.'
       );
@@ -267,12 +359,15 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
 
   const iniciar = useCallback(async () => {
     // Um pedido por vez: iniciar de novo cancela a tentativa anterior.
-    if (tentativaAtiva.current) {
+    if (emAndamento.current) {
       cancelar();
       return;
     }
 
-    tentativaAtiva.current = true;
+    const minhaGeracao = geracao.current + 1;
+    geracao.current = minhaGeracao;
+    emAndamento.current = true;
+
     setResultado(null);
     setMensagemErro(null);
     setStatusErro(null);
@@ -281,11 +376,15 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
     try {
       // 1. Permissão do microfone — só pedida na hora da ação.
       let permissao = await getRecordingPermissionsAsync();
+      if (geracao.current !== minhaGeracao) return;
+
       if (!permissao.granted) {
         permissao = await requestRecordingPermissionsAsync();
+        if (geracao.current !== minhaGeracao) return;
       }
 
       if (!permissao.granted) {
+        emAndamento.current = false;
         setMensagemErro(
           'O microfone está bloqueado. Libere a permissão nas configurações do aparelho para identificar músicas.'
         );
@@ -301,12 +400,21 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
       await new Promise<void>((resolve) => {
         let restantes = CONTAGEM_REGRESSIVA_SEGUNDOS;
 
+        resolverContagem.current = () => {
+          resolverContagem.current = null;
+          if (temporizadorContagem.current) {
+            clearTimeout(temporizadorContagem.current);
+            temporizadorContagem.current = null;
+          }
+          resolve();
+        };
+
         const proximo = () => {
           restantes -= 1;
           setContagem(restantes);
 
           if (restantes <= 0) {
-            resolve();
+            resolverContagem.current?.();
             return;
           }
 
@@ -316,22 +424,25 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
         temporizadorContagem.current = setTimeout(proximo, 1000);
       });
 
+      if (geracao.current !== minhaGeracao) return;
+
       // 3. Captura e envio.
-      await comecarCaptura();
+      await comecarCaptura(minhaGeracao);
     } catch (erro) {
+      if (geracao.current !== minhaGeracao) return;
+
       console.error('Falha no reconhecimento sonoro:', erro);
+      emAndamento.current = false;
       setMensagemErro('Não foi possível iniciar a identificação. Tente novamente.');
       setStatusErro('microphone_unavailable');
       setEstado('erro');
-    } finally {
-      tentativaAtiva.current = false;
     }
   }, [cancelar, comecarCaptura]);
 
   // O microfone não continua ativo com o aplicativo em segundo plano.
   useEffect(() => {
     const aoMudarEstado = (novo: AppStateStatus) => {
-      if (novo !== 'active' && gravador.isRecording) {
+      if (novo !== 'active' && (emAndamento.current || gravador.isRecording)) {
         cancelar();
       }
     };
@@ -342,9 +453,13 @@ export function useReconhecimentoSonoro(): ResultadoUseReconhecimentoSonoro {
     };
   }, [gravador, cancelar]);
 
-  // Ao sair da tela, tudo é liberado.
+  // Ao sair da tela, tudo é liberado — sem avisar a interface, que já saiu.
   useEffect(() => {
     return () => {
+      geracao.current += 1;
+      emAndamento.current = false;
+      resolverContagem.current?.();
+      resolverContagem.current = null;
       limparTemporizadores();
       void pararGravacao();
       void limparRecursos();

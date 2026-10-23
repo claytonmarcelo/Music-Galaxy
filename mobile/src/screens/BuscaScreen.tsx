@@ -669,6 +669,7 @@ export default function BuscaScreen(): React.JSX.Element {
           aoPesquisar={pesquisarFaixaReconhecida}
           aoTentarNovamente={repetirReconhecimento}
           aoCancelar={encerrarReconhecimento}
+          aoFechar={reconhecimento.limparResultado}
         />
 
         {/* Aviso de mínimo de letras */}

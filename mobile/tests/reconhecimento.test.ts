@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 
 import {
   STATUS_VALIDOS,
+  descreverInterrupcao,
   mensagemDoCorpo,
   montarTermoBusca,
   statusPeloCodigoHttp,
@@ -125,4 +126,22 @@ test('ignora álbum e confiança no texto de busca', () => {
   assert.equal(termo, 'Get Lucky Daft Punk');
   assert.equal(termo.includes('Random Access Memories'), false);
   assert.equal(termo.includes('88'), false);
+});
+
+// ============================================================
+// Interrupção da requisição (cancelamento × tempo esgotado)
+// ============================================================
+
+test('cancelamento do usuário vira o status cancelled', () => {
+  const interrupcao = descreverInterrupcao(true);
+
+  assert.equal(interrupcao.status, 'cancelled');
+  assert.match(interrupcao.mensagem, /cancelada/i);
+});
+
+test('tempo esgotado vira network_error, nunca cancelled', () => {
+  const interrupcao = descreverInterrupcao(false);
+
+  assert.equal(interrupcao.status, 'network_error');
+  assert.match(interrupcao.mensagem, /demorou demais/i);
 });

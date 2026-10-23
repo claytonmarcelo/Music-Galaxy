@@ -41,6 +41,8 @@ interface PainelReconhecimentoProps {
   aoTentarNovamente: () => void;
   /** Chamado para fechar o painel e liberar o microfone. */
   aoCancelar: () => void;
+  /** Chamado para dispensar o painel depois de um desfecho (sem cancelar nada). */
+  aoFechar: () => void;
 }
 
 /** Descrição do que o painel mostra em cada etapa da captura. */
@@ -122,6 +124,15 @@ function descricaoDoErro(
         detalhe: 'A captura foi interrompida e o microfone já foi liberado.',
         icone: 'info',
       };
+    case 'provider_error':
+      // Serviço fora do ar, credencial não configurada no servidor ou
+      // limite de tentativas atingido: tudo isso vive no mesmo status, e a
+      // mensagem do servidor explica o caso exato.
+      return {
+        titulo: 'Serviço de reconhecimento indisponível',
+        detalhe: `${texto} ${avisoBusca}`,
+        icone: 'aviso',
+      };
     default:
       return {
         titulo: 'Não foi possível identificar',
@@ -145,6 +156,7 @@ export default function PainelReconhecimento({
   aoPesquisar,
   aoTentarNovamente,
   aoCancelar,
+  aoFechar,
 }: PainelReconhecimentoProps): React.JSX.Element | null {
   const { colors } = useTheme();
 
@@ -353,7 +365,9 @@ export default function PainelReconhecimento({
           <View style={styles.botaoAcao}>
             <CustomButton
               title={emAndamento ? 'Cancelar' : 'Fechar'}
-              onPress={aoCancelar}
+              // "Cancelar" interrompe a tentativa e explica o desfecho;
+              // "Fechar" apenas dispensa o painel, sem inventar um erro.
+              onPress={emAndamento ? aoCancelar : aoFechar}
               variant="ghost"
               size="small"
               icone="limpar"

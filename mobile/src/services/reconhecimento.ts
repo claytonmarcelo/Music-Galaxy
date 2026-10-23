@@ -11,6 +11,7 @@
 import { BASE_URL } from './api';
 import { RecognitionResult, RecognitionStatus, RespostaReconhecimento } from '../types';
 import {
+  descreverInterrupcao,
   mensagemDoCorpo,
   statusPeloCodigoHttp,
   statusValido,
@@ -90,20 +91,25 @@ export async function reconhecerMusica(
       );
     }
 
+    // O status é a fonte de verdade da interface: um valor fora do contrato
+    // seria tratado como resultado válido e quebraria a apresentação.
+    if (!statusValido(corpo.data.status)) {
+      throw new ErroReconhecimento(
+        'provider_error',
+        'O servidor respondeu de forma inesperada ao reconhecimento.'
+      );
+    }
+
     return corpo.data;
   } catch (erro) {
     if (erro instanceof ErroReconhecimento) throw erro;
 
-    // Cancelamento pedido pelo usuário — não é falha.
-    if (erro instanceof Error && (erro.name === 'AbortError' || sinal?.aborted)) {
-      throw new ErroReconhecimento('cancelled', 'Identificação cancelada.');
-    }
-
-    if (erro instanceof Error && erro.name === 'AbortError') {
-      throw new ErroReconhecimento(
-        'network_error',
-        'O servidor demorou demais para responder. Tente novamente.'
-      );
+    // Cancelamento pedido pelo usuário — não é falha do serviço. O tempo
+    // esgotado chega como o mesmo AbortError; o que separa os dois casos é
+    // o sinal do usuário (ver descreverInterrupcao).
+    if (sinal?.aborted || (erro instanceof Error && erro.name === 'AbortError')) {
+      const interrupcao = descreverInterrupcao(Boolean(sinal?.aborted));
+      throw new ErroReconhecimento(interrupcao.status, interrupcao.mensagem);
     }
 
     throw new ErroReconhecimento(
