@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs (Regras mestras versionadas no repositório — 23/10/2026)
+- **`REGRAS_MESTRAS.md` entrou no repositório** — o documento que o dono entregou passa a viajar junto com o código, em vez de ficar só na conversa. Ele reúne oito blocos: preservação da identidade visual original, aplicação do padrão Premium Gourmet como evolução (nunca substituição), segurança da aplicação e proteção de dados, privacidade e minimização, preservação da arquitetura, comunicação obrigatória em português brasileiro, histórico Git humanizado e o relatório de encerramento de doze itens com classificação por evidência.
+- **Conteúdo conferido contra o original** — a comparação linha a linha com o documento recebido não encontrou nenhuma diferença de texto; a única mudança foi a quebra de linha final, acrescentada para o arquivo terminar de forma convencional no repositório.
+
 ### Changed (Rodapé mais baixo outra vez, sem perder os rótulos — 23/10/2026)
 - **O rodapé desceu mais 14 px** — a cápsula de vidro foi de **58 px** para **48 px** de altura, e o rodapé inteiro (cápsula + respiro) de **74 px** para **60 px** numa janela de 473 px, medido no navegador. Contra o desenho original, são **37 px devolvidos ao conteúdo** (97 px → 60 px, −38%).
 - **Peça por peça** — bolha da aba ativa de 32 px → **28 px**, ícone de 19 px → **17 px**, rótulo de 9,5/12 px → **9/11 px**, espaçamento entre ícone e rótulo de 2 px → **1 px**, enchimento vertical da cápsula de 5 px → **3 px**, respiro acima da cápsula de 6 px → **4 px**, raio de 22 px → **18 px**, sombra mais curta (`offset 6`, `radius 11`, `elevation 9`), fio de luz de 30 px → **24 px** de recuo nas pontas e distância mínima até a borda do aparelho de 10 px → **8 px**. O vidro fosco, o fio de luz e a animação da mola continuam iguais.
