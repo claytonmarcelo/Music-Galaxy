@@ -36,10 +36,10 @@ const filaResolucao: ItemFilaResolucao[] = [];
 let processandoFila = false;
 
 // Coloca na fila as releases sem áudio encontradas numa busca.
-function enfileirarResolucoes(releases: ReleaseCompleto[]): void {
+// Recebe apenas as que já vêm sem fonte do banco — não é preciso revalidar.
+function enfileirarResolucoes(releases: ItemFilaResolucao[]): void {
   let novas = 0;
   for (const r of releases) {
-    if (r.audio_source_url) continue;
     if (filaResolucao.some((item) => item.id === r.id)) continue;
     filaResolucao.push({
       id:           r.id,
@@ -112,11 +112,15 @@ function montarWhereBusca(palavras: string[]): { clausula: string; params: strin
 }
 
 // Busca releases no banco local com todos os dados relacionados.
+// Quando `somenteComAudio` é true (Regra 7), o filtro acontece no SQL — antes
+// ele era aplicado só depois do LIMIT, então uma versão com áudio que caísse
+// além da primeira página nunca aparecia e a página vinha vazia.
 async function buscarReleasesLocal(
   termo: string,
   limit: number,
   offset: number,
-  baseUrl: string = 'http://localhost:3001'
+  baseUrl: string = 'http://localhost:3001',
+  somenteComAudio: boolean = false
 ): Promise<{ releases: ReleaseCompleto[]; total: number }> {
   // Divide o termo em palavras individuais (mínimo 2 caracteres cada)
   // para suportar buscas como "Daft Punk One More Time"
@@ -124,6 +128,7 @@ async function buscarReleasesLocal(
   if (palavras.length === 0) return { releases: [], total: 0 };
 
   const { clausula, params } = montarWhereBusca(palavras);
+  const filtroAudio = somenteComAudio ? ' AND r.audio_source_url IS NOT NULL' : '';
 
   // Consulta principal — JOIN entre todas as tabelas relacionadas
   const [rows] = await pool.execute<RowDataPacket[]>(
@@ -152,20 +157,19 @@ async function buscarReleasesLocal(
      JOIN artists        a  ON w.artist_id         = a.id
      JOIN release_types  rt ON r.release_type_id   = rt.id
      JOIN metadata_sources ms ON r.metadata_source_id = ms.id
-     WHERE ${clausula}
+     WHERE ${clausula}${filtroAudio}
      ORDER BY a.name ASC, w.title ASC, r.release_year ASC
      LIMIT ? OFFSET ?`,
     [...params, limit, offset]
   );
 
-  // Contagem total para paginação
+  // Contagem total para paginação — mesma condição da consulta principal
   const [countRows] = await pool.execute<RowDataPacket[]>(
     `SELECT COUNT(*) AS total
      FROM releases r
      JOIN works          w  ON r.work_id        = w.id
      JOIN artists        a  ON w.artist_id       = a.id
-     JOIN release_types  rt ON r.release_type_id = rt.id
-     WHERE ${clausula}`,
+     WHERE ${clausula}${filtroAudio}`,
     params
   );
 
@@ -204,6 +208,51 @@ async function buscarReleasesLocal(
   return { releases, total };
 }
 
+// Busca as releases do termo que ainda NÃO têm fonte de áudio (Regra 7).
+// Devolve a contagem total (para a resposta) e uma amostra limitada para a
+// fila de resolução em segundo plano — nunca milhares de itens de uma vez.
+async function buscarPendentesAudio(
+  termo: string,
+  limiteFila: number
+): Promise<{ total: number; itens: ItemFilaResolucao[] }> {
+  const palavras = termo.trim().split(/\s+/).filter(p => p.length >= 2);
+  if (palavras.length === 0) return { total: 0, itens: [] };
+
+  const { clausula, params } = montarWhereBusca(palavras);
+
+  const [countRows] = await pool.execute<RowDataPacket[]>(
+    `SELECT COUNT(*) AS total
+     FROM releases r
+     JOIN works   w ON r.work_id  = w.id
+     JOIN artists a ON w.artist_id = a.id
+     WHERE ${clausula} AND r.audio_source_url IS NULL`,
+    params
+  );
+  const total = (countRows[0]?.['total'] as number) ?? 0;
+
+  if (total === 0) return { total: 0, itens: [] };
+
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT r.id, r.version_name, w.title AS work_title, a.name AS artist_name
+     FROM releases r
+     JOIN works   w ON r.work_id  = w.id
+     JOIN artists a ON w.artist_id = a.id
+     WHERE ${clausula} AND r.audio_source_url IS NULL
+     ORDER BY a.name ASC, w.title ASC, r.release_year ASC
+     LIMIT ?`,
+    [...params, limiteFila]
+  );
+
+  const itens: ItemFilaResolucao[] = rows.map(row => ({
+    id:           row['id'] as number,
+    version_name: row['version_name'] as string,
+    work_title:   row['work_title'] as string,
+    artist_name:  row['artist_name'] as string,
+  }));
+
+  return { total, itens };
+}
+
 // Handler do GET /api/search?q={termo}
 export async function buscarMusicas(
   req: Request,
@@ -220,17 +269,16 @@ export async function buscarMusicas(
     const protocol = req.protocol || 'http';
     const baseUrl = `${protocol}://${host}`;
 
-    // Tenta busca local primeiro
-    const local = await buscarReleasesLocal(termo, limit, offset, baseUrl);
+    // Tenta busca local primeiro (já filtrada pela Regra 7 no SQL)
+    const local = await buscarReleasesLocal(termo, limit, offset, baseUrl, true);
 
     // Regra do usuário: só exibir versões que têm áudio. As demais saem da
     // resposta, mas entram na fila de resolução em segundo plano.
-    const comAudioLocal   = local.releases.filter((r) => r.audio_source_url);
-    const pendentesLocal  = local.releases.length - comAudioLocal.length;
-    enfileirarResolucoes(local.releases);
+    const pendentesLocal = await buscarPendentesAudio(termo, 200);
+    enfileirarResolucoes(pendentesLocal.itens);
 
     // Se há dados locais suficientes, responde direto (do banco local = "cache" natural)
-    if (local.total >= MIN_RELEASES_LOCAL) {
+    if (local.total + pendentesLocal.total >= MIN_RELEASES_LOCAL) {
       // Regra do usuário: nunca reutilizar buscas idênticas. Mesmo com dados
       // locais, dispara uma ingestão NOVA em segundo plano (limpa o cache do
       // termo e consulta as fontes externas de novo). A resposta sai rápida
@@ -245,12 +293,12 @@ export async function buscarMusicas(
       const resposta: RespostaPaginada<ReleaseCompleto> = {
         success: true,
         data: {
-          results:         comAudioLocal,
-          total:           comAudioLocal.length,
+          results:         local.releases,
+          total:           local.total,
           page,
           per_page:        limit,
           fromCache:       true,
-          pendentes_audio: pendentesLocal,
+          pendentes_audio: pendentesLocal.total,
         },
       };
       res.json(resposta);
@@ -268,23 +316,22 @@ export async function buscarMusicas(
       );
     }
 
-    // Após a ingestão, consulta o banco novamente
-    const posIngestion = await buscarReleasesLocal(termo, limit, offset);
+    // Após a ingestão, consulta o banco novamente (com o mesmo filtro da Regra 7)
+    const posIngestion = await buscarReleasesLocal(termo, limit, offset, baseUrl, true);
 
     // Mesma regra: sem áudio, sem exibição. E o que sobrou entra na fila.
-    const comAudioPos   = posIngestion.releases.filter((r) => r.audio_source_url);
-    const pendentesPos  = posIngestion.releases.length - comAudioPos.length;
-    enfileirarResolucoes(posIngestion.releases);
+    const pendentesPos = await buscarPendentesAudio(termo, 200);
+    enfileirarResolucoes(pendentesPos.itens);
 
     const resposta: RespostaPaginada<ReleaseCompleto> = {
       success: true,
       data: {
-        results:         comAudioPos,
-        total:           comAudioPos.length,
+        results:         posIngestion.releases,
+        total:           posIngestion.total,
         page,
         per_page:        limit,
         fromCache:       false,
-        pendentes_audio: pendentesPos,
+        pendentes_audio: pendentesPos.total,
       },
     };
     res.json(resposta);

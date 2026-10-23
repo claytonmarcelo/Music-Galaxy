@@ -11,7 +11,8 @@
 //
 // Fluxo unificado (substitui os antigos subsistemas audio/ e o fallback YouTube):
 //   resolverFonte() → fonte salva no banco (audio_source_url) ou descoberta
-//   sob demanda pelo SourceOrchestrator (GenericWebProvider + DirectLinkProvider).
+//   sob demanda pelo SourceOrchestrator (InternetArchiveProvider +
+//   GenericWebProvider + DirectLinkProvider).
 
 import { Request, Response } from 'express';
 import { RowDataPacket } from 'mysql2';
@@ -29,12 +30,14 @@ import { downloadDeduplication } from '../services/downloadDeduplication';
 import { SourceOrchestrator } from '../services/audioSource/sourceOrchestrator';
 import { DirectLinkProvider } from '../services/audioSource/providers/directLinkProvider';
 import { GenericWebProvider } from '../services/audioSource/providers/genericWebProvider';
+import { InternetArchiveProvider } from '../services/audioSource/providers/internetArchiveProvider';
 import { AudioIdentity } from '../services/audioSource/types';
 import { USER_AGENT, auditarUrl, criarBeforeRedirect } from '../services/audioSource/webAudio';
 
 // Providers permitidos pela Regra 3 — apenas web aberta, sem plataformas.
 const directLinkProvider = new DirectLinkProvider();
 const genericWebProvider = new GenericWebProvider();
+const internetArchiveProvider = new InternetArchiveProvider();
 
 // Único orquestrador de áudio do sistema (não existe mais fallback paralelo).
 const sourceOrchestrator = new SourceOrchestrator({
@@ -43,6 +46,7 @@ const sourceOrchestrator = new SourceOrchestrator({
   requireExactMatch: true,
   enableFallback: true,
 });
+sourceOrchestrator.registerProvider(internetArchiveProvider);
 sourceOrchestrator.registerProvider(genericWebProvider);
 sourceOrchestrator.registerProvider(directLinkProvider);
 
@@ -85,8 +89,8 @@ interface ReleaseAudioRow extends RowDataPacket, DadosReleaseParaAudio {}
 // Fonte de áudio resolvida (site aberto — Regra 3)
 interface FonteAudio {
   url: string;        // URL direta do arquivo de áudio
-  provider: string;   // generic-web | direct-link
-  pageUrl?: string;   // página de origem (blog/forum), para auditoria
+  provider: string;   // internet-archive | generic-web | direct-link
+  pageUrl?: string;   // página de origem (blog/fórum/Archive), para auditoria
 }
 
 // Limites de segurança do pipeline

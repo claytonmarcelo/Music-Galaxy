@@ -60,6 +60,7 @@ musicgalaxy/
 - **JAMAIS, em hipótese alguma, usar YouTube, Spotify, Deezer ou qualquer plataforma/serviço de música** de qualquer tipo ou gênero
 - Aplicação em código (não só de comentário):
   - `backend/src/services/audioSource/webAudio.ts` contém `PLATAFORMAS_PROIBIDAS` e `auditarUrl()`, um guard anti-SSRF que bloqueia domínios de plataformas, protocolos não-HTTP, IPs não roteáveis e redirects suspeitos. **Toda URL de áudio visitada pelo sistema passa por esse guard.**
+  - `backend/src/services/audioSource/providers/internetArchiveProvider.ts` descobre áudio no **Internet Archive** (archive.org) por APIs públicas (`advancedsearch.php`, `metadata/{id}`, `download/{id}/{arquivo}`), sem chave e sem login. A identidade do candidato vem do próprio arquivo (nome → metadados ID3 → título do item somente quando há um único áudio) e o filtro de versão impede que instrumental/remix/live substituam a versão original.
   - O ingestion (`searchOrchestrator.ts`) nunca salva URLs de plataformas; as colunas legadas (`youtube_video_id`, `audio_preview_url`, `streaming_url`, `download_url`) foram zeradas e são de somente leitura.
   - O app mobile não exibe nem chama nenhum serviço de plataforma (Spotify/YouTube etc.)
 - Fonte descoberta é persistida por release em: `audio_source_url`, `audio_source_provider`, `audio_source_page_url`
@@ -92,6 +93,7 @@ musicgalaxy/
 ### Regra 7 — Só Exibir Versões que Têm Áudio
 - "Caso encontre uma música que não possua o áudio, elimine a busca e não mostre no aplicativo"
 - `GET /api/search` devolve apenas versões com `audio_source_url` preenchida; as demais entram em fila de resolução em segundo plano (8s de intervalo) e aparecem nas próximas buscas. A resposta traz `pendentes_audio` (versões aguardando resolução).
+- O filtro de áudio da busca é aplicado **no SQL, antes do LIMIT/OFFSET** — filtrar depois da paginação escondia versões com áudio que caíam além da primeira página (a busca por "daft punk" devolvia 0 resultados com uma versão pronta no banco). O `total` da resposta é a contagem de versões com áudio; `pendentes_audio` é a contagem das que ainda não têm.
 - Mesma regra em `GET /api/releases/by-date`, `GET /api/works/:id/releases` e `GET /api/works/by-decade/:decade` (obras só aparecem se tiverem ao menos uma versão com áudio)
 - As versões sem áudio continuam no banco (Regra 2 intacta nos dados); o filtro é de EXIBIÇÃO
 - A identidade de um candidato de áudio vem do PRÓPRIO arquivo (nome do arquivo → texto do link → título da página, este último só com um único link de áudio na página). Nunca herdar identidade da página com vários áudios (players globais tocariam a música errada)
@@ -213,6 +215,7 @@ npx eas-cli build --platform android --profile preview
 - **MusicBrainz** - Banco de dados aberto de metadados musicais
 - **Cover Art Archive** - Capas oficiais associadas ao MusicBrainz
 - **Discogs** - Catálogo com detalhes de formatos físicos e variações
+- **Internet Archive** - Acervo aberto com áudio; descoberta via APIs públicas do archive.org, sem chave e sem login (Regra 3)
 
 ### Estrutura de Integração
 ```
@@ -221,6 +224,15 @@ backend/src/services/
 │   ├── types.ts
 │   ├── musicBrainzAdapter.ts
 │   └── discogsAdapter.ts
+├── audioSource/
+│   ├── webAudio.ts               # guard anti-SSRF + lista negra (Regra 3)
+│   ├── sourceOrchestrator.ts     # busca em paralelo, exact match, ranking
+│   ├── exactMatchEngine.ts
+│   ├── sourceRanker.ts
+│   └── providers/
+│       ├── internetArchiveProvider.ts
+│       ├── genericWebProvider.ts
+│       └── directLinkProvider.ts
 ├── cache/
 │   └── externalApiCache.ts
 ├── rateLimiting/
@@ -230,6 +242,13 @@ backend/src/services/
     └── ingestionLogger.ts
 ```
 
+### Descoberta de Áudio em Sites Abertos
+- `SourceOrchestrator` consulta os provedores em paralelo e só aceita candidato com classificação `EXACT_MATCH` (pontuação ≥ 90 no `ExactMatchEngine`).
+- `InternetArchiveProvider` usa três consultas Lucene progressivas no `advancedsearch.php` (artista+título, artista+título restrito ao creator, artista), com parada antecipada quando já há fonte forte; metadados têm cache em memória de 30 min (100 itens) e o orçamento total da busca é de 28s.
+- O arquivo entregue é sempre validado pelo guard `auditarUrl()` antes de qualquer requisição; o download passa por `HEAD`/`Range` e o stream suporta `206 Partial Content`.
+- Validação real (2026-10-23) da release 40 (Daft Punk — One More Time): descoberta em 1,6s, stream `206` com `Content-Range: bytes 0-2047/12817079`, download MP3 de 12.817.079 bytes (assinatura ID3) e cache-hit em 0,39s. O primeiro download direto do archive.org levou ~115s (≈111 KB/s); é latência da fonte, não do pipeline.
+- Instrumental/remix/live só são usados quando a própria release pede essa versão; lançamentos originais nunca recebem um áudio alternativo.
+
 ### Configuração
 Adicionar ao `backend/.env`:
 ```env
@@ -237,6 +256,7 @@ MUSICBRAINZ_USER_AGENT=MusicGalaxy/1.0 (contato: seu-email@exemplo.com)
 DISCOGS_TOKEN=seu_token_pessoal_discogs
 DISCOGS_USER_AGENT=MusicGalaxy/1.0
 ```
+O Internet Archive não exige chave nem configuração adicional.
 
 ### Rate Limiting
 - MusicBrainz: 1 requisição por segundo
