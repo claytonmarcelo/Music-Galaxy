@@ -13,26 +13,32 @@ import { emitirEvento } from '../logger/ingestionLogger';
 const BASE_URL = 'https://api.discogs.com';
 
 // Mapeamento de formatos Discogs para os tipos cadastrados no release_types.
-const MAPA_FORMATOS: Record<string, string> = {
-  'album':         'Álbum',
-  'lp':            'Álbum',
-  'single':        'Single',
-  '7"':            'Single',
-  '12"':           'Maxi Single',
-  'maxi':          'Maxi Single',
-  'ep':            'EP',
-  'cd':            'CD Single',
-  'compilation':   'Compilation',
-  'box set':       'Box Set',
-  'promo':         'Promo CD',
-  'white label':   'White Label',
-  'sampler':       'Sampler',
-  'mixed':         'Compilation',
-  'remastered':    'Remastered',
-  'reissue':       'Reissue',
-  'limited edition': 'Limited Edition',
-  'deluxe':        'Deluxe Edition',
-};
+// A ordem importa: é uma lista de PRIORIDADE, do formato mais específico para
+// o mais genérico. Assim "CD, Maxi-Single" vira Maxi Single (e não CD),
+// "CD, Album" vira Álbum, "DVD, DVD-Video" vira DVD e um "CD" sozinho vira
+// CD — a regra de formatos do projeto (mp3/flac/CD/DVD/Maxi/Mix/Remix/Bootleg
+// e afins) depende dessa distinção.
+const PRIORIDADE_FORMATOS: [string, string][] = [
+  ['12"',             'Maxi Single'],
+  ['maxi',            'Maxi Single'],
+  ['dvd',             'DVD'],
+  ['7"',              'Single'],
+  ['single',          'Single'],
+  ['ep',              'EP'],
+  ['album',           'Álbum'],
+  ['lp',              'Álbum'],
+  ['compilation',     'Compilation'],
+  ['box set',         'Box Set'],
+  ['cd',              'CD'],
+  ['promo',           'Promo CD'],
+  ['white label',     'White Label'],
+  ['sampler',         'Sampler'],
+  ['mixed',           'Compilation'],
+  ['remastered',      'Remastered'],
+  ['reissue',         'Reissue'],
+  ['limited edition', 'Limited Edition'],
+  ['deluxe',          'Deluxe Edition'],
+];
 
 export class DiscogsAdapter implements AdapterFonteExterna {
   readonly nomeFonte = 'Discogs';
@@ -129,10 +135,10 @@ export class DiscogsAdapter implements AdapterFonteExterna {
   private determinarTipoRelease(resultado: DiscogsResultado): string {
     const formatos = (resultado.format ?? []).map(f => f.toLowerCase());
 
-    for (const formato of formatos) {
-      for (const [chave, tipo] of Object.entries(MAPA_FORMATOS)) {
-        if (formato.includes(chave)) return tipo;
-      }
+    // Percorre a lista em ordem de prioridade: o primeiro formato que casar
+    // define o tipo (ver comentário de PRIORIDADE_FORMATOS acima).
+    for (const [chave, tipo] of PRIORIDADE_FORMATOS) {
+      if (formatos.some(f => f.includes(chave))) return tipo;
     }
 
     return 'Original Release';
@@ -158,6 +164,7 @@ export class DiscogsAdapter implements AdapterFonteExterna {
     const formatos = (resultado.format ?? []).map(f => f.toLowerCase());
     if (formatos.some(f => f.includes('vinyl') || f.includes('12"') || f.includes('7"'))) return 'Vinyl';
     if (formatos.some(f => f.includes('cd'))) return 'CD';
+    if (formatos.some(f => f.includes('dvd'))) return 'DVD';
     if (formatos.some(f => f.includes('digital'))) return 'Digital';
     if (formatos.some(f => f.includes('cassette'))) return 'Cassette';
     return null;

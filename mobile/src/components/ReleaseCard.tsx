@@ -178,8 +178,8 @@ export default memo(ReleaseCardComponent, (prevProps, nextProps) => {
 const styles = StyleSheet.create({
   container: {
     borderRadius: 16,
-    marginHorizontal: 16,
-    marginVertical: 6,
+    marginHorizontal: 20,
+    marginVertical: 8,
     overflow: 'hidden',
     // Contorno e sombra de vidro: a borda e a cor da sombra vêm do
     // AnimatedCard, que resolve os tokens do tema ativo.
@@ -199,12 +199,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   capaContainer: {
-    width: 100,
-    height: 100,
+    width: 104,
+    height: 104,
   },
   capa: {
-    width: 100,
-    height: 100,
+    width: 104,
+    height: 104,
   },
   semCapa: {
     alignItems: 'center',
@@ -215,37 +215,39 @@ const styles = StyleSheet.create({
   },
   semCapaTexto: {
     fontSize: 10,
-    marginTop: 4,
+    marginTop: 6,
   },
   info: {
     flex: 1,
-    padding: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     justifyContent: 'space-between',
+    // Respiro mínimo entre as linhas de informação, mesmo quando o
+    // conteúdo é curto e o space-between distribui o restante.
+    gap: 4,
   },
   artista: {
     fontSize: 12,
-    marginBottom: 2,
   },
   versao: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
-    marginBottom: 4,
+    lineHeight: 19,
   },
   album: {
     fontSize: 11,
-    marginBottom: 4,
   },
   metadados: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 4,
-    marginBottom: 4,
+    gap: 6,
+    marginTop: 2,
   },
   badge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
     maxWidth: 130,
   },
   badgeTexto: {
@@ -260,6 +262,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
   },
   gravadora: {
     fontSize: 10,

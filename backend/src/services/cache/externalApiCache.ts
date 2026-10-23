@@ -53,6 +53,17 @@ export async function salvarNoCache(
   );
 }
 
+// Remove TODAS as entradas de cache de um termo (request_key), independente
+// da fonte. Regra do usuário: buscas idênticas nunca reutilizam respostas
+// antigas — o cache do termo é sempre apagado antes de uma nova ingestão.
+export async function limparCacheDoTermo(requestKey: string): Promise<number> {
+  const [resultado] = await pool.execute(
+    `DELETE FROM external_api_cache WHERE request_key = ?`,
+    [requestKey]
+  ) as any[];
+  return resultado.affectedRows ?? 0;
+}
+
 // Remove entradas de cache expiradas — pode ser chamado periodicamente.
 export async function limparCacheExpirado(): Promise<number> {
   const [resultado] = await pool.execute(

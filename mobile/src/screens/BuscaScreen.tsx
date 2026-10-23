@@ -42,7 +42,7 @@ export default function BuscaScreen(): React.JSX.Element {
   const navigation = useNavigation<NavProp>();
   const { favoritos } = useFavoritos();
   const { historico, adicionarBusca, removerBusca } = useHistorico();
-  const { toastSucesso, toastErro } = useModal();
+  const { toastSucesso, toastErro, toastInfo } = useModal();
   const { colors, isDark, toggleTheme } = useTheme();
 
   const [termo, setTermo]           = useState('');
@@ -52,6 +52,9 @@ export default function BuscaScreen(): React.JSX.Element {
   const [total, setTotal]           = useState(0);
   const [offset, setOffset]         = useState(0);
   const [fromCache, setFromCache]   = useState(false);
+  // Versões do termo que ainda aguardam descoberta de fonte de áudio no
+  // backend (ficam fora da lista até terem áudio resolvido)
+  const [pendentesAudio, setPendentesAudio] = useState(0);
   const [focoInput, setFocoInput]   = useState(false);
   const [mostrarFiltros, setMostrarFiltros] = useState(false);
   const [filtros, setFiltros]       = useState<Filtros>({});
@@ -71,6 +74,34 @@ export default function BuscaScreen(): React.JSX.Element {
       abortController.current?.abort();
     };
   }, []);
+
+  // Web: o Chrome pinta o campo de busca de amarelo quando preenche
+  // automaticamente (-webkit-autofill), mudando a cor do placeholder para
+  // fora do padrão. Este estilo global desliga esse comportamento usando
+  // sempre os tokens do tema (nunca cores fixas).
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const styleId = 'musicgalaxy-autofill-fix';
+    let estilo = document.getElementById(styleId) as HTMLStyleElement | null;
+
+    if (!estilo) {
+      estilo = document.createElement('style');
+      estilo.id = styleId;
+      document.head.appendChild(estilo);
+    }
+
+    estilo.textContent = `
+      input:-webkit-autofill,
+      input:-webkit-autofill:hover,
+      input:-webkit-autofill:focus {
+        -webkit-text-fill-color: ${colors.text};
+        -webkit-box-shadow: 0 0 0px 1000px ${colors.input} inset;
+        box-shadow: 0 0 0px 1000px ${colors.input} inset;
+        caret-color: ${colors.text};
+        transition: background-color 9999s ease-in-out 0s;
+      }
+    `;
+  }, [colors.text, colors.input]);
 
   // Anima entrada da lista quando há resultados
   useEffect(() => {
@@ -145,15 +176,21 @@ export default function BuscaScreen(): React.JSX.Element {
         setReleases(prev => acumular ? [...prev, ...resultado.data.results] : resultado.data.results);
         setTotal(resultado.data.total);
         setFromCache(resultado.data.fromCache);
+        setPendentesAudio(resultado.data.pendentes_audio ?? 0);
 
         if (!acumular && termoBusca.trim()) {
           adicionarBusca(termoBusca.trim());
           // Mensagem com plural correto em português
           const quantidade = resultado.data.results.length;
+          const pendentes  = resultado.data.pendentes_audio ?? 0;
           if (quantidade === 1) {
             toastSucesso('Encontrada 1 versão!');
-          } else {
+          } else if (quantidade > 1) {
             toastSucesso(`Encontradas ${quantidade} versões!`);
+          } else if (pendentes > 0) {
+            // O backend achou versões do termo, mas ainda está resolvendo o
+            // áudio delas em sites abertos — avisa em vez de dizer "0 versões"
+            toastInfo(`Localizando fontes de áudio para ${pendentes} versão${pendentes !== 1 ? 'ões' : ''}...`);
           }
         }
       }
@@ -165,7 +202,7 @@ export default function BuscaScreen(): React.JSX.Element {
     } finally {
       setCarregando(false);
     }
-  }, [adicionarBusca, toastSucesso, toastErro]);
+  }, [adicionarBusca, toastSucesso, toastErro, toastInfo]);
 
   const aoMudarTermo = useCallback((novoTermo: string) => {
     setTermo(novoTermo);
@@ -192,6 +229,14 @@ export default function BuscaScreen(): React.JSX.Element {
       setReleases([]);
       setTotal(0);
       setErro(null);
+      setPendentesAudio(0);
+      setCarregando(false);
+      return;
+    }
+
+    // Evita ingerir termos parciais ("da", "daf") que gastam cota das APIs
+    // externas e poluem o banco com buscas sem sentido.
+    if (novoTermo.trim().length < 3) {
       setCarregando(false);
       return;
     }
@@ -215,6 +260,7 @@ export default function BuscaScreen(): React.JSX.Element {
     setReleases([]);
     setTotal(0);
     setErro(null);
+    setPendentesAudio(0);
     setOffset(0);
     setFocoInput(false);
 
@@ -362,20 +408,32 @@ export default function BuscaScreen(): React.JSX.Element {
             ]}
           >
             <Text style={styles.iconeBusca}>{MusicEmojis.search}</Text>
-            <TextInput
-              style={[styles.input, { color: colors.text }]}
-              value={termo}
-              onChangeText={aoMudarTermo}
-              onFocus={() => setFocoInput(true)}
-              onBlur={() => setTimeout(() => setFocoInput(false), 200)}
-              placeholder="Artista, música ou álbum..."
-              placeholderTextColor={colors.textSecondary}
-              returnKeyType="search"
-              autoCapitalize="none"
-              autoCorrect={false}
-              clearButtonMode="while-editing"
-              accessibilityLabel="Campo de busca musical"
-            />
+            {/* O placeholder é um Text próprio sobreposto ao campo: no Android,
+                o autofill do sistema pinta o placeholder nativo de amarelo e
+                ignora o placeholderTextColor. Assim a cor vem SEMPRE do token
+                textSecondary, em qualquer plataforma. */}
+            <View style={styles.inputWrapper}>
+              <TextInput
+                style={[styles.input, { color: colors.text }]}
+                value={termo}
+                onChangeText={aoMudarTermo}
+                onFocus={() => setFocoInput(true)}
+                onBlur={() => setTimeout(() => setFocoInput(false), 200)}
+                returnKeyType="search"
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel="Campo de busca musical"
+              />
+              {termo.length === 0 && (
+                <Text
+                  pointerEvents="none"
+                  numberOfLines={1}
+                  style={[styles.placeholderTexto, { color: colors.textSecondary }]}
+                >
+                  Artista, música ou álbum...
+                </Text>
+              )}
+            </View>
             {termo.length > 0 && (
               <TouchableOpacity
                 onPress={limparBusca}
@@ -507,9 +565,31 @@ export default function BuscaScreen(): React.JSX.Element {
               },
             ]}
           >
-            <Text style={styles.estadoIcone}>🎵</Text>
-            <Text style={[styles.estadoTexto, { color: colors.textSecondary }]}>Nenhuma versão encontrada</Text>
-            <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>Tente outros termos de busca</Text>
+            {pendentesAudio > 0 ? (
+              <>
+                <Text style={styles.estadoIcone}>🔎</Text>
+                <Text style={[styles.estadoTexto, { color: colors.textSecondary }]}>
+                  Localizando fontes de áudio...
+                </Text>
+                <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
+                  {pendentesAudio} versão{pendentesAudio !== 1 ? 'ões' : ''} encontrada
+                  {pendentesAudio !== 1 ? 's' : ''}, aguardando a descoberta do áudio em sites abertos
+                </Text>
+                <TouchableOpacity
+                  style={[styles.botaoTentar, { backgroundColor: colors.button, marginTop: 16 }]}
+                  onPress={() => executarBusca(termo, 0, false)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.botaoTentarTexto, { color: colors.buttonText }]}>Buscar novamente</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.estadoIcone}>🎵</Text>
+                <Text style={[styles.estadoTexto, { color: colors.textSecondary }]}>Nenhuma versão encontrada</Text>
+                <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>Tente outros termos de busca</Text>
+              </>
+            )}
           </Animated.View>
         )}
 
@@ -647,6 +727,17 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     paddingVertical: 0,
+  },
+  // Envolve o campo para posicionar o placeholder próprio por cima dele
+  inputWrapper: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  placeholderTexto: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    fontSize: 15,
   },
   botaoLimpar: {
     fontSize: 14,

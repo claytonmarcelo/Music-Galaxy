@@ -18,6 +18,8 @@ import {
   ProviderTimeouts,
 } from '../types';
 import axios from 'axios';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import {
   USER_AGENT,
   auditarUrl,
@@ -25,76 +27,132 @@ import {
   dominioPlataformaProibida,
   extrairLinksDeAudio,
   interpretarNomeDeArquivo,
+  NomeInterpretado,
 } from '../webAudio';
+
+// execFile com array de argumentos não passa por shell — elimina qualquer
+// risco de injeção de comando no termo buscado pelo usuário.
+const execFileAsync = promisify(execFile);
+
+// O tsconfig do backend usa moduleResolution "node" (legado), que não enxerga
+// os re-exports de TIPO do cheerio (ex.: CheerioAPI). Derivamos o tipo do
+// próprio load() — mesma API, sem mudar configuração nem usar any.
+type CheerioStatic = ReturnType<typeof import('cheerio').load>;
+
+// Uma página candidata devolvida por um motor de busca.
+interface ResultadoMotor {
+  url: string;         // URL (pode ser relativa ou com redirect do motor)
+  textoBloco: string;  // texto do bloco do resultado (título + snippet + citações)
+}
 
 interface MotorDeBusca {
   id: string;
   // Monta a URL de busca para a consulta
   montarUrl(consulta: string): string;
-  // Seletores CSS dos links de resultado no HTML da página de resultados
-  seletorResultado: string;
   // Domínio do próprio motor (para descartar links internos)
   dominio: string;
-  // Desembrulha links de redirect do motor (ddg: /l/?uddg=, bing: /ck/a base64)
-  desembrulhar?: (href: string) => string | null;
+  // Quando true, o HTML é buscado via curl do sistema em vez do axios.
+  // O Brave diferencia o cliente pelo fingerprint TLS: o axios (OpenSSL do
+  // Node) recebe 429, enquanto o curl recebe 200 normal (verificado na prática).
+  viaCurl?: boolean;
+  // Extrai as páginas candidatas do HTML da página de resultados.
+  // Cada motor tem markup próprio; a função devolve URL + texto do bloco,
+  // que depois é filtrado pelas palavras obrigatórias (artista + título).
+  extrair($: CheerioStatic): ResultadoMotor[];
 }
 
-// Desembrulha o redirect "/ck/a?!...&u=a1<base64>" do Bing.
-// O prefixo "a1" marca a codificação; removemos os 2 primeiros caracteres.
-function desembrulharBing(href: string): string | null {
-  try {
-    const m = href.match(/[?&]u=a1([A-Za-z0-9_\-+=]+)/);
-    if (!m) return null;
-    const decodificado = Buffer.from(m[1], 'base64').toString('utf8');
-    return /^https?:\/\//.test(decodificado) ? decodificado : null;
-  } catch {
-    return null;
-  }
-}
-
-// Desembrulha o redirect "/l/?uddg=<url-codificada>" do DuckDuckGo HTML.
-function desembrulharUddg(href: string, dominio: string): string | null {
-  try {
-    if (!href.includes('uddg=')) return null;
-    const parametro = new URL(href, `https://${dominio}`).searchParams.get('uddg');
-    return parametro ? decodeURIComponent(parametro) : null;
-  } catch {
-    return null;
-  }
-}
-
-// Motores de busca acessíveis por HTML simples, sem chave de API.
-// Bing em primeiro lugar: é o único dos grandes que responde a requisições
-// simples (DuckDuckGo HTML devolve desafio JS e Mojeek responde 403 em bot).
+// Motores de busca acessíveis sem chave de API.
+//
+// Sondagem real (curl, UA de navegador, 2026-10-22/23):
+//   - Brave (search.brave.com): ÚNICO testado que respeita aspas e devolve
+//     resultados orgânicos relevantes (mp3.pm, mdundo.com, archive.org para
+//     "Daft Punk" "One More Time"). Responde 429 quando consultado repetidas
+//     vezes — tratado com retry/backoff e intervalo entre consultas.
+//   - Bing: IGNORA as aspas até com frases curtas — devolve lixo (OneDrive,
+//     "ONE" transporte) → inútil para a regra de só visitar páginas com a
+//     música. Removido.
+//   - DuckDuckGo HTML: 0 resultados/desafio JS. Mojeek: 403. Yep/Ecosia: 403.
+//     SearXNG públicas: 429 ou desafio Anubis. Yandex: redirect de bloqueio.
+//
+// A lista tem só o Brave; a arquitetura permite reativar outros motores
+// quando surgir algum que respeite a busca por frase exata.
 const MOTORES: MotorDeBusca[] = [
   {
-    id: 'bing-html',
-    montarUrl: (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}`,
-    seletorResultado: 'li.b_algo h2 a',
-    dominio: 'bing.com',
-    desembrulhar: desembrulharBing,
-  },
-  {
-    id: 'duckduckgo-html',
-    montarUrl: (q) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`,
-    seletorResultado: 'a.result__a',
-    dominio: 'duckduckgo.com',
-    desembrulhar: (href) => desembrulharUddg(href, 'duckduckgo.com'),
-  },
-  {
-    id: 'mojeek',
-    montarUrl: (q) => `https://www.mojeek.com/search?q=${encodeURIComponent(q)}`,
-    seletorResultado: 'a.result-link, ul.results-standard li a',
-    dominio: 'mojeek.com',
+    id: 'brave',
+    montarUrl: (q) => `https://search.brave.com/search?q=${encodeURIComponent(q)}`,
+    dominio: 'brave.com',
+    viaCurl: true,
+    // Brave: o título do resultado é um div.title.search-snippet-title dentro
+    // do <a>; o snippet fica no bloco irmão .generic-snippet
+    extrair: ($) => {
+      const resultados: ResultadoMotor[] = [];
+      $('.search-snippet-title').each((_, el) => {
+        const ancora = $(el).closest('a');
+        const href = ancora.attr('href');
+        if (!href) return;
+        const textoBloco = (
+          ancora.text() + ' ' +
+          ancora.nextAll('.generic-snippet').first().text()
+        ).trim();
+        resultados.push({ url: href, textoBloco });
+      });
+      return resultados;
+    },
   },
 ];
 
-// Orçamento de recursos da descoberta — mantém a busca educada e rápida.
+// Orçamento de recursos da descoberta — mantém a busca educada e previsível.
 const MAX_POR_PAGINA = 5;      // links de áudio por página visitada
 const INTERVALO_ENTRE_PAGINAS = 400; // ms entre requisições
+const INTERVALO_ENTRE_CONSULTAS = 3000; // ms entre consultas (evita o 429 do Brave)
 const TAMANHO_MAX_HTML = 2 * 1024 * 1024; // 2 MB por página
+// Depois de detectar o desafio anti-bot do Brave ("scheduled a captcha"),
+// o motor fica em cooldown por este período para não piorar o bloqueio.
+const COOLDOWN_DO_MOTOR = 10 * 60 * 1000; // 10 minutos
+
+// Controle de cooldown do motor (em memória, por processo).
+let motorEmCooldownAte = 0;
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// O Brave, quando marca o IP como suspeito, devolve uma página de captcha
+// com este texto (visto na prática, HTTP 429). Serviria de nada visitar o
+// restante — melhor detectar e respeitar o bloqueio.
+const PADRAO_DESAFIO = /schedule a captcha|flagged as being suspicious/i;
+
+// Palavras obrigatórias para um resultado de busca ser aceito: TODAS as
+// palavras do artista E do título (com 2+ letras, sem acentos/caixa).
+// É o que implementa a regra do usuário: só visitar páginas que têm a música
+// informada — qualquer lugar que apenas cita o artista ou a banda é ignorado.
+function palavrasObrigatorias(identity: AudioIdentity): string[] {
+  const separar = (s: string): string[] =>
+    s
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((p) => p.length >= 2);
+
+  return [...new Set([...separar(identity.artist), ...separar(identity.title)])];
+}
+
+// Verifica se um texto contém TODAS as palavras exigidas (como tokens inteiros).
+function contemTodasAsPalavras(texto: string, palavras: string[]): boolean {
+  if (palavras.length === 0) return true;
+
+  const tokens = new Set(
+    texto
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean)
+  );
+
+  return palavras.every((p) => tokens.has(p));
+}
 
 export class GenericWebProvider extends BaseAudioSourceProvider {
   readonly providerId = 'generic-web';
@@ -114,35 +172,52 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
         `[GenericWebProvider] Descoberta global iniciada: "${normalizada.artist} - ${normalizada.title}"`
       );
 
-      // Consulta focada em arquivos de áudio hospedados em páginas abertas.
-      // Sem aspas: os motores HTML ignoram correspondência exata com frequência,
-      // e "artist title mp3 download" traz páginas com arquivos embutidos.
-      const consulta = `${identity.artist} ${identity.title} mp3 download`;
+      // Consultas focadas em páginas que REALMENTE contêm a música (regra do
+      // usuário): a primeira usa a frase exata entre aspas — "Artista Título" —
+      // para que o motor só traga páginas com o nome completo da música, e não
+      // páginas que apenas citam o artista ou a banda. A segunda é o fallback
+      // sem aspas para quando o motor ignora a busca por frase.
+      const consultas = this.montarConsultas(identity);
+      const palavras = palavrasObrigatorias(identity);
 
       const candidatos: AudioCandidate[] = [];
       const urlsJaVistas = new Set<string>();
       let paginasVisitas = 0;
 
-      // Busca em um motor por vez, respeitando o orçamento de tempo
-      for (const motor of MOTORES) {
+      // Busca por consulta (frase exata primeiro) e, dentro dela, por motor.
+      // Intervalo entre consultas evita o rate limit 429 do Brave.
+      for (const [indiceConsulta, consulta] of consultas.entries()) {
         if (candidatos.length >= 10) break;
         if (Date.now() - startTime > this.timeouts.search - 8000) break;
 
-        const linksDaBusca = await this.buscarNoMotor(motor, consulta);
-        if (linksDaBusca.length === 0) continue;
-
-        // Visita no máximo 6 páginas de cada motor
-        for (const paginaUrl of linksDaBusca.slice(0, 6)) {
-          if (paginasVisitas >= 10) break;
+        if (indiceConsulta > 0) {
+          await delay(INTERVALO_ENTRE_CONSULTAS);
           if (candidatos.length >= 10) break;
-          if (Date.now() - startTime > this.timeouts.search - 4000) break;
-          if (urlsJaVistas.has(paginaUrl)) continue;
-          urlsJaVistas.add(paginaUrl);
-          paginasVisitas++;
+        }
 
-          const achados = await this.extrairDaPagina(paginaUrl, identity);
-          candidatos.push(...achados);
-          await delay(INTERVALO_ENTRE_PAGINAS);
+        console.log(`[GenericWebProvider] Consulta: "${consulta}" (candidatos até aqui: ${candidatos.length})`);
+
+        // Busca em um motor por vez, respeitando o orçamento de tempo
+        for (const motor of MOTORES) {
+          if (candidatos.length >= 10) break;
+          if (Date.now() - startTime > this.timeouts.search - 8000) break;
+
+          const linksDaBusca = await this.buscarNoMotor(motor, consulta, palavras);
+          if (linksDaBusca.length === 0) continue;
+
+          // Visita no máximo 6 páginas de cada motor
+          for (const paginaUrl of linksDaBusca.slice(0, 6)) {
+            if (paginasVisitas >= 10) break;
+            if (candidatos.length >= 10) break;
+            if (Date.now() - startTime > this.timeouts.search - 4000) break;
+            if (urlsJaVistas.has(paginaUrl)) continue;
+            urlsJaVistas.add(paginaUrl);
+            paginasVisitas++;
+
+            const achados = await this.extrairDaPagina(paginaUrl, identity);
+            candidatos.push(...achados);
+            await delay(INTERVALO_ENTRE_PAGINAS);
+          }
         }
       }
 
@@ -169,8 +244,98 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
     }
   }
 
-  // Consulta um motor de busca e devolve as URLs das páginas de resultado
-  private async buscarNoMotor(motor: MotorDeBusca, consulta: string): Promise<string[]> {
+  // Monta as consultas de busca, cobrindo os formatos de arquivo da regra do
+  // usuário (mp3, flac e afins encontrados em páginas abertas).
+  // Frases CURTAS entre aspas ("artista" "título") — o Brave respeita aspas
+  // em frases curtas, mas ignora uma frase longa "artista título" inteira.
+  private montarConsultas(identity: AudioIdentity): string[] {
+    return [
+      `"${identity.artist}" "${identity.title}" mp3`,
+      `"${identity.artist}" "${identity.title}" flac`,
+      `"${identity.artist}" "${identity.title}" download`,
+    ];
+  }
+
+  // Busca o HTML da página de resultados do motor.
+  // Motores com viaCurl (Brave) usam o curl do sistema — presente no
+  // Windows 10+ e em qualquer servidor, mesma dependência de sistema já
+  // aceita no projeto (ffprobe). Se o curl não existir, cai para o axios.
+  // Respeita o cooldown do motor (desafio anti-bot) e detecta a página de
+  // captcha para não insistir durante o bloqueio.
+  private async buscarHtmlDoMotor(motor: MotorDeBusca, url: string): Promise<string | null> {
+    if (Date.now() < motorEmCooldownAte) {
+      console.warn(`[GenericWebProvider] Motor ${motor.id} em cooldown (desafio anti-bot); consulta ignorada`);
+      return null;
+    }
+
+    let html: string | null = null;
+
+    if (motor.viaCurl) {
+      try {
+        const { stdout } = await execFileAsync('curl', [
+          '-sS', '-L', '--max-redirs', '3', '-m', '15',
+          '-A', USER_AGENT,
+          '-H', 'Accept: text/html,application/xhtml+xml',
+          '-H', 'Accept-Language: pt-BR,pt;q=0.9,en;q=0.8',
+          url,
+        ], { maxBuffer: TAMANHO_MAX_HTML + 1024, windowsHide: true });
+        html = stdout;
+      } catch (error: any) {
+        console.warn(
+          `[GenericWebProvider] curl indisponível para o motor ${motor.id}: ${error.message} — tentando axios`
+        );
+      }
+    }
+
+    if (html === null) {
+      const resposta = await this.getComRetry(url);
+      html = resposta ? String(resposta.data ?? '') : null;
+    }
+
+    // Página de captcha do motor: registra o cooldown e desiste desta rodada
+    if (html && PADRAO_DESAFIO.test(html)) {
+      motorEmCooldownAte = Date.now() + COOLDOWN_DO_MOTOR;
+      console.warn(
+        `[GenericWebProvider] Motor ${motor.id} pediu captcha — cooldown de ${COOLDOWN_DO_MOTOR / 60000} minutos`
+      );
+      return null;
+    }
+
+    return html;
+  }
+
+  // Faz a requisição ao motor com retry quando ele responde 429 (rate limit
+  // do Brave para o cliente HTTP do Node). Espera 4s e depois 10s antes de
+  // desistir — o limite é temporário e a busca volta a funcionar sozinha.
+  private async getComRetry(url: string): Promise<{ data: unknown } | null> {
+    const esperas = [0, 4000, 10000];
+    for (let i = 0; i < esperas.length; i++) {
+      if (i > 0) await delay(esperas[i]!);
+      try {
+        return await axios.get(url, {
+          headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
+          timeout: 8000,
+          maxRedirects: 3,
+          beforeRedirect: criarBeforeRedirect(),
+          maxContentLength: TAMANHO_MAX_HTML,
+        });
+      } catch (error: any) {
+        const ehRateLimit = error.response?.status === 429;
+        if (!ehRateLimit || i === esperas.length - 1) throw error;
+        console.warn(`[GenericWebProvider] Motor respondeu 429 (rate limit); aguardando ${esperas[i + 1]}ms`);
+      }
+    }
+    return null;
+  }
+
+  // Consulta um motor de busca e devolve apenas as URLs de páginas cujo bloco
+  // de resultado (título + snippet) contém TODAS as palavras obrigatórias
+  // (artista + título). Resultados que só citam o artista são descartados aqui.
+  private async buscarNoMotor(
+    motor: MotorDeBusca,
+    consulta: string,
+    palavras: string[]
+  ): Promise<string[]> {
     try {
       const auditada = await auditarUrl(motor.montarUrl(consulta));
       if (!auditada.ok) {
@@ -178,41 +343,43 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
         return [];
       }
 
-      const resposta = await axios.get(auditada.url!.href, {
-        headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
-        timeout: 8000,
-        maxRedirects: 3,
-        beforeRedirect: criarBeforeRedirect(),
-        maxContentLength: TAMANHO_MAX_HTML,
-      });
+      const html = await this.buscarHtmlDoMotor(motor, auditada.url!.href);
+      if (!html) return [];
 
       // Import dinâmico do cheerio mantém a leitura do HTML isolada
       const cheerio = await import('cheerio');
-      const $ = cheerio.load(resposta.data as string);
+      const $ = cheerio.load(html);
 
       const urls: string[] = [];
-      $(motor.seletorResultado).each((_: number, el: any) => {
-        let href = $(el).attr('href');
-        if (!href) return;
+      let descartadosPorFaltaDaMusica = 0;
 
-        // Desembrulha redirects do motor (ddg uddg=, bing /ck/a base64)
-        if (motor.desembrulhar) {
-          const dest = motor.desembrulhar(href);
-          if (dest) href = dest;
-        }
+      for (const resultado of motor.extrair($)) {
+        const href = resultado.url;
 
         try {
-          const absoluta = new URL(href);
-          if (absoluta.protocol !== 'http:' && absoluta.protocol !== 'https:') return;
-          if (absoluta.hostname.includes(motor.dominio)) return;           // link interno do motor
-          if (dominioPlataformaProibida(absoluta.hostname)) return;        // Regra 3
+          const absoluta = new URL(href, `https://${motor.dominio}`);
+          if (absoluta.protocol !== 'http:' && absoluta.protocol !== 'https:') continue;
+          if (absoluta.hostname.includes(motor.dominio)) continue;           // link interno do motor
+          if (dominioPlataformaProibida(absoluta.hostname)) continue;        // Regra 3
+
+          // Regra do usuário: o bloco precisa provar que a página tem a música.
+          // Página que só cita o artista/banda é ignorada.
+          if (!contemTodasAsPalavras(resultado.textoBloco, palavras)) {
+            descartadosPorFaltaDaMusica++;
+            console.log(`[GenericWebProvider] Ignorado (sem a música no bloco): ${absoluta.hostname}`);
+            continue;
+          }
+
           urls.push(absoluta.href);
         } catch {
           /* link malformado — ignora */
         }
-      });
+      }
 
-      console.log(`[GenericWebProvider] Motor ${motor.id} retornou ${urls.length} páginas`);
+      console.log(
+        `[GenericWebProvider] Motor ${motor.id}: ${urls.length} páginas compatíveis ` +
+        `(${descartadosPorFaltaDaMusica} ignoradas por não terem a música no bloco)`
+      );
       return urls;
     } catch (error: any) {
       console.warn(`[GenericWebProvider] Motor ${motor.id} indisponível: ${error.message}`);
@@ -238,13 +405,16 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
       });
 
       const html = typeof resposta.data === 'string' ? resposta.data : String(resposta.data ?? '');
-      const links = extrairLinksDeAudio(html, paginaUrl).slice(0, MAX_POR_PAGINA);
+      const todosLinks = extrairLinksDeAudio(html, paginaUrl);
+      const links = todosLinks.slice(0, MAX_POR_PAGINA);
       if (links.length === 0) return [];
 
       // Título da página ajuda a interpretar arquivos sem padrão "Artista - Título"
       const cheerio = await import('cheerio');
       const $ = cheerio.load(html);
       const tituloPagina = $('title').first().text().trim();
+
+      const interpretadoPagina = interpretarNomeDeArquivo(tituloPagina);
 
       const candidatos: AudioCandidate[] = [];
       for (const link of links) {
@@ -255,16 +425,27 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
           continue;
         }
 
-        const nome = link.texto || tituloPagina || decodificarNomeDoArquivo(link.url);
-        const interpretado = interpretarNomeDeArquivo(nome);
+        // Regra do usuário: a identidade do candidato é definida pelo PRÓPRIO
+        // arquivo de áudio (nome do arquivo e texto do link), nunca por
+        // herança da identidade buscada nem do título de páginas com vários
+        // áudios — um blog que fala de "Daft Punk" mas cujo player global
+        // toca outras músicas NÃO pode gerar candidatos da música buscada.
+        const interpretadoLink = interpretarNomeDeArquivo(link.texto || '');
+        const interpretadoArquivo = interpretarNomeDeArquivo(decodificarNomeDoArquivo(link.url));
+        const base = this.resolverBaseDoCandidato(
+          interpretadoArquivo,
+          interpretadoLink,
+          interpretadoPagina,
+          todosLinks.length
+        );
 
         candidatos.push({
           providerId: this.providerId,
           // Para providers web, o sourceId É a URL direta do arquivo
           sourceId: link.url,
-          artist: interpretado.artist ?? identity.artist,
-          title: interpretado.title ?? decodificarNomeDoArquivo(link.url),
-          version: interpretado.version,
+          artist: base.artist ?? '',
+          title: base.title ?? decodificarNomeDoArquivo(link.url),
+          version: base.version,
           format: link.formato,
           url: link.url,
           downloadUrl: link.url,
@@ -283,6 +464,34 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
       console.warn(`[GenericWebProvider] Falha ao visitar ${paginaUrl}: ${error.message}`);
       return [];
     }
+  }
+
+  // Decide de onde vem a identidade (artista/título/versão) de um candidato.
+  //
+  // Prioridade — da evidência MAIS forte para a mais fraca:
+  //   1. Nome do ARQUIVO de áudio: é o que será tocado de fato. Se ele traz
+  //      "Artista - Título", é a prova mais forte que existe.
+  //   2. Texto do link que aponta para o arquivo.
+  //   3. Título da página — somente quando a página tem UM único link de
+  //      áudio (página inteiramente dedicada àquela música). Páginas com
+  //      vários áudios (players globais, listas de post) têm títulos que NÃO
+  //      descrevem cada arquivo: herdar "Daft Punk - One More Time" do título
+  //      e aplicar a um mp3 do CERRONES criava falso exact match 100
+  //      (bug real encontrado em 2026-10-23, corrigido aqui).
+  //
+  // Sem nenhuma evidência, o candidato sai sem artista e o Exact Match
+  // Engine o rejeita — nunca se herda a identidade buscada (regra do usuário:
+  // lugar que só cita o artista não prova que tem a música).
+  private resolverBaseDoCandidato(
+    arquivo: NomeInterpretado,
+    link: NomeInterpretado,
+    pagina: NomeInterpretado,
+    totalLinksNaPagina: number
+  ): NomeInterpretado {
+    if (arquivo.artist && arquivo.title) return arquivo;
+    if (link.artist && link.title) return link;
+    if (totalLinksNaPagina === 1 && pagina.artist && pagina.title) return pagina;
+    return { title: arquivo.title ?? link.title, version: arquivo.version ?? link.version };
   }
 
   // Buscar links de áudio em uma URL específica (mantido para links diretos)

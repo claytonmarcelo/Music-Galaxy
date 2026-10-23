@@ -47,6 +47,9 @@ export interface RespostaBusca {
     page: number;
     per_page: number;
     fromCache: boolean;
+    // Versões do termo que ainda não têm fonte de áudio: ficam fora de
+    // `results` enquanto a resolução em segundo plano procura a fonte
+    pendentes_audio?: number;
   };
 }
 
@@ -127,14 +130,7 @@ export interface RespostaObrasArtista {
 // ============================================================
 
 export type RootStackParamList = {
-  // Bottom Tabs (principais)
-  BuscaTab: undefined;
-  BibliotecaTab: undefined;
-  ExplorarTab: undefined;
-  FavoritosTab: undefined;
-  SettingsTab: undefined;
-
-  // Stacks dentro das abas
+  // Telas principais (abas da barra de navegação inferior)
   Busca: undefined;
   Biblioteca: undefined;
   Explorar: undefined;

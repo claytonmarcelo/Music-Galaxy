@@ -153,7 +153,7 @@ class DownloadManager {
         }
 
         let receivedLength = 0;
-        const chunks: Uint8Array[] = [];
+        const chunks: BlobPart[] = [];
 
         while (true) {
           const { done, value } = await reader.read();

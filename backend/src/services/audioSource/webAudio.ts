@@ -43,6 +43,8 @@ const PLATAFORMAS_PROIBIDAS: string[] = [
   'pandora.com', 'iheart.com', 'boomplay.com', 'audiomack.com',
   'yandex.com', 'yandex.ru', 'vk.com', 'kkbox.com',
   'datpiff.com', 'mixcloud.com', 'audius.co',
+  // Plataformas de hospedagem de áudio ("ouça grátis")
+  'audio.com',
 ];
 
 // Verifica se um hostname pertence (ou é subdomínio) de um domínio proibido.
@@ -249,6 +251,7 @@ export function interpretarNomeDeArquivo(nome: string): NomeInterpretado {
   let base = nome
     .replace(/\.[a-z0-9]{2,5}$/i, '')
     .replace(/_/g, ' ')
+    .replace(/[–—]/g, ' - ') // travessões (en/em dash) viram o separador padrão
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -274,6 +277,11 @@ export function interpretarNomeDeArquivo(nome: string): NomeInterpretado {
     for (const termo of TERMOS_LIXO) {
       title = title.replace(new RegExp(`\\b${termo}\\b`, 'i'), '');
     }
+    // O título termina no próximo separador: blogs de download assinam as
+    // faixas com o nome do site ("Artista - Título - Site.com"). Sem este
+    // corte, "Site.com" vira parte do título e o match nunca acontece.
+    const fimDoTitulo = title.search(/\s[-–—|]\s/);
+    if (fimDoTitulo > 0) title = title.slice(0, fimDoTitulo);
     return {
       artist: artist || undefined,
       title: title.trim() || base || undefined,
@@ -286,6 +294,9 @@ export function interpretarNomeDeArquivo(nome: string): NomeInterpretado {
   for (const termo of TERMOS_LIXO) {
     title = title.replace(new RegExp(`\\b${termo}\\b`, 'i'), '');
   }
+  // Mesmo corte de assinatura de site do ramo acima ("Título - Site.com")
+  const fimDoTitulo = title.search(/\s[-–—|]\s/);
+  if (fimDoTitulo > 0) title = title.slice(0, fimDoTitulo);
   return { title: title.trim() || base || undefined, version };
 }
 

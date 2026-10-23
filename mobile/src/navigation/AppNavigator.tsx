@@ -8,6 +8,7 @@ import { NavigationContainer, DefaultTheme, DarkTheme, Theme, useNavigationConta
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useTheme } from '../contexts/ThemeContext';
 import OfflineBanner from '../components/OfflineBanner';
+import BarraNavegacaoInferior from '../components/BarraNavegacaoInferior';
 
 import { RootStackParamList } from '../types';
 import BuscaScreen from '../screens/BuscaScreen';
@@ -44,6 +45,7 @@ export default function AppNavigator(): React.JSX.Element {
   return (
     <View style={{ flex: 1 }}>
       <NavigationContainer ref={navigationRef} theme={temaNavegacao}>
+      <View style={{ flex: 1 }}>
       <Stack.Navigator
         initialRouteName="Busca"
         screenOptions={{
@@ -63,6 +65,9 @@ export default function AppNavigator(): React.JSX.Element {
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="AdminIngestao" component={TelaAdminIngestao} />
       </Stack.Navigator>
+      {/* Barra de navegação inferior — acesso direto às áreas principais do app */}
+      <BarraNavegacaoInferior />
+      </View>
       </NavigationContainer>
       {/* Aviso global de falta de conexão com o servidor */}
       <OfflineBanner onAbrirAjustes={() => navigationRef.navigate('Settings')} />

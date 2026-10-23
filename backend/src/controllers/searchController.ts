@@ -8,12 +8,88 @@ import { Request, Response, NextFunction } from 'express';
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/database';
 import { ingerirPorTermo } from '../services/ingestion/searchOrchestrator';
+import { resolverFonte, DadosReleaseParaAudio } from './audioController';
 import { RespostaPaginada, ReleaseCompleto } from '../types';
 import { ErroAplicacao } from '../middleware/errorHandler';
 
 // Quantidade mínima de releases no banco local para considerar que o termo
 // já foi ingerido antes. Abaixo disso, força nova ingestão.
 const MIN_RELEASES_LOCAL = 1;
+
+// Intervalo entre resoluções de áudio na fila em segundo plano.
+// A descoberta consulta sites abertos (motor de busca) e precisa de ritmo
+// suave para não disparar proteções anti-bot das fontes.
+const INTERVALO_ENTRE_RESOLUCOES = 8000;
+
+// Fila em memória de releases aguardando descoberta de fonte de áudio.
+// Regra do usuário: o app só exibe versões que têm áudio. As releases sem
+// fonte ficam fora da resposta, mas são resolvidas aqui em segundo plano,
+// uma a uma, para aparecerem nas próximas buscas.
+interface ItemFilaResolucao {
+  id: number;
+  version_name: string;
+  work_title: string;
+  artist_name: string;
+}
+
+const filaResolucao: ItemFilaResolucao[] = [];
+let processandoFila = false;
+
+// Coloca na fila as releases sem áudio encontradas numa busca.
+function enfileirarResolucoes(releases: ReleaseCompleto[]): void {
+  let novas = 0;
+  for (const r of releases) {
+    if (r.audio_source_url) continue;
+    if (filaResolucao.some((item) => item.id === r.id)) continue;
+    filaResolucao.push({
+      id:           r.id,
+      version_name: r.version_name,
+      work_title:   r.work_title,
+      artist_name:  r.artist_name,
+    });
+    novas += 1;
+  }
+  if (novas > 0) void processarFilaResolucao();
+}
+
+// Processa a fila em série (uma resolução por vez, com intervalo).
+async function processarFilaResolucao(): Promise<void> {
+  if (processandoFila) return;
+  processandoFila = true;
+  try {
+    while (filaResolucao.length > 0) {
+      const item = filaResolucao.shift()!;
+      try {
+        // Re-checa no banco: se a fonte já foi salva por outro fluxo, pula
+        const [linhas] = await pool.execute<RowDataPacket[]>(
+          `SELECT audio_source_url FROM releases WHERE id = ? LIMIT 1`,
+          [item.id]
+        );
+        if (linhas[0]?.['audio_source_url']) continue;
+
+        const dados: DadosReleaseParaAudio = {
+          id:                   item.id,
+          audio_source_url:     null,
+          audio_source_provider: null,
+          audio_source_page_url: null,
+          version_name:         item.version_name,
+          work_title:           item.work_title,
+          artist_name:          item.artist_name,
+        };
+        await resolverFonte(dados);
+      } catch (erro) {
+        console.error(
+          `[SEARCH] Falha ao resolver áudio da release ${item.id}:`,
+          erro instanceof Error ? erro.message : erro
+        );
+      }
+      // Espaçamento para respeitar as fontes abertas consultadas
+      await new Promise((resolve) => setTimeout(resolve, INTERVALO_ENTRE_RESOLUCOES));
+    }
+  } finally {
+    processandoFila = false;
+  }
+}
 
 // Monta cláusula WHERE dinâmica por palavras do termo de busca.
 // Cada palavra vira um LIKE independente, combinados com AND para
@@ -63,8 +139,7 @@ async function buscarReleasesLocal(
        r.cover_url,
        r.source_reference_url,
        r.audio_preview_url,
-       r.streaming_url,
-       r.download_url,
+       r.audio_source_url,
        rt.name        AS release_type,
        rt.category    AS release_type_category,
        ms.name        AS metadata_source,
@@ -110,8 +185,12 @@ async function buscarReleasesLocal(
       cover_url:            row['cover_url'],      // null = sem capa oficial (Regra 1)
       source_reference_url: row['source_reference_url'],
       audio_preview_url:    row['audio_preview_url'],
-      streaming_url:        row['streaming_url'] || `${baseUrl}/api/releases/${id}/stream`,
-      download_url:         row['download_url']  || `${baseUrl}/api/releases/${id}/download`,
+      // Sempre aponta para os endpoints do backend (stream completo / download).
+      // Os campos streaming_url/download_url do banco podem conter previews de 30s
+      // (dados legados) e não devem ser usados como link de reprodução ou download.
+      streaming_url:        `${baseUrl}/api/releases/${id}/stream`,
+      download_url:         `${baseUrl}/api/releases/${id}/download`,
+      audio_source_url:     row['audio_source_url'] ?? null,
       release_type:         row['release_type'],
       release_type_category: row['release_type_category'],
       metadata_source:      row['metadata_source'],
@@ -144,36 +223,68 @@ export async function buscarMusicas(
     // Tenta busca local primeiro
     const local = await buscarReleasesLocal(termo, limit, offset, baseUrl);
 
+    // Regra do usuário: só exibir versões que têm áudio. As demais saem da
+    // resposta, mas entram na fila de resolução em segundo plano.
+    const comAudioLocal   = local.releases.filter((r) => r.audio_source_url);
+    const pendentesLocal  = local.releases.length - comAudioLocal.length;
+    enfileirarResolucoes(local.releases);
+
     // Se há dados locais suficientes, responde direto (do banco local = "cache" natural)
     if (local.total >= MIN_RELEASES_LOCAL) {
+      // Regra do usuário: nunca reutilizar buscas idênticas. Mesmo com dados
+      // locais, dispara uma ingestão NOVA em segundo plano (limpa o cache do
+      // termo e consulta as fontes externas de novo). A resposta sai rápida
+      // do banco local; a atualização fica pronta para as próximas buscas.
+      void ingerirPorTermo(termo).catch((erro) => {
+        console.error(
+          '[SEARCH] Ingestão em segundo plano falhou:',
+          erro instanceof Error ? erro.message : erro
+        );
+      });
+
       const resposta: RespostaPaginada<ReleaseCompleto> = {
         success: true,
         data: {
-          results:    local.releases,
-          total:      local.total,
+          results:         comAudioLocal,
+          total:           comAudioLocal.length,
           page,
-          per_page:   limit,
-          fromCache:  true,
+          per_page:        limit,
+          fromCache:       true,
+          pendentes_audio: pendentesLocal,
         },
       };
       res.json(resposta);
       return;
     }
 
-    // Sem dados locais — dispara ingestão das fontes externas
-    await ingerirPorTermo(termo);
+    // Sem dados locais — dispara ingestão das fontes externas.
+    // Falha de fonte externa não derruba a busca: respondemos com o que existe.
+    try {
+      await ingerirPorTermo(termo);
+    } catch (erro) {
+      console.error(
+        '[SEARCH] Ingestão falhou, respondendo só com dados locais:',
+        erro instanceof Error ? erro.message : erro
+      );
+    }
 
     // Após a ingestão, consulta o banco novamente
     const posIngestion = await buscarReleasesLocal(termo, limit, offset);
 
+    // Mesma regra: sem áudio, sem exibição. E o que sobrou entra na fila.
+    const comAudioPos   = posIngestion.releases.filter((r) => r.audio_source_url);
+    const pendentesPos  = posIngestion.releases.length - comAudioPos.length;
+    enfileirarResolucoes(posIngestion.releases);
+
     const resposta: RespostaPaginada<ReleaseCompleto> = {
       success: true,
       data: {
-        results:   posIngestion.releases,
-        total:     posIngestion.total,
+        results:         comAudioPos,
+        total:           comAudioPos.length,
         page,
-        per_page:  limit,
-        fromCache: false,
+        per_page:        limit,
+        fromCache:       false,
+        pendentes_audio: pendentesPos,
       },
     };
     res.json(resposta);

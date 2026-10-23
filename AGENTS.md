@@ -83,6 +83,19 @@ musicgalaxy/
 - O endereço do servidor **nunca** deve ser fixado em código para produção — usar a configuração em Ajustes (seção "Servidor da API")
 - O aplicativo deve abrir normalmente **sem internet** (modo offline com aviso claro)
 
+### Regra 6 — Todos os Formatos de Música
+- O projeto deve buscar músicas em **todos os formatos**: mp3, flac, CD, DVD, Maxi Single, Mix, Remix, Bootleg etc. — em todos os lugares do mundo, pela internet
+- O catálogo `release_types` cobre os formatos de lançamento, mixagens, instrumentais e playbacks (99 tipos, incluindo CD e DVD)
+- O mapeamento Discogs (`discogsAdapter.ts`) usa `PRIORIDADE_FORMATOS` (lista ordenada) para classificar formatos como Maxi Single, DVD, Single, EP etc.; qualidade no banco representa o suporte (Vinyl, CD, Digital, DVD...)
+- Nenhum formato de versão existente no mundo real deve ser ignorado na busca ou no catálogo
+
+### Regra 7 — Só Exibir Versões que Têm Áudio
+- "Caso encontre uma música que não possua o áudio, elimine a busca e não mostre no aplicativo"
+- `GET /api/search` devolve apenas versões com `audio_source_url` preenchida; as demais entram em fila de resolução em segundo plano (8s de intervalo) e aparecem nas próximas buscas. A resposta traz `pendentes_audio` (versões aguardando resolução).
+- Mesma regra em `GET /api/releases/by-date`, `GET /api/works/:id/releases` e `GET /api/works/by-decade/:decade` (obras só aparecem se tiverem ao menos uma versão com áudio)
+- As versões sem áudio continuam no banco (Regra 2 intacta nos dados); o filtro é de EXIBIÇÃO
+- A identidade de um candidato de áudio vem do PRÓPRIO arquivo (nome do arquivo → texto do link → título da página, este último só com um único link de áudio na página). Nunca herdar identidade da página com vários áudios (players globais tocariam a música errada)
+
 ## Schema do Banco de Dados
 
 O schema é definitivo e não deve ser alterado sem justificativa técnica documentada.
@@ -103,11 +116,13 @@ O schema é definitivo e não deve ser alterado sem justificativa técnica docum
 ## Arquitetura da API
 
 ### Endpoints Obrigatórios
-- `GET /api/search?q={termo}` - **único endpoint que o app mobile chama para busca.** Internamente, consulta primeiro o banco local; se não houver resultado local, ou os dados existentes estiverem além do TTL de `external_api_cache`, o próprio endpoint dispara a ingestão das fontes externas através do orquestrador antes de responder.
+- `GET /api/search?q={termo}` - **único endpoint que o app mobile chama para busca.** Internamente, consulta primeiro o banco local; se não houver resultado local, ou os dados existentes estiverem além do TTL de `external_api_cache`, o próprio endpoint dispara a ingestão das fontes externas através do orquestrador antes de responder. Responde apenas com versões que têm áudio (Regra 7): `results` filtrado por `audio_source_url`, campo `pendentes_audio` com a contagem das que aguardam, e fila de resolução em segundo plano para descobrir a fonte delas em sites abertos.
 - `POST /api/search/ingest` - endpoint administrativo/interno, fora do fluxo normal do app. Serve apenas para forçar resincronização manual de um termo (script de manutenção, painel administrativo futuro). Documentado como "uso interno apenas" até existir camada de autenticação.
 - `GET /api/works/:id` - Detalhes de obra específica
-- `GET /api/works/:id/releases` - Lista versões de uma obra
+- `GET /api/works/:id/releases` - Lista versões de uma obra (somente as que têm áudio — Regra 7)
+- `GET /api/works/by-decade/:decade` - Obras de uma década (somente obras com ao menos uma versão com áudio — Regra 7)
 - `GET /api/releases/:id` - Detalhes de release específico
+- `GET /api/releases/by-date` - Versões recentes (somente as que têm áudio — Regra 7)
 - `GET /api/release-types` - Lista catálogo de tipos
 - `GET /api/releases/:id/stream` - Stream de áudio completo (proxy da fonte web aberta, com suporte a Range). Única fonte de playback do app (Regra 3)
 - `GET /api/releases/:id/download?format=mp3|flac` - Download do arquivo de áudio gerado a partir da fonte web aberta (pipeline: cache → dedup → fetch → ffprobe → conversão condicional → validação)
@@ -156,7 +171,7 @@ Para decisões técnicas não cobertas neste documento:
 
 ### Exceções que Requerem Confirmação Humana
 1. **Mudança na porta 3307 do MariaDB** - Nunca alterar sem autorização explícita
-2. **Flexibilização das Regras 1, 2, 3, 4 ou 5** - Nunca flexibilizar sem autorização explícita
+2. **Flexibilização das Regras 1, 2, 3, 4, 5, 6 ou 7** - Nunca flexibilizar sem autorização explícita
 
 ## Comandos de Desenvolvimento
 

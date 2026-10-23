@@ -210,6 +210,8 @@ INSERT INTO release_types (name, category) VALUES
   ('Maxi Single Importado', 'release_format'),
   ('Maxi Single Nacional', 'release_format'),
   ('CD Single', 'release_format'),
+  ('CD', 'release_format'),
+  ('DVD', 'release_format'),
   ('Promo CD', 'release_format'),
   ('Promo Vinyl', 'release_format'),
   ('Promo Digital', 'release_format'),

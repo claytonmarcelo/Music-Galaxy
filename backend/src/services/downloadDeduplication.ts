@@ -27,6 +27,20 @@ class DownloadDeduplication {
     return `${releaseId}-${format}`;
   }
 
+  // Indica se já existe um download em andamento para a mesma release/formato.
+  isInFlight(releaseId: number, format: string): boolean {
+    return this.inflight.has(this.getDownloadKey(releaseId, format));
+  }
+
+  // Aguarda o download em andamento terminar (sucesso ou falha, sem propagar erro).
+  // Se o líder falhar, quem chamou tenta produzir por conta própria.
+  async waitForInFlight(releaseId: number, format: string): Promise<void> {
+    const existing = this.inflight.get(this.getDownloadKey(releaseId, format));
+    if (existing) {
+      try { await existing.promise; } catch { /* o líder já respondeu ao seu cliente */ }
+    }
+  }
+
   async execute<T>(
     releaseId: number,
     format: string,

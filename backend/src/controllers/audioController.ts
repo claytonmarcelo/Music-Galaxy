@@ -23,6 +23,7 @@ import ffmpeg from 'fluent-ffmpeg';
 import fs from 'fs/promises';
 import { createReadStream, createWriteStream } from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { downloadCache } from '../services/downloadCache';
 import { downloadDeduplication } from '../services/downloadDeduplication';
 import { SourceOrchestrator } from '../services/audioSource/sourceOrchestrator';
@@ -64,8 +65,11 @@ interface DownloadError extends Error {
   retryable?: boolean;
 }
 
-// Dados da release necessários para resolver a fonte de áudio
-interface ReleaseAudioRow extends RowDataPacket {
+// Dados da release necessários para resolver a fonte de áudio.
+// Versão simples e exportada: permite que outros controllers (ex.: a fila de
+// resolução do searchController) montem a identidade sem depender do tipo de
+// linha do mysql2.
+export interface DadosReleaseParaAudio {
   id: number;
   audio_source_url: string | null;
   audio_source_provider: string | null;
@@ -74,6 +78,9 @@ interface ReleaseAudioRow extends RowDataPacket {
   work_title: string;
   artist_name: string;
 }
+
+// Linha vinda do banco — combina a identidade com o tipo de row do mysql2
+interface ReleaseAudioRow extends RowDataPacket, DadosReleaseParaAudio {}
 
 // Fonte de áudio resolvida (site aberto — Regra 3)
 interface FonteAudio {
@@ -150,12 +157,39 @@ async function limparFonte(releaseId: number): Promise<void> {
   );
 }
 
-// Monta a identidade musical usada pelo Exact Match Engine
-function montarIdentidade(release: ReleaseAudioRow): AudioIdentity {
+// Termos que identificam uma versão REAL da música — mesma lista usada pelo
+// interpretarNomeDeArquivo (webAudio.ts), para manter os dois lados coerentes.
+const PADRAO_VERSAO_REAL = /live|remix|remast|edit|version|mix|acoustic|instrumental|acapella|cover|mono|stereo|demo|take/i;
+
+// Extrai do version_name apenas o qualificador de versão real, quando houver.
+// Ex.: "One More Time (Radio Edit)" → "Radio Edit". Já rótulos de release como
+// "Madonna Madonna (Compilation)" NÃO são uma versão da música: devolver isso
+// ao Exact Match Engine fazia todo candidato perder os 10 pontos de versão e
+// cair abaixo do limiar de 90 — por isso o player e o download falhavam.
+function extrairVersaoReal(versionName: string): string | undefined {
+  const parenteses = versionName.match(/[([]([^)\]]{1,60})[)\]]/g);
+  if (parenteses) {
+    const relevante = parenteses
+      .map((p) => p.slice(1, -1).trim())
+      .find((p) => PADRAO_VERSAO_REAL.test(p));
+    if (relevante) return relevante;
+  }
+
+  // Sem parênteses: o nome inteiro só conta se tiver um qualificador real
+  if (PADRAO_VERSAO_REAL.test(versionName)) return versionName.trim();
+  return undefined;
+}
+
+// Monta a identidade musical usada pelo Exact Match Engine.
+// A versão só é enviada quando é uma versão REAL da música; rótulos de
+// release (Compilation, Album, EP etc.) são ignorados para não penalizar
+// candidatos legítimos encontrados em sites abertos.
+function montarIdentidade(release: DadosReleaseParaAudio): AudioIdentity {
+  const versao = release.version_name ? extrairVersaoReal(release.version_name) : undefined;
   return {
     artist: release.artist_name,
     title: release.work_title,
-    version: release.version_name,
+    ...(versao ? { version: versao } : {}),
   };
 }
 
@@ -163,8 +197,10 @@ function montarIdentidade(release: ReleaseAudioRow): AudioIdentity {
 //   1. Usa a fonte salva no banco, se ainda estiver no ar e passar no guard.
 //   2. Senão, dispara a descoberta global em sites abertos via SourceOrchestrator
 //      e salva o resultado (exact match obrigatório).
-async function resolverFonte(
-  release: ReleaseAudioRow,
+// Exportada porque o searchController a usa na fila de resolução em segundo
+// plano (regra do usuário: só mostrar versões que têm áudio).
+export async function resolverFonte(
+  release: DadosReleaseParaAudio,
   opts: { reDescobrir?: boolean } = {}
 ): Promise<FonteAudio | null> {
   // 1. Fonte já salva — valida segurança (Regra 3) e disponibilidade
@@ -358,6 +394,20 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
 
     console.log(`[AudioDownload] releaseId=${releaseId} status=cache-miss format=${formatoAudio}`);
 
+    // Se outro cliente já está gerando o mesmo arquivo, espera ele terminar e
+    // serve direto do cache (sem reprocessar). Se o líder falhou, o cache fica
+    // vazio e o fluxo segue para a produção normal por conta própria.
+    if (downloadDeduplication.isInFlight(releaseId, formatoAudio)) {
+      await downloadDeduplication.waitForInFlight(releaseId, formatoAudio);
+      const pronto = await downloadCache.get(releaseId, formatoAudio);
+      if (pronto) {
+        console.log(`[AudioDownload] releaseId=${releaseId} status=cache-hit-by-follower format=${formatoAudio}`);
+        await servirArquivo(req, res, pronto.filePath, nomeArquivo, mimeType, 'HIT', releaseId);
+        return;
+      }
+      // O líder falhou: segue o fluxo normal e tenta por conta própria
+    }
+
     // Passo 2: deduplicação — o produtor devolve o CAMINHO em cache e nunca
     // escreve na Response. Líder e seguidores servem cada um ao seu req/res.
     const caminhoCache = await downloadDeduplication.execute(releaseId, formatoAudio, async () => {
@@ -406,7 +456,8 @@ async function produzirArquivoCache(
   // Diretório temporário de trabalho (sempre apagado; o cache fica fora daqui)
   const tempDir = path.join(__dirname, '../../temp/audio');
   await fs.mkdir(tempDir, { recursive: true });
-  const timestamp = Date.now();
+  // Único por requisição (evita colisão entre downloads simultâneos da mesma versão)
+  const timestamp = `${Date.now()}_${randomUUID()}`;
   const sourceFile = path.join(tempDir, `source_${releaseId}_${timestamp}.bin`);
   const outputFile = path.join(tempDir, `output_${releaseId}_${timestamp}.${formatoAudio}`);
   const temporarios: string[] = [sourceFile, outputFile];

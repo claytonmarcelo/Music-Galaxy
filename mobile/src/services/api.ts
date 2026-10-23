@@ -66,7 +66,10 @@ export async function restaurarServidorPadrao(): Promise<string> {
 // Testa a conexão com um endereço informado (usado na tela de Ajustes).
 export { testarConexaoServidor };
 
-const TIMEOUT_MS = 15000;
+// Tempo máximo de espera por resposta. Buscas em termos ainda não ingeridos
+// esperam o backend consultar as fontes externas (MusicBrainz/Discogs, com
+// rate limit), então 45s evita cortar uma busca legítima pela metade.
+const TIMEOUT_MS = 45000;
 
 // Realiza uma requisição com timeout e suporte a AbortController.
 async function requisicaoComTimeout<T>(

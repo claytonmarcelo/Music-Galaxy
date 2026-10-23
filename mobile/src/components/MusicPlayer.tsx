@@ -3,7 +3,7 @@
 // que resolve a fonte exclusivamente em sites abertos (blogs, fóruns, links diretos).
 // Nunca usa YouTube / Spotify / Deezer ou qualquer plataforma de música.
 // - Web: HTML5 Audio
-// - iOS/Android: expo-av (Sound.createAsync)
+// - iOS/Android: expo-audio (createAudioPlayer) — módulo oficial do SDK 57
 // Download in-page com barra de progresso real (sem abrir nova janela).
 
 import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
@@ -16,19 +16,20 @@ import {
   Pressable,
   Platform,
 } from 'react-native';
+import type { AudioPlayer, AudioStatus } from 'expo-audio';
 import { useTheme } from '../contexts/ThemeContext';
 import { useModal } from '../contexts/ModalContext';
 import { MusicEmojis } from './AnimatedIcon';
 import { Release } from '../types';
 import { BASE_URL } from '../services/api';
 
-// Importa expo-av apenas em ambiente React Native (nunca no web)
-let ExpoAudio: any;
+// Importa expo-audio apenas em ambiente React Native (nunca no web)
+let ExpoAudio: typeof import('expo-audio') | null = null;
 if (Platform.OS !== 'web') {
   try {
-    ExpoAudio = require('expo-av').Audio;
+    ExpoAudio = require('expo-audio');
   } catch {
-    console.warn('expo-av não disponível');
+    console.warn('expo-audio não disponível');
   }
 }
 
@@ -48,7 +49,7 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
 
   // Referências de playback por plataforma
   const audioRef = useRef<HTMLAudioElement | null>(null);   // Web
-  const soundRef = useRef<any>(null);                        // expo-av (nativo)
+  const playerRef = useRef<AudioPlayer | null>(null);       // expo-audio (nativo)
 
   // URL de stream do backend — única fonte de playback (Regra 3)
   const streamUrl   = `${BASE_URL}/api/releases/${release.id}/stream`;
@@ -62,9 +63,9 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
         audioRef.current.src = '';
         audioRef.current = null;
       }
-      if (soundRef.current) {
-        soundRef.current.unloadAsync().catch(() => {});
-        soundRef.current = null;
+      if (playerRef.current) {
+        playerRef.current.remove();
+        playerRef.current = null;
       }
     };
   }, []);
@@ -112,43 +113,42 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
   }, []);
 
   // ──────────────────────────────────────────────
-  // PLAYER NATIVO — expo-av (iOS/Android)
+  // PLAYER NATIVO — expo-audio (iOS/Android)
   // ──────────────────────────────────────────────
   const tocarNativo = useCallback(async (url: string): Promise<boolean> => {
-    if (!ExpoAudio?.Sound) return false;
+    if (!ExpoAudio?.createAudioPlayer) return false;
 
     try {
-      // Descarta som anterior antes de criar novo
-      if (soundRef.current) {
-        await soundRef.current.unloadAsync().catch(() => {});
-        soundRef.current = null;
+      // Descarta player anterior antes de criar novo
+      if (playerRef.current) {
+        playerRef.current.remove();
+        playerRef.current = null;
       }
 
-      // Toca em modo silencioso no iOS e ducking no Android
+      // Toca em modo silencioso no iOS e faz ducking no Android
       await ExpoAudio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        staysActiveInBackground: false,
+        playsInSilentMode: true,
+        shouldPlayInBackground: false,
+        interruptionMode: 'duckOthers',
       });
 
-      // createAsync retorna a instância real do Sound (com pauseAsync/playAsync)
-      const { sound, status } = await ExpoAudio.Sound.createAsync(
-        { uri: url },
-        { shouldPlay: true },
-        // Listener de status: termina quando a faixa acaba
-        (st: any) => {
-          if (st.isLoaded && st.didJustFinish) {
-            setIsPlaying(false);
+      // Cria o player apontando para o stream do backend (Regra 3)
+      const player = ExpoAudio.createAudioPlayer({ uri: url });
+
+      // Listener de status: termina quando a faixa acaba e reporta erros de carga
+      player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
+        if (status.didJustFinish) {
+          setIsPlaying(false);
+          // Remove o player concluído; o próximo play cria um novo do zero
+          player.remove();
+          if (playerRef.current === player) {
+            playerRef.current = null;
           }
         }
-      );
+      });
 
-      if (!status.isLoaded) {
-        await sound.unloadAsync().catch(() => {});
-        return false;
-      }
-
-      soundRef.current = sound;
+      player.play();
+      playerRef.current = player;
       return true;
     } catch (err) {
       console.error('Erro no player nativo:', err);
@@ -161,17 +161,17 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
     if (audioRef.current) {
       audioRef.current.pause();
     }
-    if (soundRef.current?.pauseAsync) {
-      await soundRef.current.pauseAsync().catch(() => {});
+    if (playerRef.current) {
+      playerRef.current.pause();
     }
     setIsPlaying(false);
   }, []);
 
   // Retomar playback nativo pausado (web retoma via tocarWeb com nova URL)
   const retomarNativo = useCallback(async (): Promise<boolean> => {
-    if (soundRef.current?.playAsync) {
+    if (playerRef.current) {
       try {
-        await soundRef.current.playAsync();
+        playerRef.current.play();
         return true;
       } catch {
         return false;
@@ -247,7 +247,8 @@ function MusicPlayerComponent({ release }: MusicPlayerProps): React.JSX.Element 
         const reader = resp.body?.getReader();
         if (!reader) throw new Error('Stream não disponível');
 
-        const chunks: Uint8Array[] = [];
+        // Chunks tipados como BlobPart: o TS 6 distingue Uint8Array<ArrayBuffer> de Uint8Array<ArrayBufferLike>
+        const chunks: BlobPart[] = [];
         let baixado = 0;
 
         while (true) {

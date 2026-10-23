@@ -72,6 +72,9 @@ export interface ReleaseCompleto {
   release_type_category: string;
   metadata_source: string;
   source_reference_url: string | null;
+  // Fonte de áudio aberta resolvida (Regra 3). null = versão ainda sem áudio;
+  // nesse caso a busca NÃO a exibe no app (regra do usuário).
+  audio_source_url: string | null;
   // URLs de mídia - null quando não disponível
   audio_preview_url: string | null;
   streaming_url: string | null;
@@ -102,6 +105,10 @@ export interface RespostaPaginada<T> {
     page: number;
     per_page: number;
     fromCache: boolean;
+    // Quantidade de versões do termo que ainda estão SEM fonte de áudio
+    // resolvida. Elas ficam fora de `results` (regra do usuário) enquanto a
+    // resolução em segundo plano procura a fonte em sites abertos.
+    pendentes_audio?: number;
   };
 }
 

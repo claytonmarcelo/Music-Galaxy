@@ -90,6 +90,7 @@ export async function listarReleasesDeWork(
          r.audio_preview_url,
          r.streaming_url,
          r.download_url,
+         r.audio_source_url,
          rt.name        AS release_type,
          rt.category    AS release_type_category,
          ms.name        AS metadata_source,
@@ -102,14 +103,16 @@ export async function listarReleasesDeWork(
        JOIN artists         a  ON w.artist_id         = a.id
        JOIN release_types   rt ON r.release_type_id   = rt.id
        JOIN metadata_sources ms ON r.metadata_source_id = ms.id
-       WHERE r.work_id = ?
+       -- Regra do usuário: sem fonte de áudio, a versão não aparece no app
+       WHERE r.work_id = ? AND r.audio_source_url IS NOT NULL
        ORDER BY r.release_year ASC, r.version_name ASC
        LIMIT ? OFFSET ?`,
       [id, limit, offset]
     );
 
     const [countRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) AS total FROM releases WHERE work_id = ?`,
+      `SELECT COUNT(*) AS total FROM releases
+       WHERE work_id = ? AND audio_source_url IS NOT NULL`,
       [id]
     );
     const total = (countRows[0]?.['total'] as number) ?? 0;
@@ -128,6 +131,7 @@ export async function listarReleasesDeWork(
       audio_preview_url:     row['audio_preview_url'],
       streaming_url:        row['streaming_url'],
       download_url:         row['download_url'],
+      audio_source_url:      row['audio_source_url'] ?? null,
       release_type:          row['release_type'],
       release_type_category: row['release_type_category'],
       metadata_source:       row['metadata_source'],
@@ -187,14 +191,24 @@ export async function listarWorksPorDecada(
        FROM works w
        JOIN artists a ON w.artist_id = a.id
        WHERE w.original_release_year >= ? AND w.original_release_year <= ?
+         -- Regra do usuário: obra só aparece se tiver ao menos uma versão
+         -- com fonte de áudio aberta resolvida
+         AND EXISTS (
+           SELECT 1 FROM releases r2
+           WHERE r2.work_id = w.id AND r2.audio_source_url IS NOT NULL
+         )
        ORDER BY w.original_release_year DESC, w.title ASC
        LIMIT ? OFFSET ?`,
       [anoInicio, anoFim, limit, offset]
     );
 
     const [countRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) AS total FROM works 
-       WHERE original_release_year >= ? AND original_release_year <= ?`,
+      `SELECT COUNT(*) AS total FROM works w
+       WHERE w.original_release_year >= ? AND w.original_release_year <= ?
+         AND EXISTS (
+           SELECT 1 FROM releases r2
+           WHERE r2.work_id = w.id AND r2.audio_source_url IS NOT NULL
+         )`,
       [anoInicio, anoFim]
     );
     const total = (countRows[0]?.['total'] as number) ?? 0;

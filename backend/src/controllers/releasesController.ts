@@ -122,13 +122,16 @@ export async function listarReleasesPorData(
        JOIN artists         a  ON w.artist_id         = a.id
        JOIN release_types   rt ON r.release_type_id   = rt.id
        JOIN metadata_sources ms ON r.metadata_source_id = ms.id
+       -- Regra do usuário: só exibir versões que já têm fonte de áudio aberta
+       WHERE r.audio_source_url IS NOT NULL
        ORDER BY r.created_at DESC
        LIMIT ? OFFSET ?`,
       [limit, offset]
     );
 
     const [countRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) AS total FROM releases`
+      // Contagem alinhada ao filtro acima, para a paginação bater
+      `SELECT COUNT(*) AS total FROM releases WHERE audio_source_url IS NOT NULL`
     );
     const total = (countRows[0]?.['total'] as number) ?? 0;
 

@@ -3,8 +3,8 @@
 // controla a concorrência e usa o cache para evitar chamadas repetidas.
 //
 // Fluxo:
-//   1. Verifica se há cache válido no banco para o termo
-//   2. Se não há cache, chama MusicBrainz e Discogs com fila de concorrência
+//   1. Apaga o cache do termo (buscas idênticas nunca são reutilizadas)
+//   2. Chama MusicBrainz e Discogs com fila de concorrência
 //   3. Persiste os releases encontrados evitando duplicatas (via external_id)
 //   4. Registra tudo no ingestion_log para auditoria com contadores reais
 
@@ -13,7 +13,7 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import { DadosReleaseExterno } from '../../types';
 import { MusicBrainzAdapter } from '../sources/musicBrainzAdapter';
 import { DiscogsAdapter } from '../sources/discogsAdapter';
-import { buscarDoCache, salvarNoCache, buscarIdFonte } from '../cache/externalApiCache';
+import { limparCacheDoTermo, salvarNoCache, buscarIdFonte } from '../cache/externalApiCache';
 import { registrarLogIngestion, emitirEvento } from '../logger/ingestionLogger';
 
 // Controle de concorrência — máximo de fontes consultadas simultaneamente.
@@ -63,24 +63,17 @@ export async function ingerirPorTermo(termo: string): Promise<ResultadoIngestion
     throw new Error('Fontes de metadados não encontradas no banco. Execute o seed do schema.');
   }
 
-  const cacheMB     = await buscarDoCache(idMusicBrainz, chaveCache);
-  const cacheDiscogs = await buscarDoCache(idDiscogs, chaveCache);
+  // Regra do usuário: buscas idênticas NUNCA reutilizam respostas antigas.
+  // O cache do termo é sempre apagado antes da ingestão e as duas fontes são
+  // consultadas a cada busca — o rate limiter enfileira (não rejeita), então
+  // a consulta é segura mesmo em sequência.
+  await limparCacheDoTermo(chaveCache);
 
-  // Ambas as fontes em cache — sem necessidade de chamar APIs externas
-  if (cacheMB !== null && cacheDiscogs !== null) {
-    emitirEvento('INGESTION_CACHE_HIT', { termo, fontes: ['MusicBrainz', 'Discogs'] });
-    return { worksCreated: 0, releasesCreated: 0, fromCache: true, fontesChamadas: [] };
-  }
-
-  // Chama as fontes ausentes do cache em paralelo, com controle de concorrência
-  const promessas: Promise<{ fonte: string; idFonte: number; releases: DadosReleaseExterno[] }>[] = [];
-
-  if (cacheMB === null) {
-    promessas.push(chamarFonte('MusicBrainz', idMusicBrainz, chaveCache, () => musicBrainz.buscarPorTermo(termo)));
-  }
-  if (cacheDiscogs === null) {
-    promessas.push(chamarFonte('Discogs', idDiscogs, chaveCache, () => discogs.buscarPorTermo(termo)));
-  }
+  // Chama as duas fontes em paralelo, com controle de concorrência
+  const promessas: Promise<{ fonte: string; idFonte: number; releases: DadosReleaseExterno[] }>[] = [
+    chamarFonte('MusicBrainz', idMusicBrainz, chaveCache, () => musicBrainz.buscarPorTermo(termo)),
+    chamarFonte('Discogs', idDiscogs, chaveCache, () => discogs.buscarPorTermo(termo)),
+  ];
 
   const resultados = await Promise.allSettled(promessas);
 
@@ -163,32 +156,42 @@ async function persistirReleases(
       const idMetadataSource = await buscarIdFonte(release.metadata_source_name);
       if (!idMetadataSource) continue;
 
-      // 1. Artista — INSERT IGNORE para não duplicar pelo nome
-      await pool.execute<ResultSetHeader>(
-        `INSERT IGNORE INTO artists (name, country) VALUES (?, ?)`,
-        [release.artist_name, release.artist_country ?? null]
-      );
-
+      // 1. Artista — como artists NÃO tem índice único em name, o INSERT IGNORE
+      // antigo criava duplicatas a cada ingestão. Agora consulta primeiro e só
+      // insere quando o artista ainda não existe.
       const [rowsArtista] = await pool.execute<RowDataPacket[]>(
         `SELECT id FROM artists WHERE name = ? LIMIT 1`,
         [release.artist_name]
       );
-      if (rowsArtista.length === 0) continue;
-      const artistaId = rowsArtista[0]!['id'] as number;
+      let artistaId: number;
+      if (rowsArtista.length > 0) {
+        artistaId = rowsArtista[0]!['id'] as number;
+      } else {
+        const [resArtista] = await pool.execute<ResultSetHeader>(
+          `INSERT INTO artists (name, country) VALUES (?, ?)`,
+          [release.artist_name, release.artist_country ?? null]
+        );
+        artistaId = resArtista.insertId;
+      }
 
-      // 2. Obra (work) — INSERT IGNORE pelo título + artista
-      const [resWork] = await pool.execute<ResultSetHeader>(
-        `INSERT IGNORE INTO works (title, artist_id, original_release_year) VALUES (?, ?, ?)`,
-        [release.work_title, artistaId, release.original_release_year ?? null]
-      );
-      if (resWork.affectedRows > 0) worksCreated++;
-
+      // 2. Obra (work) — mesma lógica: works não tem índice único em
+      // (title, artist_id), então consulta antes de inserir para não criar
+      // obras duplicadas a cada busca repetida.
       const [rowsWork] = await pool.execute<RowDataPacket[]>(
         `SELECT id FROM works WHERE title = ? AND artist_id = ? LIMIT 1`,
         [release.work_title, artistaId]
       );
-      if (rowsWork.length === 0) continue;
-      const workId = rowsWork[0]!['id'] as number;
+      let workId: number;
+      if (rowsWork.length > 0) {
+        workId = rowsWork[0]!['id'] as number;
+      } else {
+        const [resWork] = await pool.execute<ResultSetHeader>(
+          `INSERT INTO works (title, artist_id, original_release_year) VALUES (?, ?, ?)`,
+          [release.work_title, artistaId, release.original_release_year ?? null]
+        );
+        workId = resWork.insertId;
+        worksCreated++;
+      }
 
       // 3. Tipo de release — busca pelo nome, fallback para 'Original Release'
       const [rowsTipo] = await pool.execute<RowDataPacket[]>(

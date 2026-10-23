@@ -33,7 +33,10 @@ export class MusicBrainzAdapter implements AdapterFonteExterna {
     // Aguarda liberação pelo rate limiter antes de fazer a chamada
     await agendarChamada(this.nomeFonte);
 
-    const url = `${BASE_URL}/recording?query=${encodeURIComponent(termo)}&limit=${LIMITE_RECORDINGS}&fmt=json&inc=releases+artist-credits+release-groups`;
+    // Cada palavra do termo deve aparecer no título da gravação, no artista ou
+    // no álbum (mesma lógica da busca local). Sem isso, "Daft Punk One More Time"
+    // procuraria só no título da gravação e não encontraria a música.
+    const url = `${BASE_URL}/recording?query=${encodeURIComponent(this.montarQuery(termo))}&limit=${LIMITE_RECORDINGS}&fmt=json`;
 
     let respostaBruta: string;
     try {
@@ -60,6 +63,21 @@ export class MusicBrainzAdapter implements AdapterFonteExterna {
     });
 
     return releases;
+  }
+
+  // Monta a query Lucene do MusicBrainz a partir do termo digitado.
+  // Cada palavra com 2+ letras vira um grupo (recording OU artist OU release)
+  // e os grupos são combinados com AND — garante que todas as palavras do
+  // termo apareçam na gravação, no artista ou no álbum.
+  private montarQuery(termo: string): string {
+    const palavras = termo
+      .replace(/[+\-&|!(){}\[\]^"~*?:\\/]/g, ' ')
+      .split(/\s+/)
+      .filter(p => p.length >= 2);
+    if (palavras.length === 0) return termo;
+    return palavras
+      .map(p => `(recording:${p} OR artist:${p} OR release:${p})`)
+      .join(' AND ');
   }
 
   // Extrai todos os releases de um recording do MusicBrainz,

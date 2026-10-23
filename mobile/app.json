@@ -7,11 +7,6 @@
     "userInterfaceStyle": "dark",
     "scheme": "musicgalaxy",
     "icon": "./assets/icon.png",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0B0B1A"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.musicgalaxy.app"
@@ -27,8 +22,21 @@
     "plugins": [
       "expo-web-browser",
       "expo-font",
-      "expo-splash-screen"
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#0B0B1A"
+        }
+      ],
+      "expo-audio"
     ],
-    "platforms": ["ios", "android", "web"]
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ]
   }
 }

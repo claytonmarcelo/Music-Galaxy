@@ -38,6 +38,16 @@ router.post(
 // Obras (Works)
 // ============================================================
 
+// GET /api/works/by-decade/:decade
+// Obras lançadas em uma década específica (ex: 1990, 2000, 2010).
+// Atenção: rota estática precisa vir ANTES de /works/:id,
+// senão "by-decade" é interpretado como um id e retorna 400.
+router.get(
+  '/works/by-decade/:decade',
+  validarPaginacao,
+  asyncHandler(listarWorksPorDecada)
+);
+
 // GET /api/works/:id
 // Detalhes de uma obra específica
 router.get(
@@ -55,17 +65,19 @@ router.get(
   asyncHandler(listarReleasesDeWork)
 );
 
-// GET /api/works/by-decade/:decade
-// Obras lançadas em uma década específica (ex: 1990, 2000, 2010)
-router.get(
-  '/works/by-decade/:decade',
-  validarPaginacao,
-  asyncHandler(listarWorksPorDecada)
-);
-
 // ============================================================
 // Releases (Versões)
 // ============================================================
+
+// GET /api/releases/by-date
+// Releases recentes ordenados por data de criação.
+// Atenção: esta rota estática precisa vir ANTES de /releases/:id,
+// senão "by-date" é interpretado como um id e retorna 400.
+router.get(
+  '/releases/by-date',
+  validarPaginacao,
+  asyncHandler(listarReleasesPorData)
+);
 
 // GET /api/releases/:id
 // Detalhes de uma versão específica
@@ -73,14 +85,6 @@ router.get(
   '/releases/:id',
   validarParamId,
   asyncHandler(detalharRelease)
-);
-
-// GET /api/releases/by-date
-// Releases recentes ordenados por data de criação
-router.get(
-  '/releases/by-date',
-  validarPaginacao,
-  asyncHandler(listarReleasesPorData)
 );
 
 // ============================================================

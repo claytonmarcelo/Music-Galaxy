@@ -1,31 +1,32 @@
 // Serviço de reprodução de áudio para o Music Galaxy.
 // Gerencia playback de faixas musicais com suporte a:
-// - expo-av (React Native: iOS, Android)
+// - expo-audio (React Native: iOS, Android) — módulo oficial do SDK 57
 // - HTML5 Audio (Web: browser)
 // Mantém estado de reprodução (tocando, pausado, parado).
 
 import { Platform } from 'react-native';
-let ExpoAudio: any;
+import type { AudioPlayer, AudioStatus } from 'expo-audio';
 
-// Importa expo-av apenas em ambiente React Native
+// Módulo expo-audio carregado apenas em ambiente React Native (nunca no web)
+let ExpoAudio: typeof import('expo-audio') | null = null;
 if (Platform.OS !== 'web') {
   try {
-    ExpoAudio = require('expo-av').Audio;
+    ExpoAudio = require('expo-audio');
   } catch (e) {
-    console.warn('expo-av não disponível');
+    console.warn('expo-audio não disponível');
   }
 }
 
 export interface EstadoPlayer {
   tocando: boolean;
   pausado: boolean;
-  tempo: number;
-  duracao: number;
+  tempo: number;      // milissegundos
+  duracao: number;    // milissegundos
   urlAtual: string | null;
 }
 
 class PlayerAudio {
-  private som: any = null;
+  private som: AudioPlayer | null = null;
   private audioWeb: HTMLAudioElement | null = null;
   private listeners: Array<(estado: EstadoPlayer) => void> = [];
   private intervaloAtualizacao: ReturnType<typeof setInterval> | null = null;
@@ -39,12 +40,13 @@ class PlayerAudio {
   private isWeb = Platform.OS === 'web';
 
   constructor() {
-    // Configura modo de áudio apenas em React Native
+    // Configura o modo de áudio global apenas em React Native:
+    // toca em modo silencioso no iOS e faz "ducking" (abaixa outros sons) no Android
     if (!this.isWeb && ExpoAudio?.setAudioModeAsync) {
       ExpoAudio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        staysActiveInBackground: true,
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+        interruptionMode: 'duckOthers',
       }).catch((err: unknown) => {
         if (err instanceof Error) {
           console.error('Erro ao configurar modo de áudio:', err.message);
@@ -68,21 +70,13 @@ class PlayerAudio {
     this.listeners.forEach(listener => listener(this.estado));
   }
 
-  // Inicia atualização periódica do tempo de reprodução
+  // Inicia atualização periódica do tempo (usada apenas na Web, que não emite status)
   private iniciarIntervaloAtualizacao(): void {
     if (this.intervaloAtualizacao) clearInterval(this.intervaloAtualizacao);
-
-    this.intervaloAtualizacao = setInterval(async () => {
-      if (this.som && this.estado.tocando) {
-        try {
-          const status = await this.som.getStatusAsync();
-          if (status.isLoaded) {
-            this.estado.tempo = status.positionMillis;
-            this.notificarListeners();
-          }
-        } catch (err) {
-          console.error('Erro ao atualizar tempo:', err);
-        }
+    this.intervaloAtualizacao = setInterval(() => {
+      if (this.audioWeb && this.estado.tocando) {
+        this.estado.tempo = (this.audioWeb.currentTime ?? 0) * 1000;
+        this.notificarListeners();
       }
     }, 500); // Atualiza a cada 500ms
   }
@@ -93,6 +87,25 @@ class PlayerAudio {
       clearInterval(this.intervaloAtualizacao);
       this.intervaloAtualizacao = null;
     }
+  }
+
+  // Configura o listener de status do player nativo:
+  // o expo-audio emite playbackStatusUpdate a cada 500ms (padrão),
+  // então não precisamos de intervalo manual para atualizar tempo/duração/fim.
+  private observarPlayerNativo(player: AudioPlayer): void {
+    player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
+      // Só espelha estado quando a faixa realmente carregou
+      if (status.isLoaded) {
+        this.estado.tempo = status.currentTime * 1000;
+        this.estado.duracao = status.duration * 1000;
+      }
+      if (status.didJustFinish) {
+        this.estado.tocando = false;
+        this.estado.pausado = false;
+        this.estado.tempo = 0;
+      }
+      this.notificarListeners();
+    });
   }
 
   // Carrega e toca uma faixa
@@ -140,49 +153,57 @@ class PlayerAudio {
         this.iniciarIntervaloAtualizacao();
         this.notificarListeners();
       } else {
-        // Implementação React Native com expo-av
-        // Se há um som carregado diferente, descarre primeiro
+        // Implementação React Native com expo-audio
+        // Se há um player carregado com outra URL, descarta primeiro
         if (this.som && this.estado.urlAtual !== url) {
-          await this.som.unloadAsync();
+          this.som.remove();
           this.som = null;
         }
 
         // Se é a mesma URL e está pausada, retoma
         if (this.som && this.estado.urlAtual === url && this.estado.pausado) {
-          await this.som.playAsync();
+          this.som.play();
           this.estado.tocando = true;
           this.estado.pausado = false;
-          this.iniciarIntervaloAtualizacao();
           this.notificarListeners();
           return;
         }
 
-        // Carrega novo som
+        // Cria novo player para a URL
         if (!this.som || this.estado.urlAtual !== url) {
-          const { sound } = await ExpoAudio.Sound.createAsync(
-            { uri: url },
-            { shouldPlay: true },
-            this.aoMudarStatus.bind(this)
-          );
-          this.som = sound;
+          if (!ExpoAudio) {
+            throw new Error('expo-audio não disponível neste ambiente');
+          }
+          const player = ExpoAudio.createAudioPlayer({ uri: url });
+          this.observarPlayerNativo(player);
+          player.play();
+
+          this.som = player;
           this.estado.urlAtual = url;
           this.estado.tocando = true;
           this.estado.pausado = false;
           this.estado.tempo = 0;
-
-          // Obtém duração
-          const status = await this.som.getStatusAsync();
-          if (status.isLoaded) {
-            this.estado.duracao = status.durationMillis || 0;
-          }
-
-          this.iniciarIntervaloAtualizacao();
           this.notificarListeners();
         }
       }
     } catch (err) {
       console.error('Erro ao tocar áudio:', err);
-      throw new Error(`Erro ao reproduzir áudio: ${err instanceof Error ? err.message : 'desconhecido'}`);
+
+      // Erros de mídia do navegador (stream 404, formato não suportado etc.)
+      // viram mensagem amigável em pt-BR, sem expor o texto técnico do HTML5 Audio.
+      const nomeErro = (err as { name?: string }).name;
+      const mensagemTecnica = err instanceof Error ? err.message : String(err);
+      const erroDeMidiaWeb = this.isWeb && (
+        nomeErro === 'NotSupportedError' ||
+        /supported source|no supported|failed to load/i.test(mensagemTecnica) ||
+        Boolean(this.audioWeb?.error)
+      );
+
+      if (erroDeMidiaWeb) {
+        throw new Error('Nenhuma fonte de áudio aberta disponível para esta versão.');
+      }
+
+      throw new Error(`Erro ao reproduzir áudio: ${mensagemTecnica}`);
     }
   }
 
@@ -199,10 +220,9 @@ class PlayerAudio {
         }
       } else {
         if (this.som && this.estado.tocando) {
-          await this.som.pauseAsync();
+          this.som.pause();
           this.estado.tocando = false;
           this.estado.pausado = true;
-          this.pararIntervaloAtualizacao();
           this.notificarListeners();
         }
       }
@@ -225,10 +245,9 @@ class PlayerAudio {
         }
       } else {
         if (this.som && this.estado.pausado) {
-          await this.som.playAsync();
+          this.som.play();
           this.estado.tocando = true;
           this.estado.pausado = false;
-          this.iniciarIntervaloAtualizacao();
           this.notificarListeners();
         }
       }
@@ -238,7 +257,7 @@ class PlayerAudio {
     }
   }
 
-  // Para completamente a reprodução
+  // Para completamente a reprodução (pausa e volta ao início)
   async parar(): Promise<void> {
     try {
       if (this.isWeb) {
@@ -253,11 +272,18 @@ class PlayerAudio {
         }
       } else {
         if (this.som) {
-          await this.som.stopAsync();
+          this.som.pause();
+          try {
+            await this.som.seekTo(0);
+          } catch {
+            // Se não foi possível voltar ao início, descarta o player:
+            // o próximo tocar() cria um novo do zero
+            this.som.remove();
+            this.som = null;
+          }
           this.estado.tocando = false;
           this.estado.pausado = false;
           this.estado.tempo = 0;
-          this.pararIntervaloAtualizacao();
           this.notificarListeners();
         }
       }
@@ -278,7 +304,8 @@ class PlayerAudio {
         }
       } else {
         if (this.som) {
-          await this.som.setPositionAsync(posicaoMs);
+          // expo-audio trabalha em segundos
+          await this.som.seekTo(posicaoMs / 1000);
           this.estado.tempo = posicaoMs;
           this.notificarListeners();
         }
@@ -286,19 +313,6 @@ class PlayerAudio {
     } catch (err) {
       console.error('Erro ao buscar posição:', err);
       throw err;
-    }
-  }
-
-  // Callback chamado quando o status do áudio muda
-  private async aoMudarStatus(status: any): Promise<void> {
-    if (!status.isLoaded) return;
-
-    if (status.didJustFinish) {
-      this.estado.tocando = false;
-      this.estado.pausado = false;
-      this.estado.tempo = 0;
-      this.pararIntervaloAtualizacao();
-      this.notificarListeners();
     }
   }
 
@@ -319,7 +333,7 @@ class PlayerAudio {
         }
       } else {
         if (this.som) {
-          await this.som.unloadAsync();
+          this.som.remove();
           this.som = null;
         }
       }

@@ -49,6 +49,9 @@ export default function TelaAdminIngestao({ navigation }: Props): React.JSX.Elem
       if (resposta.success && resposta.data) {
         setResultado(resposta.data);
         toastSucesso('Ingestão concluída com sucesso!');
+        // Regra do usuário: após uma busca bem-sucedida, o usuário volta
+        // automaticamente para a página inicial e continua suas buscas.
+        navigation.navigate('Busca');
       } else {
         const mensagem = resposta.error || 'Erro na ingestão';
         setErro(mensagem);
