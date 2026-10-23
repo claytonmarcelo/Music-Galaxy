@@ -37,6 +37,8 @@ const ICONES = {
   seta: { familia: 'feather', nome: 'chevron-right' },
   setaBaixo: { familia: 'feather', nome: 'chevron-down' },
   musica: { familia: 'feather', nome: 'music' },
+  artista: { familia: 'feather', nome: 'user' },
+  playlist: { familia: 'feather', nome: 'list' },
   album: { familia: 'feather', nome: 'disc' },
   calendario: { familia: 'feather', nome: 'calendar' },
   pais: { familia: 'feather', nome: 'globe' },

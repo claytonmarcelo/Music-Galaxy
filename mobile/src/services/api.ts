@@ -71,6 +71,28 @@ export { testarConexaoServidor };
 // rate limit), então 45s evita cortar uma busca legítima pela metade.
 const TIMEOUT_MS = 45000;
 
+// Extrai a mensagem de erro de uma resposta HTTP sem confiar no formato do
+// corpo: o backend devolve `{ error }`, mas proxies e servidores fora da API
+// podem devolver HTML ou JSON em outro formato. Nunca propaga detalhes crus.
+async function mensagemDeErroDaResposta(response: Response): Promise<string> {
+  const fallback = `Erro HTTP ${response.status}`;
+  try {
+    const corpo: unknown = await response.json();
+    if (corpo && typeof corpo === 'object') {
+      const registro = corpo as { error?: unknown; message?: unknown };
+      if (typeof registro.error === 'string' && registro.error.trim()) {
+        return registro.error;
+      }
+      if (typeof registro.message === 'string' && registro.message.trim()) {
+        return registro.message;
+      }
+    }
+  } catch {
+    // Corpo não era JSON — usa a mensagem padrão.
+  }
+  return fallback;
+}
+
 // Realiza uma requisição com timeout e suporte a AbortController.
 async function requisicaoComTimeout<T>(
   url: string,
@@ -104,8 +126,7 @@ async function requisicaoComTimeout<T>(
     clearTimeout(timer);
 
     if (!response.ok) {
-      const corpo = await response.json().catch(() => ({})) as any;
-      throw new Error(corpo?.error || `Erro HTTP ${response.status}`);
+      throw new Error(await mensagemDeErroDaResposta(response));
     }
 
     return response.json() as Promise<T>;
@@ -237,10 +258,9 @@ export async function forcarIngestao(
     });
 
     if (!response.ok) {
-      const corpo = await response.json().catch(() => ({})) as any;
       return {
         success: false,
-        error: corpo?.error || `Erro HTTP ${response.status}`,
+        error: await mensagemDeErroDaResposta(response),
       };
     }
 

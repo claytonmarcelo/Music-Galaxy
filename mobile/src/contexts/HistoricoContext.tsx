@@ -1,7 +1,7 @@
 // Contexto global para gerenciar histórico de buscas.
 // Persiste últimas 20 buscas em AsyncStorage para sugestões rápidas.
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = '@MusicGalaxy:historico';
@@ -20,34 +20,46 @@ interface HistoricoContextData {
   limparHistorico: () => Promise<void>;
 }
 
-const HistoricoContext = createContext<HistoricoContextData>({} as HistoricoContextData);
+const HistoricoContext = createContext<HistoricoContextData | undefined>(undefined);
 
 export function HistoricoProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
   const [historico, setHistorico] = useState<ItemHistorico[]>([]);
   const [carregando, setCarregando] = useState(true);
+  // Lista mais recente para evitar perder buscas feitas em sequência rápida.
+  const historicoRef = useRef<ItemHistorico[]>([]);
 
   // Carrega histórico do AsyncStorage ao iniciar
   useEffect(() => {
-    carregarHistorico();
-  }, []);
+    let ativo = true;
 
-  const carregarHistorico = async () => {
-    try {
-      const dados = await AsyncStorage.getItem(STORAGE_KEY);
-      if (dados) {
-        const historicoCarregado = JSON.parse(dados) as ItemHistorico[];
-        setHistorico(historicoCarregado);
+    const carregarHistorico = async () => {
+      try {
+        const dados = await AsyncStorage.getItem(STORAGE_KEY);
+        if (!ativo) return;
+
+        if (dados) {
+          const historicoCarregado = JSON.parse(dados) as ItemHistorico[];
+          historicoRef.current = historicoCarregado;
+          setHistorico(historicoCarregado);
+        }
+      } catch (erro) {
+        console.error('Erro ao carregar histórico:', erro);
+      } finally {
+        if (ativo) setCarregando(false);
       }
-    } catch (erro) {
-      console.error('Erro ao carregar histórico:', erro);
-    } finally {
-      setCarregando(false);
-    }
-  };
+    };
+
+    void carregarHistorico();
+
+    return () => {
+      ativo = false;
+    };
+  }, []);
 
   const salvarHistorico = async (novoHistorico: ItemHistorico[]) => {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(novoHistorico));
+      historicoRef.current = novoHistorico;
       setHistorico(novoHistorico);
     } catch (erro) {
       console.error('Erro ao salvar histórico:', erro);
@@ -60,7 +72,7 @@ export function HistoricoProvider({ children }: { children: React.ReactNode }): 
     if (!termoNormalizado) return;
 
     // Remove duplicatas (mantém apenas a mais recente)
-    const historicoFiltrado = historico.filter(
+    const historicoFiltrado = historicoRef.current.filter(
       item => item.termo.toLowerCase() !== termoNormalizado
     );
 
@@ -76,7 +88,7 @@ export function HistoricoProvider({ children }: { children: React.ReactNode }): 
 
   const removerBusca = async (termo: string) => {
     const termoNormalizado = termo.trim().toLowerCase();
-    const novoHistorico = historico.filter(
+    const novoHistorico = historicoRef.current.filter(
       item => item.termo.toLowerCase() !== termoNormalizado
     );
     await salvarHistorico(novoHistorico);
@@ -84,6 +96,7 @@ export function HistoricoProvider({ children }: { children: React.ReactNode }): 
 
   const limparHistorico = async () => {
     await AsyncStorage.removeItem(STORAGE_KEY);
+    historicoRef.current = [];
     setHistorico([]);
   };
 

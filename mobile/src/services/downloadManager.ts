@@ -5,21 +5,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
-import { Release } from '../types';
-import { BASE_URL } from './api';
-
-export interface DownloadItem {
-  id: string;
-  release: Release;
-  url: string;
-  status: 'pending' | 'downloading' | 'completed' | 'error';
-  progress: number;
-  filePath: string | null;
-  fileSize: number;
-  error: string | null;
-  createdAt: number;
-  completedAt: number | null;
-}
 
 // Detecta o formato pedido no endpoint de download (mp3 por padrão).
 export function formatoDoDownload(url: string): 'mp3' | 'flac' {
@@ -28,6 +13,21 @@ export function formatoDoDownload(url: string): 'mp3' | 'flac' {
     return formato === 'flac' ? 'flac' : 'mp3';
   } catch {
     return 'mp3';
+  }
+}
+
+// Extrai o ID da versão de uma URL de download do backend.
+// Retorna null para qualquer endereço que não seja desse endpoint.
+export function releaseIdDoDownload(url: string): number | null {
+  try {
+    const caminho = new URL(url, 'http://localhost').pathname;
+    const correspondencia = /^\/api\/releases\/(\d+)\/download$/.exec(caminho);
+    if (!correspondencia) return null;
+
+    const id = Number(correspondencia[1]);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  } catch {
+    return null;
   }
 }
 
@@ -54,27 +54,19 @@ export interface EstadoDownload {
 }
 
 class DownloadManager {
-  private downloads: Map<string, DownloadItem> = new Map();
-  private queue: string[] = [];
-  private isProcessing = false;
-  private maxConcurrent = 1;
-  private currentDownloads = 0;
   private estadosByUrl: Map<string, EstadoDownload> = new Map();
   private listeners: Map<string, Array<(estado: EstadoDownload) => void>> = new Map();
   private listenersGlobais: Set<() => void> = new Set();
-  private downloadResumables: Map<string, any> = new Map();
+  private downloadResumables: Map<string, FileSystem.DownloadResumable> = new Map();
   // Controladores de download da web (permitem cancelar o fetch de verdade).
   private abortControllers: Map<string, AbortController> = new Map();
   // Garante que a fila salva no aparelho seja carregada uma única vez.
   private inicializacao: Promise<void> | null = null;
 
-  // Inicializar gerenciador (fila antiga + fila nova persistida).
+  // Inicializar gerenciador com a fila persistida no aparelho.
   async initialize(): Promise<void> {
     if (!this.inicializacao) {
-      this.inicializacao = (async () => {
-        await this.loadFromStorage();
-        await this.carregarFilaSalva();
-      })();
+      this.inicializacao = this.carregarFilaSalva();
     }
     return this.inicializacao;
   }
@@ -123,36 +115,33 @@ class DownloadManager {
     }
   }
 
-  // Carregar downloads persistidos em storage.
-  private async loadFromStorage(): Promise<void> {
-    try {
-      const data = await AsyncStorage.getItem('@musicgalaxy:downloads');
-      if (data) {
-        const parsed = JSON.parse(data) as DownloadItem[];
-        this.downloads = new Map(parsed.map((item) => [item.id, item]));
-        this.queue = parsed
-          .filter((item) => item.status === 'pending')
-          .map((item) => item.id);
-      }
-    } catch (error) {
-      console.error('Erro ao carregar downloads:', error);
-    }
-  }
-
-  // Salvar downloads no AsyncStorage.
-  private async saveToStorage(): Promise<void> {
-    try {
-      const data = Array.from(this.downloads.values());
-      await AsyncStorage.setItem('@musicgalaxy:downloads', JSON.stringify(data));
-    } catch (error) {
-      console.error('Erro ao salvar downloads:', error);
-    }
-  }
-
   // Requisita o estado público de um download por URL.
   obterEstado(url: string): EstadoDownload | null {
     const estado = this.estadosByUrl.get(url);
     return estado ? { ...estado } : null;
+  }
+
+  // Caminho local confiável de uma versão já baixada.
+  // Só devolve o arquivo quando o download terminou de fato e o arquivo
+  // ainda existe no aparelho — nunca usa um arquivo pela metade. Na web
+  // não existe caminho local, então a reprodução continua pelo servidor.
+  async obterArquivoLocal(releaseId: number): Promise<string | null> {
+    if (Platform.OS === 'web') return null;
+
+    for (const [url, estado] of this.estadosByUrl.entries()) {
+      if (!estado.concluido || !estado.caminhoLocal) continue;
+      if (!estado.caminhoLocal.startsWith('file://')) continue;
+      if (releaseIdDoDownload(url) !== releaseId) continue;
+
+      try {
+        const informacoes = await FileSystem.getInfoAsync(estado.caminhoLocal);
+        if (informacoes.exists) return estado.caminhoLocal;
+      } catch (erro) {
+        console.error('Erro ao verificar o arquivo local:', erro);
+      }
+    }
+
+    return null;
   }
 
   // Acompanha mudanças de progresso por URL.
@@ -237,15 +226,9 @@ class DownloadManager {
     };
   }
 
-  // Adiciona um download usando a release original do usuário.
+  // Baixa uma versão a partir do endpoint do backend.
   // Regra 3: o arquivo sempre vem do endpoint do backend, que resolve a
   // fonte em sites abertos (nunca YouTube/Spotify/Deezer).
-  async addDownload(release: Release): Promise<string> {
-    const url = `${BASE_URL}/api/releases/${release.id}/download?format=mp3`;
-    return this.baixar(url, release.version_name);
-  }
-
-  // Compatibilidade com o componente de UI antigo.
   async baixar(url: string, titulo: string): Promise<string> {
     if (!url) {
       throw new Error('URL de download não disponível');
@@ -358,7 +341,9 @@ class DownloadManager {
     }
 
     const fileName = nomeSeguro(titulo, formatoDoDownload(url));
-    const cacheDirectory = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? '';
+    // No web, os diretórios do expo-file-system são nulos; o fallback vazio
+    // mantém o download do navegador funcionando (Blob + link de download).
+    const cacheDirectory = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? '';
     const fileUri = `${cacheDirectory}${fileName}`;
 
     try {
@@ -469,172 +454,6 @@ class DownloadManager {
     this.downloadResumables.delete(url);
     this.listenersGlobais.forEach((callback) => callback());
     void this.persistirFila();
-  }
-
-  // Processar fila de downloads.
-  private async processQueue(): Promise<void> {
-    if (this.isProcessing || this.currentDownloads >= this.maxConcurrent) {
-      return;
-    }
-
-    this.isProcessing = true;
-
-    while (this.queue.length > 0 && this.currentDownloads < this.maxConcurrent) {
-      const id = this.queue.shift();
-      if (id) {
-        this.currentDownloads++;
-        this.processDownload(id).finally(() => {
-          this.currentDownloads--;
-        });
-      }
-    }
-
-    this.isProcessing = false;
-  }
-
-  // Processar download individual.
-  private async processDownload(id: string): Promise<void> {
-    const downloadItem = this.downloads.get(id);
-    if (!downloadItem) return;
-
-    try {
-      downloadItem.status = 'downloading';
-      await this.saveToStorage();
-
-      const fileName = `${downloadItem.release.artist_name} - ${downloadItem.release.work_title} - ${downloadItem.release.version_name}.mp3`;
-      const cacheDirectory = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory ?? '';
-      const fileUri = `${cacheDirectory}${fileName}`;
-      const resumable = FileSystem.createDownloadResumable(
-        downloadItem.url,
-        fileUri,
-        {},
-        (downloadProgress) => {
-          const total = downloadProgress.totalBytesExpectedToWrite || downloadProgress.totalBytesWritten || 0;
-          const progresso = total > 0 ? downloadProgress.totalBytesWritten / total : 0;
-          downloadItem.progress = progresso * 100;
-          downloadItem.fileSize = total;
-          this.saveToStorage();
-        }
-      );
-
-      const result = await resumable.downloadAsync();
-
-      downloadItem.status = 'completed';
-      downloadItem.filePath = result?.uri || fileUri;
-      downloadItem.progress = 100;
-      downloadItem.completedAt = Date.now();
-      downloadItem.error = null;
-    } catch (error) {
-      downloadItem.status = 'error';
-      downloadItem.error = error instanceof Error ? error.message : 'Erro desconhecido';
-    } finally {
-      await this.saveToStorage();
-    }
-  }
-
-  // Pausar download antigo, preservando compatibilidade.
-  async pauseDownload(id: string): Promise<void> {
-    const downloadItem = this.downloads.get(id);
-    if (downloadItem && downloadItem.status === 'downloading') {
-      downloadItem.status = 'pending';
-      await this.saveToStorage();
-    }
-  }
-
-  // Cancelar download antigo, preservando compatibilidade.
-  async cancelDownloadLegacy(id: string): Promise<void> {
-    const downloadItem = this.downloads.get(id);
-    if (downloadItem) {
-      if (downloadItem.filePath) {
-        try {
-          await FileSystem.deleteAsync(downloadItem.filePath);
-        } catch (error) {
-          console.error('Erro ao deletar arquivo:', error);
-        }
-      }
-      this.downloads.delete(id);
-      this.queue = this.queue.filter((item) => item !== id);
-      await this.saveToStorage();
-    }
-  }
-
-  // Retomar download antigo, preservando compatibilidade.
-  async resumeDownload(id: string): Promise<void> {
-    const downloadItem = this.downloads.get(id);
-    if (downloadItem && downloadItem.status === 'pending') {
-      this.queue.push(id);
-      await this.saveToStorage();
-      this.processQueue();
-    }
-  }
-
-  // Obter todos os downloads.
-  getAllDownloads(): DownloadItem[] {
-    return Array.from(this.downloads.values()).sort((a, b) => b.createdAt - a.createdAt);
-  }
-
-  // Obter download por ID.
-  getDownload(id: string): DownloadItem | undefined {
-    return this.downloads.get(id);
-  }
-
-  // Obter downloads de uma release.
-  getDownloadsByRelease(releaseId: number): DownloadItem[] {
-    return this.getAllDownloads().filter((item) => item.release.id === releaseId);
-  }
-
-  // Limpar downloads concluídos.
-  async clearCompleted(): Promise<void> {
-    const completedIds = Array.from(this.downloads.entries())
-      .filter(([_, item]) => item.status === 'completed')
-      .map(([id]) => id);
-
-    for (const id of completedIds) {
-      const downloadItem = this.downloads.get(id);
-      if (downloadItem?.filePath) {
-        try {
-          await FileSystem.deleteAsync(downloadItem.filePath);
-        } catch (error) {
-          console.error('Erro ao deletar arquivo:', error);
-        }
-      }
-      this.downloads.delete(id);
-    }
-
-    await this.saveToStorage();
-  }
-
-  // Limpar downloads com erro.
-  async clearErrors(): Promise<void> {
-    const errorIds = Array.from(this.downloads.entries())
-      .filter(([_, item]) => item.status === 'error')
-      .map(([id]) => id);
-
-    for (const id of errorIds) {
-      this.downloads.delete(id);
-    }
-
-    await this.saveToStorage();
-  }
-
-  // Estatísticas do gerenciador.
-  getStats(): {
-    total: number;
-    pending: number;
-    downloading: number;
-    completed: number;
-    error: number;
-    totalSize: number;
-  } {
-    const downloads = this.getAllDownloads();
-    return {
-      total: downloads.length,
-      pending: downloads.filter((d) => d.status === 'pending').length,
-      downloading: downloads.filter((d) => d.status === 'downloading').length,
-      completed: downloads.filter((d) => d.status === 'completed').length,
-      error: downloads.filter((d) => d.status === 'error').length,
-      totalSize: downloads.reduce((sum, d) => sum + d.fileSize, 0),
-    };
   }
 }
 

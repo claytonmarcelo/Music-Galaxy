@@ -16,6 +16,7 @@ import DetalheReleaseScreen from '../screens/DetalheReleaseScreen';
 import DetalheWorkScreen from '../screens/DetalheWorkScreen';
 import DetalheArtistaScreen from '../screens/DetalheArtistaScreen';
 import TelaBiblioteca from '../screens/TelaBiblioteca';
+import TelaPlaylist from '../screens/TelaPlaylist';
 import TelaExplorar from '../screens/TelaExplorar';
 import FavoritosScreen from '../screens/FavoritosScreen';
 import FilaDownloadsScreen from '../screens/FilaDownloadsScreen';
@@ -61,6 +62,7 @@ export default function AppNavigator(): React.JSX.Element {
         <Stack.Screen name="DetalheWork" component={DetalheWorkScreen} />
         <Stack.Screen name="DetalheArtista" component={DetalheArtistaScreen} />
         <Stack.Screen name="Biblioteca" component={TelaBiblioteca} />
+        <Stack.Screen name="DetalhePlaylist" component={TelaPlaylist} />
         <Stack.Screen name="Explorar" component={TelaExplorar} />
         <Stack.Screen name="Favoritos" component={FavoritosScreen} />
         <Stack.Screen name="FilaDownloads" component={FilaDownloadsScreen} />

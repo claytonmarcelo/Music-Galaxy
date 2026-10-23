@@ -18,6 +18,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { Release } from '../types';
 import { useTheme } from '../contexts/ThemeContext';
 import { useModal } from '../contexts/ModalContext';
+import { useHistoricoReproducao } from '../contexts/HistoricoReproducaoContext';
 import AnimatedCard from './AnimatedCard';
 import Icone from './Icone';
 import PlayerControls from './PlayerControls';
@@ -61,6 +62,7 @@ function corDaCategoria(
 function ReleaseCardComponent({ release, onPress }: Props): React.JSX.Element {
   const { colors } = useTheme();
   const { toastSucesso, toastErro } = useModal();
+  const { registrarReproducao } = useHistoricoReproducao();
   const isFocused = useIsFocused();
 
   const [showPlayer, setShowPlayer] = useState(false);
@@ -68,8 +70,24 @@ function ReleaseCardComponent({ release, onPress }: Props): React.JSX.Element {
   const [urlAtual, setUrlAtual] = useState<string | null>(null);
   const [estado, setEstado] = useState<EstadoDownload | null>(null);
   const [baixandoAgora, setBaixandoAgora] = useState(false);
+  const [arquivoLocal, setArquivoLocal] = useState<string | null>(null);
 
   const corCategoria = corDaCategoria(colors, release.release_type_category);
+
+  // Ao abrir o player compacto, procura um arquivo já baixado desta versão
+  // para permitir a reprodução offline.
+  useEffect(() => {
+    if (!showPlayer) return;
+
+    let ativo = true;
+    void downloadManager.obterArquivoLocal(release.id).then((caminho) => {
+      if (ativo) setArquivoLocal(caminho);
+    });
+
+    return () => {
+      ativo = false;
+    };
+  }, [showPlayer, release.id]);
 
   // Relê a preferência sempre que a tela volta ao foco (ex.: após Ajustes).
   useEffect(() => {
@@ -258,8 +276,12 @@ function ReleaseCardComponent({ release, onPress }: Props): React.JSX.Element {
       {showPlayer && (
         <PlayerControls
           url={urlStreamRelease(release.id)}
+          urlLocal={arquivoLocal}
           titulo={release.version_name}
           artista={release.artist_name}
+          onReproduzir={() => {
+            void registrarReproducao(release);
+          }}
           compacto
         />
       )}

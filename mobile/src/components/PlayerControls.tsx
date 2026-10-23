@@ -27,6 +27,11 @@ interface Props {
   url: string;
   titulo: string;
   artista?: string;
+  // Caminho local de um arquivo já baixado. Quando existe, a reprodução
+  // acontece direto do aparelho (offline) e o stream fica como reserva.
+  urlLocal?: string | null;
+  // Avisa a tela quando a reprodução começa de fato (histórico local).
+  onReproduzir?: () => void;
   // Modo embutido no card: sem cartão próprio e com controles menores.
   compacto?: boolean;
 }
@@ -51,25 +56,39 @@ export default function PlayerControls({
   url,
   titulo,
   artista,
+  urlLocal = null,
+  onReproduzir,
   compacto = false,
 }: Props): React.JSX.Element {
   const { colors } = useTheme();
-  const { toastErro } = useModal();
+  const { toastErro, toastInfo } = useModal();
 
   const [estado, setEstado] = useState<EstadoPlayer>(playerAudio.obterEstado());
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   // Fração exibida durante o arrasto do slider (null = posição real).
   const [arrastando, setArrastando] = useState<number | null>(null);
+  // Arquivo local que deixou de existir durante a sessão.
+  const [falhaLocal, setFalhaLocal] = useState(false);
 
   const fadeInAnim = useRef(new Animated.Value(0)).current;
-  const urlRef = useRef(url);
 
-  // Mantém a URL atual em uma ref para a limpeza de desmontagem.
+  // O arquivo local tem prioridade; se falhar, o stream do servidor assume.
+  const usarLocal = Boolean(urlLocal) && !falhaLocal;
+  const urlEfetiva: string = usarLocal && urlLocal ? urlLocal : url;
+
+  const urlRef = useRef(urlEfetiva);
+
+  // Mantém a URL efetiva em uma ref para a limpeza de desmontagem.
   useEffect(() => {
-    urlRef.current = url;
+    urlRef.current = urlEfetiva;
     setErro(null);
-  }, [url]);
+  }, [urlEfetiva]);
+
+  // Um novo arquivo local (ou a troca de faixa) volta a tentar o modo local.
+  useEffect(() => {
+    setFalhaLocal(false);
+  }, [urlLocal]);
 
   // Acompanha o player global e anima a entrada do painel.
   useEffect(() => {
@@ -91,14 +110,14 @@ export default function PlayerControls({
     };
   }, [fadeInAnim]);
 
-  const ehEstaFaixa = estado.urlAtual === url;
+  const ehEstaFaixa = estado.urlAtual === urlEfetiva;
   const tocando = ehEstaFaixa && estado.tocando;
   const duracao = ehEstaFaixa ? estado.duracao : 0;
   const tempo = arrastando !== null ? arrastando * duracao : ehEstaFaixa ? estado.tempo : 0;
   const progresso = duracao > 0 ? Math.min(tempo / duracao, 1) : 0;
 
   const alternarReproducao = async () => {
-    if (!url) {
+    if (!urlEfetiva) {
       setErro('Nenhuma fonte de áudio disponível para esta versão.');
       toastErro('Nenhuma fonte de áudio disponível para esta versão.');
       return;
@@ -113,7 +132,17 @@ export default function PlayerControls({
       } else if (ehEstaFaixa && estado.pausado) {
         await playerAudio.retomar();
       } else {
-        await playerAudio.tocar(url);
+        try {
+          await playerAudio.tocar(urlEfetiva);
+        } catch (falha) {
+          // O arquivo local pode ter sido removido pelo sistema. Nesse caso,
+          // tenta o stream do servidor antes de mostrar qualquer erro.
+          if (!usarLocal || !url) throw falha;
+          setFalhaLocal(true);
+          await playerAudio.tocar(url);
+          toastInfo('Arquivo local indisponível. Reproduzindo pelo servidor.');
+        }
+        onReproduzir?.();
       }
     } catch (falha) {
       const mensagem =
@@ -208,13 +237,18 @@ export default function PlayerControls({
             style={[
               styles.etiquetaAberta,
               {
-                backgroundColor: comAlfa(colors.success, 0.14),
-                borderColor: comAlfa(colors.success, 0.3),
+                backgroundColor: comAlfa(usarLocal ? colors.primary : colors.success, 0.14),
+                borderColor: comAlfa(usarLocal ? colors.primary : colors.success, 0.3),
               },
             ]}
           >
-            <Text style={[styles.etiquetaAbertaTexto, { color: colors.success }]}>
-              Aberto
+            <Text
+              style={[
+                styles.etiquetaAbertaTexto,
+                { color: usarLocal ? colors.primary : colors.success },
+              ]}
+            >
+              {usarLocal ? 'Local' : 'Aberto'}
             </Text>
           </View>
         </View>

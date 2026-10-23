@@ -102,8 +102,7 @@ export default function DetalheArtistaScreen({ route, navigation }: Props): Reac
   useEffect(() => {
     void carregarArtista();
     void carregarObras(0, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [artistaId]);
+  }, [carregarArtista, carregarObras]);
 
   const carregarMais = useCallback((): void => {
     if (!temMais || atualizando || carregando) return;
@@ -296,8 +295,8 @@ export default function DetalheArtistaScreen({ route, navigation }: Props): Reac
                       {obra.title}
                     </Text>
                     <Text style={[styles.anoObra, { color: colors.textSecondary }]}>
-                      {obra.original_release_year
-                        ? `Lançamento original em ${obra.original_release_year}`
+                      {(obra.effective_year ?? obra.original_release_year)
+                        ? `Lançamento original em ${obra.effective_year ?? obra.original_release_year}`
                         : 'Ano de lançamento desconhecido'}
                     </Text>
                   </View>

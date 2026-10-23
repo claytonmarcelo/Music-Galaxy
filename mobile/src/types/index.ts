@@ -30,9 +30,13 @@ export interface Release {
   audio_source_provider?: string | null;
   audio_source_page_url?: string | null;
   work_title: string;
+  // Opcional porque favoritos antigos salvos no aparelho podem não ter o campo.
+  artist_id?: number;
   artist_name: string;
   artist_country: string | null;
   original_release_year: number | null;
+  // Ano efetivo calculado pelo backend (obra ou versão mais antiga)
+  effective_year?: number | null;
 }
 
 // ============================================================
@@ -67,6 +71,7 @@ export interface Work {
   id: number;
   title: string;
   original_release_year: number | null;
+  effective_year?: number | null;
   created_at: string;
   artist: {
     id: number;
@@ -88,6 +93,13 @@ export interface RespostaReleasesDeWork {
     work: {
       id: number;
       title: string;
+      original_release_year: number | null;
+      effective_year?: number | null;
+      artist: {
+        id: number;
+        name: string;
+        country: string | null;
+      };
     };
     results: Release[];
     total: number;
@@ -150,6 +162,9 @@ export type RootStackParamList = {
 
   // Fila de downloads (acessível pelo cabeçalho da busca e por Ajustes)
   FilaDownloads: undefined;
+
+  // Playlist local (aberta pela Biblioteca)
+  DetalhePlaylist: { playlistId: string };
 
   // Telas de detalhe (compartilhadas por múltiplas stacks)
   DetalheRelease: { release: Release };

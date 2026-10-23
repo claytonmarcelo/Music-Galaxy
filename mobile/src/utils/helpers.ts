@@ -24,13 +24,13 @@ export function truncateText(text: string, maxLength: number): string {
 }
 
 // Debounce function
-export function debounce<T extends (...args: any[]) => any>(
-  func: T,
+export function debounce<A extends unknown[]>(
+  func: (...args: A) => void,
   wait: number
-): (...args: Parameters<T>) => void {
+): (...args: A) => void {
   // ReturnType<typeof setTimeout> funciona sem depender dos tipos do Node
   let timeout: ReturnType<typeof setTimeout> | null = null;
-  return (...args: Parameters<T>) => {
+  return (...args: A) => {
     if (timeout) clearTimeout(timeout);
     timeout = setTimeout(() => func(...args), wait);
   };

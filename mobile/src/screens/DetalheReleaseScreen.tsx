@@ -4,7 +4,7 @@
 // endpoints do backend, que resolvem a fonte em sites abertos da web
 // (Regra 3) — nenhum link de plataforma é aberto ou exibido.
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -18,18 +18,21 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types';
 import { useFavoritos } from '../contexts/FavoritosContext';
+import { useHistoricoReproducao } from '../contexts/HistoricoReproducaoContext';
 import { useModal } from '../contexts/ModalContext';
 import { useTheme } from '../contexts/ThemeContext';
 import PlayerControls from '../components/PlayerControls';
 import DownloadProgress from '../components/DownloadProgress';
+import ModalPlaylists from '../components/ModalPlaylists';
 import FundoAtmosfera from '../components/FundoAtmosfera';
 import GlassCard from '../components/GlassCard';
 import Icone, { NomeIcone } from '../components/Icone';
 import { BASE_URL } from '../services/api';
+import { downloadManager } from '../services/downloadManager';
 import { TIMINGS, EASING, USE_NATIVE_DRIVER } from '../utils/animacoes';
 import { traduzirTipoRelease } from '../utils/tiposRelease';
 import { comAlfa } from '../utils/cores';
@@ -57,9 +60,12 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
   const urlStream = `${BASE_URL}/api/releases/${release.id}/stream`;
 
   const { isFavorito, adicionarFavorito, removerFavorito } = useFavoritos();
+  const { registrarReproducao } = useHistoricoReproducao();
   const { abrirInfo, toastSucesso, toastErro } = useModal();
 
   const [ehFavorito, setEhFavorito] = useState(isFavorito(release.id));
+  const [mostrarPlaylists, setMostrarPlaylists] = useState(false);
+  const [arquivoLocal, setArquivoLocal] = useState<string | null>(null);
 
   // Animações de entrada: capa, cabeçalho e blocos de conteúdo.
   const fadeInAnim = useRef(new Animated.Value(0)).current;
@@ -88,6 +94,23 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
     ]).start();
   }, [fadeInAnim, scaleCapaAnim, slideConteudoAnim]);
 
+  // Ao voltar ao foco, sincroniza o coração com os favoritos e procura um
+  // arquivo já baixado para permitir a reprodução offline desta versão.
+  useFocusEffect(
+    useCallback(() => {
+      let ativo = true;
+      setEhFavorito(isFavorito(release.id));
+
+      void downloadManager.obterArquivoLocal(release.id).then((caminho) => {
+        if (ativo) setArquivoLocal(caminho);
+      });
+
+      return () => {
+        ativo = false;
+      };
+    }, [isFavorito, release.id])
+  );
+
   // Cores de destaque por categoria, derivadas do tema (sem cores fixas).
   const coresCategoria: Record<string, string> = {
     release_format: colors.success,
@@ -98,6 +121,7 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
   const corCategoria = coresCategoria[release.release_type_category] ?? colors.textSecondary;
   const labelCategoria = LABELS_CATEGORIA[release.release_type_category] ?? release.release_type;
   const tamanhoCapa = Math.min(width - 104, 280);
+  const artistId = release.artist_id;
 
   const toggleFavorito = async () => {
     try {
@@ -143,11 +167,29 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           </TouchableOpacity>
 
           <View style={styles.headerTextos}>
-            <Text style={[styles.headerTitulo, { color: colors.text }]}>Detalhes da versão</Text>
-            <Text style={[styles.headerSubtitulo, { color: colors.textSecondary }]}>
+            <Text style={[styles.headerTitulo, { color: colors.text }]} numberOfLines={1}>
+              Detalhes da versão
+            </Text>
+            <Text
+              style={[styles.headerSubtitulo, { color: colors.textSecondary }]}
+              numberOfLines={1}
+            >
               {release.artist_name}
             </Text>
           </View>
+
+          <TouchableOpacity
+            style={[
+              styles.botaoCirculo,
+              { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+            ]}
+            onPress={() => setMostrarPlaylists(true)}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Adicionar esta versão a uma playlist"
+          >
+            <Icone nome="playlist" tamanho={18} cor={colors.text} />
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={[
@@ -294,8 +336,12 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           >
             <PlayerControls
               url={urlStream}
+              urlLocal={arquivoLocal}
               titulo={release.version_name}
               artista={release.artist_name}
+              onReproduzir={() => {
+                void registrarReproducao(release);
+              }}
             />
           </Animated.View>
 
@@ -327,6 +373,39 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
               <InfoLinha label="Artista" valor={release.artist_name} />
               <InfoLinha label="País do artista" valor={release.artist_country} />
               <InfoLinha label="Lançamento original" valor={release.original_release_year?.toString()} />
+
+              {/* Navegação para a obra e para o artista desta versão */}
+              <View style={styles.acoesLinha}>
+                <TouchableOpacity
+                  style={[
+                    styles.acaoBotao,
+                    { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                  ]}
+                  onPress={() => navigation.navigate('DetalheWork', { workId: release.work_id })}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Ver todas as versões de ${release.work_title}`}
+                >
+                  <Icone nome="musica" tamanho={14} cor={colors.primary} />
+                  <Text style={[styles.acaoTexto, { color: colors.text }]}>Ver obra</Text>
+                </TouchableOpacity>
+
+                {typeof artistId === 'number' && (
+                  <TouchableOpacity
+                    style={[
+                      styles.acaoBotao,
+                      { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                    ]}
+                    onPress={() => navigation.navigate('DetalheArtista', { artistaId: artistId })}
+                    activeOpacity={0.75}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Ver o artista ${release.artist_name}`}
+                  >
+                    <Icone nome="artista" tamanho={14} cor={colors.primary} />
+                    <Text style={[styles.acaoTexto, { color: colors.text }]}>Ver artista</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </GlassCard>
 
             <GlassCard style={styles.secao}>
@@ -368,6 +447,13 @@ export default function DetalheReleaseScreen(): React.JSX.Element {
           </Animated.View>
         </ScrollView>
       </SafeAreaView>
+
+      {/* Seletor de playlists locais */}
+      <ModalPlaylists
+        visivel={mostrarPlaylists}
+        release={release}
+        onFechar={() => setMostrarPlaylists(false)}
+      />
     </FundoAtmosfera>
   );
 }
@@ -547,6 +633,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 0.2,
+  },
+  acoesLinha: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+  },
+  acaoBotao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  acaoTexto: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   linkFonte: {
     flexDirection: 'row',

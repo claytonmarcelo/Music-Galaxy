@@ -3,7 +3,7 @@
 // (Regra 2: nunca ocultar ou substituir versões). Cada versão continua
 // sendo um ReleaseCard independente sobre o fundo atmosférico.
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -37,6 +37,24 @@ interface GrupoReleases {
   releases: Release[];
 }
 
+// Agrupa as versões por categoria, preservando todas as linhas (Regra 2).
+function agruparPorCategoria(rels: Release[]): GrupoReleases[] {
+  const mapa = new Map<string, Release[]>();
+
+  rels.forEach((rel) => {
+    const cat = rel.release_type_category || 'Outros';
+    if (!mapa.has(cat)) {
+      mapa.set(cat, []);
+    }
+    mapa.get(cat)!.push(rel);
+  });
+
+  return Array.from(mapa.entries()).map(([categoria, relsDaCategoria]) => ({
+    categoria,
+    releases: relsDaCategoria,
+  }));
+}
+
 export default function DetalheWorkScreen({ route, navigation }: Props): React.JSX.Element {
   const { workId } = route.params;
   const { toastErro } = useModal();
@@ -46,8 +64,7 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
   const [atualizando, setAtualizando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [releases, setReleases] = useState<Release[]>([]);
-  const [workInfo, setWorkInfo] = useState<{ id: number; title: string } | null>(null);
-  const [gruposReleases, setGruposReleases] = useState<GrupoReleases[]>([]);
+  const [workInfo, setWorkInfo] = useState<RespostaReleasesDeWork['data']['work'] | null>(null);
   const [pagina, setPagina] = useState(0);
   const [temMais, setTemMais] = useState(true);
 
@@ -63,23 +80,8 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
     }).start();
   }, [fadeInAnim]);
 
-  // Agrupa as versões por categoria, preservando todas as linhas.
-  const agruparPorCategoria = (rels: Release[]): GrupoReleases[] => {
-    const mapa = new Map<string, Release[]>();
-
-    rels.forEach((rel) => {
-      const cat = rel.release_type_category || 'Outros';
-      if (!mapa.has(cat)) {
-        mapa.set(cat, []);
-      }
-      mapa.get(cat)!.push(rel);
-    });
-
-    return Array.from(mapa.entries()).map(([categoria, relsDaCategoria]) => ({
-      categoria,
-      releases: relsDaCategoria,
-    }));
-  };
+  // Os grupos são derivados da lista carregada — nunca um estado paralelo.
+  const gruposReleases = useMemo(() => agruparPorCategoria(releases), [releases]);
 
   const carregarReleases = useCallback(
     async (offset = 0, adicionar = false): Promise<void> => {
@@ -94,16 +96,9 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
         const { results, total, work } = resposta.data;
 
         setWorkInfo(work);
-
-        if (adicionar) {
-          setReleases((prev) => [...prev, ...results]);
-        } else {
-          setReleases(results);
-        }
-
+        setReleases((prev) => (adicionar ? [...prev, ...results] : results));
         setTemMais(offset + LIMIT < total);
         setPagina(Math.floor(offset / LIMIT) + 1);
-        setGruposReleases(agruparPorCategoria(adicionar ? [...releases, ...results] : results));
         setErro(null);
       } catch (err) {
         const mensagem = err instanceof Error ? err.message : 'Erro desconhecido';
@@ -114,13 +109,12 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
         setAtualizando(false);
       }
     },
-    [workId, releases, toastErro]
+    [workId, toastErro]
   );
 
   useEffect(() => {
     void carregarReleases(0, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workId]);
+  }, [carregarReleases]);
 
   const carregarMais = useCallback((): void => {
     if (!temMais || atualizando || carregando) return;
@@ -154,7 +148,7 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
       <View style={styles.headerTextos}>
         <Text style={[styles.headerTitulo, { color: colors.text }]}>Obra completa</Text>
         <Text style={[styles.headerSubtitulo, { color: colors.textSecondary }]} numberOfLines={1}>
-          {workInfo?.title ?? 'Carregando...'}
+          {workInfo ? workInfo.artist.name : 'Carregando...'}
         </Text>
       </View>
 
@@ -246,6 +240,41 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
                 {workInfo?.title || 'Obra'}
               </Text>
               <View style={styles.obraRodape}>
+                {workInfo && (
+                  <TouchableOpacity
+                    style={[
+                      styles.chip,
+                      { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                    ]}
+                    onPress={() =>
+                      navigation.navigate('DetalheArtista', { artistaId: workInfo.artist.id })
+                    }
+                    activeOpacity={0.75}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Ver o artista ${workInfo.artist.name}`}
+                  >
+                    <Icone nome="artista" tamanho={12} cor={colors.primary} />
+                    <Text style={[styles.chipTexto, { color: colors.text }]}>
+                      {workInfo.artist.name}
+                    </Text>
+                    <Icone nome="seta" tamanho={11} cor={colors.textSecondary} />
+                  </TouchableOpacity>
+                )}
+
+                {(workInfo?.effective_year ?? workInfo?.original_release_year) && (
+                  <View
+                    style={[
+                      styles.chip,
+                      { backgroundColor: colors.glassCard, borderColor: colors.glassBorder },
+                    ]}
+                  >
+                    <Icone nome="calendario" tamanho={12} cor={colors.textSecondary} />
+                    <Text style={[styles.chipTexto, { color: colors.textSecondary }]}>
+                      {workInfo?.effective_year ?? workInfo?.original_release_year}
+                    </Text>
+                  </View>
+                )}
+
                 <View
                   style={[
                     styles.chip,
@@ -258,7 +287,7 @@ export default function DetalheWorkScreen({ route, navigation }: Props): React.J
                   </Text>
                 </View>
                 <Text style={[styles.obraDica, { color: colors.textSecondary }]}>
-                  Todas as versões com áudio disponível
+                  Todas as versões com áudio disponíveis
                 </Text>
               </View>
             </GlassCard>
