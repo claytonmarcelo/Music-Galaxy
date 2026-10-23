@@ -72,7 +72,11 @@ export default function FundoAtmosfera({
 
   return (
     <View style={[styles.base, { backgroundColor: colors.gradienteBase }, style]}>
-      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      {/* A camada dos brilhos é recortada pela própria tela: sem isso, os
+          halos absolutos (700 px, deslocados para fora) enlarguecem a área
+          rolável do aplicativo e o navegador desloca a tela inteira quando
+          um botão recebe o foco. */}
+      <View pointerEvents="none" style={styles.camadaFundo}>
         {/* Degradê vertical principal */}
         <View style={styles.degrade}>
           {faixas.map((cor, indice) => (
@@ -129,6 +133,14 @@ export default function FundoAtmosfera({
 const styles = StyleSheet.create({
   base: {
     flex: 1,
+    overflow: 'hidden',
+  },
+  camadaFundo: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     overflow: 'hidden',
   },
   degrade: {
