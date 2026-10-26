@@ -123,23 +123,144 @@ async function processarFilaResolucao(): Promise<void> {
   }
 }
 
-// Monta cláusula WHERE dinâmica por palavras do termo de busca.
-// Cada palavra vira um LIKE independente, combinados com AND para
-// garantir que todos os termos estejam presentes em algum campo do registro.
-function montarWhereBusca(palavras: string[]): { clausula: string; params: string[] } {
-  const blocos: string[] = [];
-  const params: string[] = [];
+// Divide o termo em palavras pesquisáveis (mínimo 2 caracteres cada).
+function separarPalavras(termo: string): string[] {
+  return termo.trim().replace(/\s+/g, ' ').split(' ').filter((p) => p.length >= 2);
+}
 
+export interface CriterioBusca {
+  // Filtro: recalled largo — toda versão que menciona as palavras do termo.
+  clausula: string;
+  paramsClausula: string[];
+  // Relevância: expressão numérica (mais alto = mais perto do que foi pedido).
+  relevancia: string;
+  paramsRelevancia: string[];
+}
+
+// Letras que se escrevem com acento em português e espanhol. O REGEXP do MariaDB
+// compara caixa sem se importar, mas não dobra acento: "legiao" não casaria
+// "Legião" sem esta classe. Verificado em 26/10/2026 contra o banco real.
+const LETRAS_COM_VARIANTES: Record<string, string> = {
+  a: 'aàáâãäå',
+  c: 'cç',
+  e: 'eèéêë',
+  i: 'iìíîï',
+  n: 'nñ',
+  o: 'oòóôõö',
+  u: 'uùúûü',
+  y: 'yÿ',
+};
+
+// Texto sem acentos, em minúsculas, para comparação e para montar padrões.
+function semAcentos(texto: string): string {
+  return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+// Texto digitado pelo usuário transformado em padrão de expressão regular que
+// aceita a mesma palavra escrita com ou sem acento.
+function padraoSemAcento(texto: string): string {
+  return semAcentos(texto)
+    .split('')
+    .map((caractere) => {
+      const variantes = LETRAS_COM_VARIANTES[caractere];
+      if (variantes) return `[${variantes}]`;
+      // Qualquer coisa que a regex entenda como operador deixa de ser operador.
+      return /[.*+?^${}()|[\]\\]/.test(caractere) ? `\\${caractere}` : caractere;
+    })
+    .join('');
+}
+
+// A palavra inteira, e não um pedaço dela: `[[:<:]]one[[:>:]]` casa "One More
+// Time" e não casa "Someone" nem "Alcione".
+function palavraInteira(palavra: string): string {
+  return `[[:<:]]${padraoSemAcento(palavra)}[[:>:]]`;
+}
+
+// As palavras do termo na ordem em que foram digitadas, coladas pelo que houver
+// entre elas no título (espaço, hífen, apóstrofo). "Baader-Meinhof" é uma frase só.
+function padraoFrase(palavras: string[]): string {
+  return `[[:<:]]${palavras.map(padraoSemAcento).join('[^[:alnum:]]+')}` + '[[:>:]]';
+}
+
+// Monta o critério da busca: o filtro continua sendo o AND de LIKE por palavra
+// (para não esconder nenhuma versão disponível — Regra 2) e a relevância passa a
+// decidir a ordem.
+//
+// Por que a ordem importa: com ORDER BY alfabético, a busca por "queen" abria com
+// "Hairspray Queen" do Nirvana e a busca por "one" abria com "Someone Like You",
+// porque o LIKE `%one%` também casa um pedaço de palavra. Medido em 26/10/2026:
+// 260 obras contêm "one" como pedaço contra 181 que dizem a palavra.
+//
+// Escala (o casamento exato sempre vale mais que o parcial):
+//   100 — o termo é exatamente o nome do artista/banda
+//    90 — o termo é exatamente o título da obra ou da versão
+//    20 — as palavras do termo, juntas e inteiras, aparecem no título
+//    15 — as palavras do termo, juntas e inteiras, aparecem no nome do artista
+//     6 — por palavra inteira encontrada no título
+//     3 — por palavra inteira encontrada no nome do artista
+// Abaixo disso o resto fica em zero e desce para o fim da lista: a versão continua
+// na resposta (Regra 2), só não passa na frente do que foi realmente pedido.
+//
+// A igualdade usa a colação do banco (utf8mb4_unicode_ci): caixa e acento não
+// precisam ser digitados como a fonte oficial publicou. O REGEXP dobra caixa mas
+// NÃO dobra acento, então cada letra acentuável vira classe de caracteres.
+export function montarCriterioBusca(termo: string): CriterioBusca | null {
+  const palavras = separarPalavras(termo);
+  if (palavras.length === 0) return null;
+
+  const termoCompleto = palavras.join(' ');
+
+  const blocos: string[] = [];
+  const paramsClausula: string[] = [];
   for (const palavra of palavras) {
     const p = `%${palavra}%`;
     // Cada palavra deve aparecer em pelo menos um dos campos pesquisáveis
     blocos.push(`(w.title LIKE ? OR a.name LIKE ? OR r.version_name LIKE ? OR r.album_name LIKE ?)`);
-    params.push(p, p, p, p);
+    paramsClausula.push(p, p, p, p);
   }
 
+  // Só entram na pontuação as palavras que têm letra ou número: um termo feito
+  // de pontuação solta não gera padrão de expressão regular utilizável.
+  const palavrasEscoraveis = palavras.filter((p) => /[a-z0-9]/.test(semAcentos(p)));
+  const porPalavra = palavrasEscoraveis.map(palavraInteira);
+  const frase = porPalavra.length > 0 ? padraoFrase(palavrasEscoraveis) : '';
+
+  // Soma de palavras inteiras presentes em cada lado. O parêntese é obrigatório:
+  // a aritmética vem depois da soma dos booleanos.
+  const palavrasNoTitulo = palavrasEscoraveis
+    .map(() => '(w.title REGEXP ? OR r.version_name REGEXP ?)')
+    .join(' + ');
+  const palavrasNoArtista = palavrasEscoraveis.map(() => 'a.name REGEXP ?').join(' + ');
+
+  const relevancia =
+    `CASE WHEN a.name = ? THEN 100 ` +
+    `     WHEN w.title = ? OR r.version_name = ? THEN 90 ` +
+    (porPalavra.length === 0
+      ? `     ELSE 0 `
+      : `     ELSE (w.title REGEXP ? OR r.version_name REGEXP ?) * 20 ` +
+        `        + (a.name REGEXP ?) * 15 ` +
+        `        + (${palavrasNoTitulo}) * 6 ` +
+        `        + (${palavrasNoArtista}) * 3 `) +
+    `END`;
+
   return {
-    clausula: blocos.length > 0 ? blocos.join(' AND ') : '1=1',
-    params,
+    clausula: blocos.join(' AND '),
+    paramsClausula,
+    relevancia,
+    // os ? abaixo seguem exatamente a ordem em que aparecem na expressão acima
+    paramsRelevancia: [
+      termoCompleto,                        // a.name =
+      termoCompleto,                        // w.title =
+      termoCompleto,                        // r.version_name =
+      ...(porPalavra.length === 0
+        ? []
+        : [
+            frase, frase,                   // frase inteira no título
+            frase,                          // frase inteira no artista
+            ...porPalavra.flatMap((p) => [p, p]), // palavras inteiras no título
+            ...porPalavra,                  // palavras inteiras no artista
+          ]),
+    ],
   };
 }
 
@@ -154,12 +275,11 @@ async function buscarReleasesLocal(
   baseUrl: string = 'http://localhost:3001',
   somenteComAudio: boolean = false
 ): Promise<{ releases: ReleaseCompleto[]; total: number }> {
-  // Divide o termo em palavras individuais (mínimo 2 caracteres cada)
-  // para suportar buscas como "Daft Punk One More Time"
-  const palavras = termo.trim().split(/\s+/).filter(p => p.length >= 2);
-  if (palavras.length === 0) return { releases: [], total: 0 };
+  // O termo vira filtro (recall largo) + relevância (ordem do que foi pedido)
+  const criterio = montarCriterioBusca(termo);
+  if (!criterio) return { releases: [], total: 0 };
 
-  const { clausula, params } = montarWhereBusca(palavras);
+  const { clausula, paramsClausula, relevancia, paramsRelevancia } = criterio;
   const filtroAudio = somenteComAudio ? ' AND r.audio_source_url IS NOT NULL' : '';
 
   // Consulta principal — JOIN entre todas as tabelas relacionadas
@@ -193,9 +313,9 @@ async function buscarReleasesLocal(
      JOIN release_types  rt ON r.release_type_id   = rt.id
      JOIN metadata_sources ms ON r.metadata_source_id = ms.id
      WHERE ${clausula}${filtroAudio}
-     ORDER BY a.name ASC, w.title ASC, r.release_year ASC
+     ORDER BY (${relevancia}) DESC, a.name ASC, w.title ASC, r.release_year ASC, r.id ASC
      LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
+    [...paramsClausula, ...paramsRelevancia, limit, offset]
   );
 
   // Contagem total para paginação — mesma condição da consulta principal
@@ -205,7 +325,7 @@ async function buscarReleasesLocal(
      JOIN works          w  ON r.work_id        = w.id
      JOIN artists        a  ON w.artist_id       = a.id
      WHERE ${clausula}${filtroAudio}`,
-    params
+    paramsClausula
   );
 
   const total = (countRows[0]?.['total'] as number) ?? 0;
@@ -254,10 +374,10 @@ async function buscarPendentesAudio(
   termo: string,
   limiteFila: number
 ): Promise<{ total: number; itens: ItemFilaResolucao[] }> {
-  const palavras = termo.trim().split(/\s+/).filter(p => p.length >= 2);
-  if (palavras.length === 0) return { total: 0, itens: [] };
+  const criterio = montarCriterioBusca(termo);
+  if (!criterio) return { total: 0, itens: [] };
 
-  const { clausula, params } = montarWhereBusca(palavras);
+  const { clausula, paramsClausula, relevancia, paramsRelevancia } = criterio;
 
   const [countRows] = await pool.execute<RowDataPacket[]>(
     `SELECT COUNT(*) AS total
@@ -265,21 +385,23 @@ async function buscarPendentesAudio(
      JOIN works   w ON r.work_id  = w.id
      JOIN artists a ON w.artist_id = a.id
      WHERE ${clausula} AND r.audio_source_url IS NULL`,
-    params
+    paramsClausula
   );
   const total = (countRows[0]?.['total'] as number) ?? 0;
 
   if (total === 0) return { total: 0, itens: [] };
 
+  // A amostra que vai para a fila sai pela relevância, não pelo alfabeto: o que
+  // o usuário acabou de pedir é o primeiro a ganhar áudio descoberto.
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT r.id, r.version_name, w.title AS work_title, a.name AS artist_name
      FROM releases r
      JOIN works   w ON r.work_id  = w.id
      JOIN artists a ON w.artist_id = a.id
      WHERE ${clausula} AND r.audio_source_url IS NULL
-     ORDER BY a.name ASC, w.title ASC, r.release_year ASC
+     ORDER BY (${relevancia}) DESC, a.name ASC, w.title ASC, r.release_year ASC, r.id ASC
      LIMIT ?`,
-    [...params, limiteFila]
+    [...paramsClausula, ...paramsRelevancia, limiteFila]
   );
 
   const itens: ItemFilaResolucao[] = rows.map(row => ({

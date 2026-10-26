@@ -30,8 +30,13 @@ const LIMITE_RECORDINGS = 25;
 // montado pelas FAIXAS dos discos dele. Antes, "the beatles" caía na busca de
 // recordings e o MusicBrainz devolvia documentários, entrevistas e discos de
 // natal — nada que tivesse áudio disponível em site aberto.
-const LIMITE_RELEASES_ARTISTA = 50;      // prensagens consultadas de uma vez
-const MAX_DISCOS_ARTISTA = 10;           // discos distintos (release-group) por busca
+//
+// Prensagens aceitas pelo MusicBrainz numa chamada (o teto da API é 100).
+const PAGINA_RELEASES_ARTISTA = 100;
+// Tetos da varredura por disco: 6 páginas cobrem 600 prensagens e 30 discos
+// distintos bastam para o catálogo de um artista caber na tela do aplicativo.
+const MAX_PAGINAS_RELEASES_ARTISTA = 6;
+const MAX_DISCOS_ARTISTA = 30;           // discos distintos (release-group) por busca
 const MIN_RELEASES_CATALOGO = 20;        // catálogo menor indica título de música, não artista
 const TIPOS_DISCOS_ARTISTA = 'album|single|ep';
 
@@ -127,26 +132,62 @@ export class MusicBrainzAdapter implements AdapterFonteExterna {
     const artista = this.escolherArtistaExato(termo, artistas);
     if (!artista) return [];
 
-    // 2. Discos do artista (álbuns, singles e EPs), com as faixas.
-    await agendarChamada(this.nomeFonte);
-    const urlReleases =
-      `${BASE_URL}/release?artist=${encodeURIComponent(artista.id)}` +
-      '&inc=recordings+artist-credits+labels+release-groups' +
-      `&limit=${LIMITE_RELEASES_ARTISTA}` +
-      `&type=${encodeURIComponent(TIPOS_DISCOS_ARTISTA)}` +
-      '&fmt=json';
-    const dados = JSON.parse(await this.requisitar(urlReleases)) as MusicBrainzRespostaReleases;
-
     // Nome de artista pode coincidir com título de música ("One More Time").
     // Catálogo pequeno demais é sinal de que a intenção era buscar a música.
-    if ((dados['release-count'] ?? 0) < MIN_RELEASES_CATALOGO) return [];
+    await agendarChamada(this.nomeFonte);
+    const contagem = (JSON.parse(
+      await this.requisitar(`${BASE_URL}/release?artist=${encodeURIComponent(artista.id)}&limit=1&fmt=json`)
+    ) as MusicBrainzRespostaReleases)['release-count'] ?? 0;
+    if (contagem < MIN_RELEASES_CATALOGO) return [];
 
-    const discos = this.selecionarDiscos(dados.releases ?? []);
+    // 2. Discos do artista (álbuns, singles e EPs), com as faixas, percorridos
+    //    em páginas de 100 até juntar os discos suficientes. Uma chamada única
+    //    devolvia 50 prensagens — para Queen, que tem centenas, isso cobria
+    //    pouco e as faixas dos discos seguintes nunca entravam no catálogo.
+    const discos = await this.percorrerDiscos(artista.id);
+
     const faixas: DadosReleaseExterno[] = [];
     for (const disco of discos) {
       faixas.push(...this.extrairFaixasDoDisco(disco, artista));
     }
     return faixas;
+  }
+
+  // percorre as prensagens do artista em páginas e fica com os discos distintos
+  private async percorrerDiscos(artistaId: string): Promise<MusicBrainzRelease[]> {
+    const grupos = new Map<string, MusicBrainzRelease>();
+
+    for (let pagina = 0; pagina < MAX_PAGINAS_RELEASES_ARTISTA; pagina++) {
+      const offset = pagina * PAGINA_RELEASES_ARTISTA;
+      const url =
+        `${BASE_URL}/release?artist=${encodeURIComponent(artistaId)}` +
+        '&inc=recordings+artist-credits+labels+release-groups' +
+        `&limit=${PAGINA_RELEASES_ARTISTA}` +
+        `&offset=${offset}` +
+        `&type=${encodeURIComponent(TIPOS_DISCOS_ARTISTA)}` +
+        '&fmt=json';
+
+      await agendarChamada(this.nomeFonte);
+      const dados = JSON.parse(await this.requisitar(url)) as MusicBrainzRespostaReleases;
+      const prensagens = dados.releases ?? [];
+
+      for (const prensagem of prensagens) {
+        const chave = prensagem['release-group']?.id ?? prensagem.id;
+        const atual = grupos.get(chave);
+        // Um disco por release-group: CD, vinil e remaster contam uma vez e
+        // fica a prensagem com a data mais antiga.
+        if (!atual || this.dataMaisAntiga(prensagem, atual)) grupos.set(chave, prensagem);
+      }
+
+      // Para quando já juntou discos suficientes ou quando não há mais página.
+      if (grupos.size >= MAX_DISCOS_ARTISTA) break;
+      if (prensagens.length < PAGINA_RELEASES_ARTISTA) break;
+      if (offset + PAGINA_RELEASES_ARTISTA >= (dados['release-count'] ?? 0)) break;
+    }
+
+    return [...grupos.values()]
+      .sort((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999'))
+      .slice(0, MAX_DISCOS_ARTISTA);
   }
 
   // Compara o termo com os artistas devolvidos pela busca, sem acentos e
@@ -173,27 +214,10 @@ export class MusicBrainzAdapter implements AdapterFonteExterna {
       .trim();
   }
 
-  // Um disco por release-group: prensagens e reedições do mesmo álbum contam
-  // uma vez só. Fica com a edição mais antiga e mantém a ordem cronológica.
-  private selecionarDiscos(releases: MusicBrainzRelease[]): MusicBrainzRelease[] {
-    const porGrupo = new Map<string, MusicBrainzRelease>();
-
-    for (const release of releases) {
-      const chave = release['release-group']?.id ?? release.id;
-      const atual = porGrupo.get(chave);
-      if (!atual) {
-        porGrupo.set(chave, release);
-        continue;
-      }
-      // Data ausente vai para o fim da comparação, nunca "ganha" da com data.
-      const dataAtual = atual.date ?? '9999';
-      const dataNova = release.date ?? '9999';
-      if (dataNova < dataAtual) porGrupo.set(chave, release);
-    }
-
-    return [...porGrupo.values()]
-      .sort((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999'))
-      .slice(0, MAX_DISCOS_ARTISTA);
+  // Duas prensagens do mesmo disco: fica a que tem a data mais antiga. Data
+  // ausente vai para o fim da comparação e nunca "ganha" da que tem data.
+  private dataMaisAntiga(nova: MusicBrainzRelease, atual: MusicBrainzRelease): boolean {
+    return (nova.date ?? '9999') < (atual.date ?? '9999');
   }
 
   // Converte cada faixa de um disco em um release do Music Galaxy.
