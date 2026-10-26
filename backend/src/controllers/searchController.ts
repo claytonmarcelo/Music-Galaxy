@@ -7,7 +7,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/database';
-import { ingerirPorTermo } from '../services/ingestion/searchOrchestrator';
+import { haIngestaoEmCurso, ingerirPorTermo } from '../services/ingestion/searchOrchestrator';
 import { resolverFonte, DadosReleaseParaAudio } from './audioController';
 import { RespostaPaginada, ReleaseCompleto } from '../types';
 import { ErroAplicacao } from '../middleware/errorHandler';
@@ -292,6 +292,17 @@ async function buscarPendentesAudio(
   return { total, itens };
 }
 
+// Quanto tempo a primeira resposta da busca espera a ingestão de um termo novo.
+// O aplicativo aborta a requisição em 45 s (TIMEOUT_MS de mobile/src/services/api.ts);
+// este teto fica bem abaixo disso para que a resposta chegue antes de o cliente
+// desistir. A ingestão não é cancelada: ela continua em segundo plano e a tela
+// se preenche sozinha pelas reconsultas leve=1.
+const AGUARDA_INGESTAO_MS = 15000;
+
+function esperar(ms: number): Promise<void> {
+  return new Promise((resolver) => setTimeout(resolver, ms));
+}
+
 // Handler do GET /api/search?q={termo}
 export async function buscarMusicas(
   req: Request,
@@ -334,6 +345,11 @@ export async function buscarMusicas(
           per_page:        limit,
           fromCache:       true,
           pendentes_audio: pendentesLocal.total,
+          // A atualização leve também informa se ainda há ingestão do termo em
+          // curso: é ela que segura a tela atualizando enquanto o backend monta
+          // o catálogo, mesmo quando ainda não há nenhuma versão pendente no
+          // banco para contar.
+          ingestao_em_curso: haIngestaoEmCurso(termo),
         },
       };
       res.json(respostaLeve);
@@ -372,24 +388,33 @@ export async function buscarMusicas(
           per_page:        limit,
           fromCache:       true,
           pendentes_audio: pendentesLocal.total,
+          // Acabamos de disparar a ingestão deste termo em segundo plano.
+          ingestao_em_curso: haIngestaoEmCurso(termo),
         },
       };
       res.json(resposta);
       return;
     }
 
-    // Sem dados locais — dispara ingestão das fontes externas.
-    // Falha de fonte externa não derruba a busca: respondemos com o que existe.
-    try {
-      await ingerirPorTermo(termo);
-    } catch (erro) {
+    // Sem dados locais — a ingestão consulta MusicBrainz e Discogs e, para um
+    // artista com discografia, passa de um minuto. Esperar até o fim derrubava a
+    // primeira busca de um termo novo: o aplicativo desistia em 45 s e a tela
+    // ficava sem nada no meio de um trabalho que ainda estava rodando aqui.
+    //
+    // A espera é limitada. O que já está no banco responde na hora, a ingestão
+    // segue em segundo plano e o aplicativo reconsulta (leve=1) enquanto
+    // ingestao_em_curso for true — é assim que a lista aparece sozinha, sem
+    // consulta repetida às fontes externas e sem inventar resultado.
+    const ingestao = ingerirPorTermo(termo).catch((erro) => {
       console.error(
         '[SEARCH] Ingestão falhou, respondendo só com dados locais:',
         erro instanceof Error ? erro.message : erro
       );
-    }
+    });
+    await Promise.race([ingestao, esperar(AGUARDA_INGESTAO_MS)]);
 
-    // Após a ingestão, consulta o banco novamente (com o mesmo filtro da Regra 7)
+    // Consulta o banco com o mesmo filtro da Regra 7 — com o que a ingestão já
+    // conseguiu gravar até aqui.
     const posIngestion = await buscarReleasesLocal(termo, limit, offset, baseUrl, true);
 
     // Mesma regra: sem áudio, sem exibição. E o que sobrou entra na fila.
@@ -405,6 +430,9 @@ export async function buscarMusicas(
         per_page:        limit,
         fromCache:       false,
         pendentes_audio: pendentesPos.total,
+        // Se a ingestão ultrapassou o teto de espera acima ela continua aqui:
+        // o sinal diz ao aplicativo para continuar reconsultando o banco leve.
+        ingestao_em_curso: haIngestaoEmCurso(termo),
       },
     };
     res.json(resposta);

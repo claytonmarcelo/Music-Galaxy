@@ -92,6 +92,17 @@ export function ingerirPorTermo(termo: string): Promise<ResultadoIngestion> {
   return execucao;
 }
 
+// Existe uma ingestão deste termo acontecendo agora?
+//
+// A tela de busca precisa desse sinal: numa busca nova, as primeiras respostas
+// costumam vir sem nenhuma versão com áudio porque o trabalho ainda está em
+// curso — consultar MusicBrainz e Discogs, gravar as obras e descobrir o áudio
+// em sites abertos. Sem isto, o aplicativo mostra "Nenhuma versão encontrada"
+// para algo que ainda está sendo feito.
+export function haIngestaoEmCurso(termo: string): boolean {
+  return ingestacoesEmCurso.has(termo.toLowerCase().trim());
+}
+
 async function executarIngestao(termo: string): Promise<ResultadoIngestion> {
   const chaveCache    = `search:${termo.toLowerCase().trim()}`;
   const fontesChamadas: string[] = [];

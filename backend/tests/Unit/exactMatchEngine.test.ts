@@ -141,3 +141,86 @@ test('filtra apenas EXACT_MATCH da lista de pontuações', () => {
   assert.equal(exatos.length, 1);
   assert.equal(exatos[0]?.candidate.title, 'One More Time');
 });
+
+// --- Crédito compartilhado (colaboração) ----------------------------------
+// O catálogo guarda o artista principal da ficha oficial (Regra 8), mas o
+// arquivo encontrado na web costuma trazer o crédito completo da colaboração.
+// Medido em 23/10/2026: 154 versões de "Lean On" (Major Lazer) presas em
+// PROBABLE_MATCH 84,3 porque o MP3 se chama "Major Lazer & DJ Snake - Lean On".
+
+test('aceita o candidato que traz o crédito completo da colaboração', () => {
+  const identidade: AudioIdentity = { artist: 'Major Lazer', title: 'Lean On' };
+
+  const resultado = motor.scoreCandidate(
+    identidade,
+    candidato({ artist: 'Major Lazer & DJ Snake', title: 'Lean On' })
+  );
+
+  assert.equal(resultado.classification, MatchClassification.EXACT_MATCH);
+  assert.ok(resultado.score >= 90, `pontuação insuficiente: ${resultado.score}`);
+});
+
+test('aceita quando o artista pedido aparece depois do primeiro crédito', () => {
+  const identidade: AudioIdentity = { artist: 'DJ Snake', title: 'Lean On' };
+
+  const resultado = motor.scoreCandidate(
+    identidade,
+    candidato({ artist: 'Major Lazer & DJ Snake', title: 'Lean On' })
+  );
+
+  assert.equal(resultado.classification, MatchClassification.EXACT_MATCH);
+});
+
+test('mantém rejeitado o artista que não é nenhum dos créditos', () => {
+  const identidade: AudioIdentity = { artist: 'Skrillex', title: 'Lean On' };
+
+  const resultado = motor.scoreCandidate(
+    identidade,
+    candidato({ artist: 'Major Lazer & DJ Snake', title: 'Lean On' })
+  );
+
+  assert.equal(resultado.classification, MatchClassification.REJECTED);
+});
+
+test('não quebra uma música que realmente se chama Intro', () => {
+  const identidade: AudioIdentity = { artist: 'Daft Punk', title: 'Intro' };
+
+  const resultado = motor.scoreCandidate(identidade, candidato({ artist: 'Daft Punk', title: 'Intro' }));
+
+  assert.equal(resultado.classification, MatchClassification.EXACT_MATCH);
+});
+
+// --- Nome de arquivo truncado ---------------------------------------------
+// Uploads do Internet Archive chegam cortados no meio do parêntese
+// ("03 Smells Like Teen Spirit (Intro Te"). O fragmento solto diz que ali não
+// está a música inteira, então não pode vencer o arquivo completo na ranking.
+
+test('rejeita a variante marcada por um parêntese truncado', () => {
+  const identidade: AudioIdentity = { artist: 'Nirvana', title: 'Smells Like Teen Spirit' };
+
+  const resultado = motor.scoreCandidate(
+    identidade,
+    candidato({ artist: 'Nirvana', title: 'Smells Like Teen Spirit', version: 'Intro Te' })
+  );
+
+  assert.equal(resultado.classification, MatchClassification.REJECTED);
+  assert.match(resultado.reasons.join(' '), /intro/i);
+});
+
+// --- Crédito em lista (Internet Archive) ----------------------------------
+// O archive.org grava o campo creator como lista e a uni com ponto-e-vírgula.
+// Medido em 26/10/2026: o MP3 de "Saideira" chega como "Skank;Skank" e, sem
+// esse separador, a similaridade de artista era 50% — a faixa morria em
+// PROBABLE_MATCH 82,5 depois de o catálogo já ter encontrado o arquivo.
+
+test('aceita o crédito repetido que o Archive junta com ponto-e-vírgula', () => {
+  const identidade: AudioIdentity = { artist: 'Skank', title: 'Saideira' };
+
+  const resultado = motor.scoreCandidate(
+    identidade,
+    candidato({ artist: 'Skank;Skank', title: 'Saideira' })
+  );
+
+  assert.equal(resultado.classification, MatchClassification.EXACT_MATCH);
+  assert.ok(resultado.score >= 90, `pontuação insuficiente: ${resultado.score}`);
+});

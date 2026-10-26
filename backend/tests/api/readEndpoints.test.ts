@@ -442,3 +442,34 @@ test('POST /audio-source rejeita IP privado e plataforma proibida sem alterar o 
   );
   assert.equal(depois[0]?.['audio_source_url'], fonteOriginal);
 });
+
+// ============================================================
+// Contratos da tela de busca
+// ============================================================
+
+// A atualização automática da tela depende de dois campos: `pendentes_audio`
+// conta quantas versões aguardam fonte de áudio e `ingestao_em_curso` diz se o
+// servidor ainda está montando o catálogo do termo. Sem eles, uma lista vazia
+// durante um trabalho em curso é exibida como "Nenhuma versão encontrada".
+test('GET /api/search?leve=1 devolve os campos que a tela usa para esperar', async () => {
+  const { status, corpo } = await obterJson<{
+    success: boolean;
+    data: {
+      results: unknown[];
+      total: number;
+      fromCache?: boolean;
+      pendentes_audio?: number;
+      ingestao_em_curso?: boolean;
+    };
+  }>('/api/search?q=zz-musicgalaxy-teste-inexistente&leve=1');
+
+  assert.equal(status, 200);
+  assert.equal(corpo.success, true);
+
+  // leve=1 não consulta MusicBrainz nem Discogs: a resposta vem só do banco,
+  // sem ingestão deste termo em curso.
+  assert.equal(corpo.data.fromCache, true);
+  assert.equal(typeof corpo.data.pendentes_audio, 'number');
+  assert.equal(typeof corpo.data.ingestao_em_curso, 'boolean');
+  assert.equal(corpo.data.ingestao_em_curso, false);
+});

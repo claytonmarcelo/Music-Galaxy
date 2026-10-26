@@ -54,6 +54,9 @@ export interface RespostaBusca {
     // Versões do termo que ainda não têm fonte de áudio: ficam fora de
     // `results` enquanto a resolução em segundo plano procura a fonte
     pendentes_audio?: number;
+    // O servidor ainda está montando o catálogo deste termo (ingestão em
+    // curso)? Enquanto for true, uma lista vazia é espera — não "não existe".
+    ingestao_em_curso?: boolean;
   };
 }
 

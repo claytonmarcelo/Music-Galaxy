@@ -178,7 +178,10 @@ export class SourceOrchestrator {
     const cachedResult = await this.checkCache(cacheKey);
     
     if (cachedResult) {
-      console.log(`[SourceOrchestrator] Cache HIT: requestId=${requestId}`);
+      console.log(
+      `[SourceOrchestrator] Cache HIT (${cachedResult.bestCandidate ? 'positivo' : 'negativo'}): ` +
+      `requestId=${requestId}`
+    );
       return {
         requestId,
         identity,
@@ -286,10 +289,13 @@ export class SourceOrchestrator {
       fromCache: false,
     };
 
-    // Salvar no cache
-    if (bestCandidate) {
-      await this.saveCache(cacheKey, result);
-    }
+    // Salvar no cache — também quando não apareceu nenhum candidato. O resultado
+    // negativo vive pouco (TTL abaixo), mas é ele que impede a fila de resoluções
+    // de refazer a descoberta inteira — três consultas ao motor de busca e
+    // várias requisições de metadados — toda vez que a mesma faixa sem fonte
+    // volta à frente da fila numa busca nova. Sem isso, o IP do servidor bate no
+    // ritmo que faz o Brave devolver captcha.
+    await this.saveCache(cacheKey, result);
 
     return result;
   }
@@ -314,8 +320,14 @@ export class SourceOrchestrator {
   // Cache de memória com TTL — evita re-crawlear a web a cada requisição.
   // (A persistência principal continua sendo releases.audio_source_url.)
   private readonly cacheDescoberta = new Map<string, { resultado: DiscoveryResult; expiraEm: number }>();
-  private readonly TTL_CACHE_MS = 60 * 60 * 1000; // 1 hora
-  private readonly TAMANHO_MAX_CACHE = 500;
+  private readonly TTL_CACHE_MS = 60 * 60 * 1000; // fonte encontrada: 1 hora
+  // Faixa sem candidato: 30 minutos. Suficiente para a fila não repetir a
+  // descoberta da mesma faixa várias vezes seguidas e curto o bastante para uma
+  // fonte que aparecer na web depois de meia hora ser encontrada na próxima.
+  private readonly TTL_NEGATIVO_MS = 30 * 60 * 1000;
+  // As entradas negativas são baratas (lista de candidatos vazia) e a fila tem
+  // centenas de faixas, então o teto precisa cobrir o catálogo em curso.
+  private readonly TAMANHO_MAX_CACHE = 2000;
 
   private async checkCache(key: string): Promise<DiscoveryResult | null> {
     const entrada = this.cacheDescoberta.get(key);
@@ -325,9 +337,6 @@ export class SourceOrchestrator {
       this.cacheDescoberta.delete(key);
       return null;
     }
-
-    // Resultado negativo não é reusado — permite tentar a descoberta de novo
-    if (!entrada.resultado.bestCandidate) return null;
 
     return entrada.resultado;
   }
@@ -346,8 +355,12 @@ export class SourceOrchestrator {
       }
     }
 
-    this.cacheDescoberta.set(key, { resultado: result, expiraEm: Date.now() + this.TTL_CACHE_MS });
-    console.log(`[SourceOrchestrator] Cache salvo: key=${key}`);
+    const ttl = result.bestCandidate ? this.TTL_CACHE_MS : this.TTL_NEGATIVO_MS;
+    this.cacheDescoberta.set(key, { resultado: result, expiraEm: Date.now() + ttl });
+    console.log(
+      `[SourceOrchestrator] Cache salvo: key=${key} ` +
+      `(${result.bestCandidate ? 'positivo' : 'negativo'}, ${Math.round(ttl / 60000)} min)`
+    );
   }
 
   // Limpar cache

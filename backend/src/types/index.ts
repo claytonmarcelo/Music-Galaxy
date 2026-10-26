@@ -112,6 +112,9 @@ export interface RespostaPaginada<T> {
     // resolvida. Elas ficam fora de `results` (regra do usuário) enquanto a
     // resolução em segundo plano procura a fonte em sites abertos.
     pendentes_audio?: number;
+    // Há ingestão deste termo acontecendo no servidor neste momento? Serve
+    // para a tela de busca esperar em vez de afirmar que não existe nada.
+    ingestao_em_curso?: boolean;
   };
 }
 

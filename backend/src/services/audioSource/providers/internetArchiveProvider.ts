@@ -87,6 +87,9 @@ interface DocumentoBusca {
   creator?: string | string[];
 }
 
+// Exportado para o teste unitário do ranqueamento (tests/Unit).
+export type { DocumentoBusca };
+
 interface ArquivoItem {
   name?: string;
   format?: string;
@@ -169,6 +172,14 @@ function similaridade(a: string, b: string): number {
   return (maior.length - distancia) / maior.length;
 }
 
+// A palavra aparece sozinha no texto, e não como parte de outro nome?
+// "Skank" aparece isolado em "Mournful Skank - The Realm", mas aquele artista
+// não é o Skank — ver o uso desta função em `pontuarDocumento`.
+function contemPalavra(texto: string, palavra: string): boolean {
+  if (!texto || !palavra) return false;
+  return new RegExp(`(?:^|[^a-z0-9])${escaparRegex(palavra)}(?:$|[^a-z0-9])`).test(texto);
+}
+
 // O campo creator/title da API pode vir como string ou lista.
 function textoUnico(valor?: string | string[]): string {
   if (!valor) return '';
@@ -185,6 +196,80 @@ function decodificar(texto: string): string {
 
 function escaparRegex(texto: string): string {
   return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Compara textos ignorando os espaços entre as palavras.
+function semEspacos(texto: string): string {
+  return texto.replace(/\s+/g, '');
+}
+
+// Pontua um documento da lista de busca pela afinidade com o que foi pedido.
+// A API devolve os itens pela relevância dela, e essa ordem é dominada por
+// ruído: medido em 26/10/2026, a consulta por "Skank" traz 20 itens e quase
+// todos são de outros artistas ("Mournful Skank", "Zarbsong", "JL Sanders"),
+// enquanto os discos do Skank — "Skank - O Samba Poconé (CD)" e
+// "Skank - Calango (1994)" — caem nas posições 15 e 16. O provedor abre só os
+// primeiros itens da lista, então o disco certo nunca era lido e a faixa
+// voltava como "sem fonte". Os campos título, criador e identificador já vêm
+// na resposta da busca, portanto escolher o que abrir custa zero requisições.
+export function pontuarDocumento(documento: DocumentoBusca, identity: AudioIdentity): number {
+  const artista = normalizar(identity.artist);
+  const titulo = normalizar(identity.title);
+
+  const creditos = Array.isArray(documento.creator)
+    ? documento.creator
+    : [documento.creator ?? ''];
+  const nomeDoItem = normalizar(textoUnico(documento.title));
+  // O identificador costuma ser o nome do arquivo do upload e traz a faixa
+  // dentro: "18-skank-obeijo-e-a-reza-demo" declara "O Beijo e a Reza".
+  const identificador = normalizar(
+    String(documento.identifier ?? '').replace(/[-_.]+/g, ' ')
+  );
+
+  let pontos = 0;
+
+  // Título começando pelo nome do artista: o upload se apresenta como dele.
+  if (artista && nomeDoItem.startsWith(`${artista} `)) pontos += 40;
+
+  // A faixa pedida citada no nome do item ou no identificador do upload.
+  // A comparação é sem espaços porque o upload costuma colar as palavras
+  // ("18-skank-obeijo-e-a-reza-demo" declara "O Beijo e a Reza").
+  if (titulo) {
+    const alvo = semEspacos(titulo);
+    if (
+      alvo &&
+      (semEspacos(nomeDoItem).includes(alvo) || semEspacos(identificador).includes(alvo))
+    ) {
+      pontos += 35;
+    }
+  }
+
+  // Crédito exato, quando o uploader preencheu o campo (muitos deixam vazio ou
+  // gravam "Album").
+  const creditoExato = creditos.some((credito) => {
+    const normalizado = normalizar(credito);
+    return !!normalizado && (normalizado === artista || similaridade(normalizado, artista) >= 0.9);
+  });
+  if (creditoExato) {
+    pontos += 25;
+  } else if (artista && (contemPalavra(nomeDoItem, artista) || contemPalavra(identificador, artista))) {
+    // Só a palavra do artista no meio do nome: pode ser homônimo.
+    pontos += 5;
+  }
+
+  return pontos;
+}
+
+// Coloca primeiro o item mais provável. O sorteio é estável: em empate continua
+// a ordem que a API do Archive respondeu.
+export function ordenarPorAfantidade(
+  documentos: DocumentoBusca[],
+  identity: AudioIdentity
+): DocumentoBusca[] {
+  return documentos
+    .map((documento, indice) => ({ documento, indice, pontos: pontuarDocumento(documento, identity) }))
+    .sort((a, b) => b.pontos - a.pontos || a.indice - b.indice)
+    .map((entrada) => entrada.documento);
 }
 
 // Remove prefixos de faixa ("01 - ", "CD1 - ") dos nomes de arquivo.
@@ -229,11 +314,22 @@ function extrairQualificador(texto: string): string | undefined {
 // versão "Bootleg Remake" (nunca um falso original).
 function interpretarFaixa(texto: string): NomeInterpretado {
   const base = semPrefixoDeFaixa(limparTextoDoArquivo(texto));
-  const versao = extrairQualificador(base);
 
-  let semVersao = base;
+  // Nome truncado por quem fez o upload: "03 Smells Like Teen Spirit (Intro Te".
+  // A abertura de parêntese sem fechamento esconde o qualificador de versão, e é
+  // ele que avisa que ali não está a música inteira. Medido em 23/10/2026 no item
+  // nirvana "06-smells-like-teen-spirit_202507": o arquivo truncado pontuava 100
+  // e deixava para trás o arquivo completo da faixa (96,5), e o player do
+  // aplicativo tocaria um introdução em lugar da música.
+  const truncado = base.match(/^(.*?)[[([]([^)\]]{2,60})\s*$/);
+  const textoInteiro = truncado ? (truncado[1] ?? '').trim() : base;
+  const fragmentoDeVersao = truncado ? (truncado[2] ?? '').trim() : undefined;
+
+  const versao = extrairQualificador(textoInteiro) ?? fragmentoDeVersao;
+
+  let semVersao = textoInteiro;
   if (versao) {
-    semVersao = base.replace(/[([]([^)\]]{1,80})[)\]]/g, (bloco) =>
+    semVersao = textoInteiro.replace(/[([]([^)\]]{1,80})[)\]]/g, (bloco) =>
       PADRAO_QUALIFICADOR.test(bloco.slice(1, -1)) ? ' ' : bloco
     );
   }
@@ -241,7 +337,7 @@ function interpretarFaixa(texto: string): NomeInterpretado {
   const interpretado = interpretarNomeDeArquivo(semVersao);
   return {
     artist: interpretado.artist,
-    title: interpretado.title ?? base,
+    title: interpretado.title ?? textoInteiro,
     version: versao ?? interpretado.version,
   };
 }
@@ -332,7 +428,7 @@ export class InternetArchiveProvider extends BaseAudioSourceProvider {
         try {
           documentos = await this.consultarItens(
             consultas[indice]!,
-            indice === 0 ? 30 : 20
+            indice === 0 ? 30 : indice === 2 ? 40 : 20
           );
         } catch (error: unknown) {
           console.warn(
@@ -340,6 +436,10 @@ export class InternetArchiveProvider extends BaseAudioSourceProvider {
           );
           continue;
         }
+
+        // Abre primeiro o item mais parecido com o pedido; a ordem da API é
+        // dominada por homônimos (ver `pontuarDocumento`).
+        documentos = ordenarPorAfantidade(documentos, identity);
 
         console.log(
           `[InternetArchiveProvider] Consulta ${indice + 1}: ${documentos.length} itens (candidatos até aqui: ${candidatos.length})`
@@ -419,7 +519,10 @@ export class InternetArchiveProvider extends BaseAudioSourceProvider {
   // Consultas em ordem de precisão decrescente:
   //   1. artista + título em qualquer campo (acha singles e álbuns);
   //   2. artista + título no criador (itens enviados pelo próprio artista);
-  //   3. somente artista (último recurso para álbuns cujo título não cita a faixa).
+  //   3. somente artista — e aqui o artista também pode estar só no título do
+  //      item, porque muitos uploads não preenchem o campo criador: medido em
+  //      26/10/2026, "Skank - Calango (1994)" tem creator "Album" e só aparece
+  //      quando o título entra na consulta.
   private montarConsultas(identity: AudioIdentity): string[] {
     const artista = this.escaparLucene(identity.artist);
     const titulo = this.escaparLucene(identity.title);
@@ -429,7 +532,7 @@ export class InternetArchiveProvider extends BaseAudioSourceProvider {
     return [
       `mediatype:audio AND (creator:("${artista}") OR title:("${artista}")) AND (title:("${titulo}") OR "${titulo}")`,
       `mediatype:audio AND creator:("${artista}") AND (title:("${titulo}") OR "${titulo}")`,
-      `mediatype:audio AND creator:("${artista}")`,
+      `mediatype:audio AND (creator:("${artista}") OR title:("${artista}"))`,
     ];
   }
 
@@ -618,6 +721,14 @@ export class InternetArchiveProvider extends BaseAudioSourceProvider {
           semelhanca: similaridade(doNome.title, identity.title),
         });
       }
+
+      // O nome do arquivo é evidência do próprio arquivo, tanto quanto a
+      // etiqueta de título gravada no upload. Quando o nome declara uma variante
+      // que a release não pede ("... (Intro Te", "... (Live)"), o candidato está
+      // fora: a etiqueta limpa do uploader não pode resgatar um arquivo que não
+      // é a música inteira (verificado em 23/10/2026 com "03 Smells Like Teen
+      // Spirit (Intro Te.mp3", que pontuava 100 e tocava a introdução do show).
+      if (!this.versaoCompativel(identity, doNome.version)) return null;
     }
 
     if (arquivo.title) {

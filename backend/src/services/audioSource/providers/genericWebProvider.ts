@@ -60,6 +60,12 @@ interface MotorDeBusca {
   // O Brave diferencia o cliente pelo fingerprint TLS: o axios (OpenSSL do
   // Node) recebe 429, enquanto o curl recebe 200 normal (verificado na prática).
   viaCurl?: boolean;
+  // Texto que só aparece no HTML quando a resposta é uma lista de resultados.
+  // Serve para separar "o motor não achou nada" de "o motor está segurando o
+  // cliente numa página de espera" — as duas chegam como HTTP 200 e, sem este
+  // marcador, a página de espera parece um resultado válido vazio e é
+  // reconsultada em toda descoberta da fila.
+  marcadorDeResultado: string;
   // Extrai as páginas candidatas do HTML da página de resultados.
   // Cada motor tem markup próprio; a função devolve URL + texto do bloco,
   // que depois é filtrado pelas palavras obrigatórias (artista + título).
@@ -68,25 +74,36 @@ interface MotorDeBusca {
 
 // Motores de busca acessíveis sem chave de API.
 //
-// Sondagem real (curl, UA de navegador, 2026-10-22/23):
-//   - Brave (search.brave.com): ÚNICO testado que respeita aspas e devolve
-//     resultados orgânicos relevantes (mp3.pm, mdundo.com, archive.org para
-//     "Daft Punk" "One More Time"). Responde 429 quando consultado repetidas
-//     vezes — tratado com retry/backoff e intervalo entre consultas.
-//   - Bing: IGNORA as aspas até com frases curtas — devolve lixo (OneDrive,
-//     "ONE" transporte) → inútil para a regra de só visitar páginas com a
-//     música. Removido.
-//   - DuckDuckGo HTML: 0 resultados/desafio JS. Mojeek: 403. Yep/Ecosia: 403.
-//     SearXNG públicas: 429 ou desafio Anubis. Yandex: redirect de bloqueio.
+// Sondagem real (curl, UA de navegador, 2026-10-23, consulta
+// "Nirvana" "Smells Like Teen Spirit" mp3):
+//   - Brave (search.brave.com): respeita aspas e devolve páginas que hospedam o
+//     arquivo. Nesta rodada respondeu 429 com "schedule a captcha" — o ritmo e
+//     o cooldown por motor abaixo existem para o IP sair da lista sozinho.
+//   - Marginalia (old-search.marginalia.nu com view=classic): 200 com 25
+//     resultados orgânicos já no HTML e as aspas respeitadas. No filtro das
+//     palavras obrigatórias, 22 dos 25 blocos comprovam a música pedida — e o
+//     acervo do motor é justamente de sites pequenos e independentes (blogs de
+//     crítica, fóruns, páginas de artista), que é onde a Regra 3 encontra
+//     arquivos. A interface nova (search.marginalia.nu) monta o resultado em
+//     JavaScript e devolve zero links no HTML: por isso o "classic".
+//   - Bing: 200 com 10 blocos, mas IGNORA as aspas — devolve wikipédia,
+//     youtube.com (o guard da Regra 3 já bloqueia), letras.mus.br e nirvana.com;
+//     0 dos 10 blocos comprovam a música. Seriam 10 visitas inúteis por
+//     consulta, e o provedor tem orçamento de páginas para gastar.
+//   - DuckDuckGo html. e lite.: 202 com captcha. Mojeek e Ecosia: 403.
+//     priv.au e searxng.site: 429. searx.disroot.org, opengroup.eu e
+//     search.shuttleblue.com: conexão não estabelecida.
 //
-// A lista tem só o Brave; a arquitetura permite reativar outros motores
-// quando surgir algum que respeite a busca por frase exata.
+// São dois motores, cada um com estado próprio: um captcha do Brave não cega
+// mais o provedor inteiro — a fila continua descobrindo pelo Marginalia enquanto
+// o primeiro descansa.
 const MOTORES: MotorDeBusca[] = [
   {
     id: 'brave',
     montarUrl: (q) => `https://search.brave.com/search?q=${encodeURIComponent(q)}`,
     dominio: 'brave.com',
     viaCurl: true,
+    marcadorDeResultado: 'search-snippet-title',
     // Brave: o título do resultado é um div.title.search-snippet-title dentro
     // do <a>; o snippet fica no bloco irmão .generic-snippet
     extrair: ($) => {
@@ -104,6 +121,30 @@ const MOTORES: MotorDeBusca[] = [
       return resultados;
     },
   },
+  {
+    id: 'marginalia',
+    montarUrl: (q) =>
+      `https://old-search.marginalia.nu/search?query=${encodeURIComponent(q)}&view=classic`,
+    dominio: 'marginalia.nu',
+    viaCurl: true,
+    marcadorDeResultado: 'class="card search-result"',
+    // Marginalia (interface classic): cada resultado é um
+    // <section class="card search-result"> com a página em .url a e o texto
+    // comprovando a música em h2 + p.description.
+    extrair: ($) => {
+      const resultados: ResultadoMotor[] = [];
+      $('section.search-result').each((_, el) => {
+        const bloco = $(el);
+        const href = bloco.find('.url a').first().attr('href');
+        if (!href) return;
+        const textoBloco = (
+          bloco.find('h2').text() + ' ' + bloco.find('p.description').first().text()
+        ).trim();
+        resultados.push({ url: href, textoBloco });
+      });
+      return resultados;
+    },
+  },
 ];
 
 // Orçamento de recursos da descoberta — mantém a busca educada e previsível.
@@ -111,19 +152,73 @@ const MAX_POR_PAGINA = 5;      // links de áudio por página visitada
 const INTERVALO_ENTRE_PAGINAS = 400; // ms entre requisições
 const INTERVALO_ENTRE_CONSULTAS = 3000; // ms entre consultas (evita o 429 do Brave)
 const TAMANHO_MAX_HTML = 2 * 1024 * 1024; // 2 MB por página
-// Depois de detectar o desafio anti-bot do Brave ("scheduled a captcha"),
-// o motor fica em cooldown por este período para não piorar o bloqueio.
-const COOLDOWN_DO_MOTOR = 10 * 60 * 1000; // 10 minutos
+// Depois de detectar o desafio anti-bot de um motor ("scheduled a captcha" ou
+// HTTP 429), ele sai de cena por um período.
+//
+// O controle é POR MOTOR e a duração DOBRA a cada bloqueio seguido. Motivo: a
+// fila de resoluções consulta este provedor sem parar (centenas de versões
+// pendentes, três trabalhadores em paralelo, um item a cada 8 s). Com um
+// cooldown fixo renovado a cada tentativa o bloqueio nunca expirava de verdade —
+// medido em 23/10/2026: 431 versões pendentes, ZERO candidatas vindas do
+// generic-web e o log repetindo "Motor brave em cooldown" em toda descoberta.
+const COOLDOWN_BASE_DO_MOTOR = 5 * 60 * 1000;  // 5 minutos no primeiro captcha
+const COOLDOWN_MAX_DO_MOTOR = 120 * 60 * 1000; // teto de 2 horas
 
-// Controle de cooldown do motor (em memória, por processo).
-let motorEmCooldownAte = 0;
+// Ritmo mínimo entre requisições AO MESMO MOTOR, somando todo o processo. Cada
+// descoberta faz três consultas e a fila roda com três trabalhadores: sem este
+// teto o motor recebe quase uma requisição por segundo, que é justamente o que
+// faz o Brave marcar o IP como suspeito.
+const INTERVALO_MINIMO_POR_MOTOR = 20 * 1000;
+
+// Quanto tempo, no máximo, um trabalhador espera o ritmo do motor. Passou
+// disso a consulta é pulada — a fila tem itens para dar e esperar não vale
+// consumir o orçamento inteiro da descoberta.
+const ESPERA_MAXIMA_POR_RITMO = 12 * 1000;
+
+interface EstadoMotor {
+  cooldownAte: number;       // até quando o motor não deve ser consultado
+  bloqueiosSeguidos: number; // captchas consecutivos — define a duração do cooldown
+  ultimoPedido: number;      // quando a última requisição real ao motor aconteceu
+}
+
+// Estado em memória, por processo, chaveado pelo id do motor.
+const estadosPorMotor = new Map<string, EstadoMotor>();
+
+function estadoDoMotor(id: string): EstadoMotor {
+  let estado = estadosPorMotor.get(id);
+  if (!estado) {
+    estado = { cooldownAte: 0, bloqueiosSeguidos: 0, ultimoPedido: 0 };
+    estadosPorMotor.set(id, estado);
+  }
+  return estado;
+}
+
+// Registra um bloqueio: dobra o descanso a cada captcha seguido (até o teto) e
+// escreve no log qual motor saiu de cena, por quê e por quanto tempo — antes só
+// existia um genérico "em cooldown".
+function registrarBloqueio(idDoMotor: string, motivo: string): void {
+  const estado = estadoDoMotor(idDoMotor);
+  estado.bloqueiosSeguidos++;
+  const duracao = Math.min(
+    COOLDOWN_BASE_DO_MOTOR * 2 ** (estado.bloqueiosSeguidos - 1),
+    COOLDOWN_MAX_DO_MOTOR
+  );
+  estado.cooldownAte = Date.now() + duracao;
+  console.warn(
+    `[GenericWebProvider] Motor ${idDoMotor} bloqueado (${motivo}) — fora por ` +
+    `${Math.round(duracao / 1000)}s (${estado.bloqueiosSeguidos}º bloqueio seguido)`
+  );
+}
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// O Brave, quando marca o IP como suspeito, devolve uma página de captcha
-// com este texto (visto na prática, HTTP 429). Serviria de nada visitar o
-// restante — melhor detectar e respeitar o bloqueio.
-const PADRAO_DESAFIO = /schedule a captcha|flagged as being suspicious/i;
+// Páginas de desafio anti-bot que não são lista de resultados. O Brave marca o
+// IP suspeito com "schedule a captcha" (HTTP 429); o Marginalia segura o
+// cliente com "fairly aggressive bot activity" antes de mostrar os resultados.
+// Detectar os dois permite registrar o bloqueio do motor e respeitar o descanso
+// em vez de insistir e piorar o bloqueio.
+const PADRAO_DESAFIO =
+  /schedule a captcha|flagged as being suspicious|aggressive bot activity/i;
 
 // Palavras obrigatórias para um resultado de busca ser aceito: TODAS as
 // palavras do artista E do título (com 2+ letras, sem acentos/caixa).
@@ -263,17 +358,82 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
   }
 
   // Busca o HTML da página de resultados do motor.
-  // Motores com viaCurl (Brave) usam o curl do sistema — presente no
-  // Windows 10+ e em qualquer servidor, mesma dependência de sistema já
+  // Motores com viaCurl (Brave e Marginalia) usam o curl do sistema — presente
+  // no Windows 10+ e em qualquer servidor, mesma dependência de sistema já
   // aceita no projeto (ffprobe). Se o curl não existir, cai para o axios.
-  // Respeita o cooldown do motor (desafio anti-bot) e detecta a página de
-  // captcha para não insistir durante o bloqueio.
+  // Respeita o cooldown do motor (desafio anti-bot), detecta a página de
+  // captcha e repete uma vez a página de espera para não insistir no bloqueio.
   private async buscarHtmlDoMotor(motor: MotorDeBusca, url: string): Promise<string | null> {
-    if (Date.now() < motorEmCooldownAte) {
-      console.warn(`[GenericWebProvider] Motor ${motor.id} em cooldown (desafio anti-bot); consulta ignorada`);
+    const estado = estadoDoMotor(motor.id);
+    const agora = Date.now();
+
+    if (agora < estado.cooldownAte) {
+      console.warn(
+        `[GenericWebProvider] Motor ${motor.id} em cooldown (desafio anti-bot); consulta ignorada`
+      );
       return null;
     }
 
+    // Ritmo do motor é global: espera o mínimo entre requisições quando cabe no
+    // orçamento; se não cabe, pula a consulta em vez de travar o trabalhador.
+    const faltaParaORitmo = estado.ultimoPedido + INTERVALO_MINIMO_POR_MOTOR - agora;
+    if (estado.ultimoPedido > 0 && faltaParaORitmo > 0) {
+      if (faltaParaORitmo > ESPERA_MAXIMA_POR_RITMO) {
+        console.warn(
+          `[GenericWebProvider] Motor ${motor.id} ocupado (ritmo mínimo de ` +
+          `${INTERVALO_MINIMO_POR_MOTOR / 1000}s); consulta pulada`
+        );
+        return null;
+      }
+      await delay(faltaParaORitmo);
+    }
+    estado.ultimoPedido = Date.now();
+
+    const html = await this.requisitarHtmlDoMotor(motor, url);
+
+    // Página de captcha do motor: registra o bloqueio só deste motor e desiste
+    // da rodada. Os demais motores continuam disponíveis.
+    if (html && PADRAO_DESAFIO.test(html)) {
+      registrarBloqueio(motor.id, 'captcha na página de resultados');
+      return null;
+    }
+
+    // HTTP 200 que não é lista de resultados: o Marginalia devolve uma página
+    // de espera ("barraged by queries from bots") que ele mesmo manda aguardar
+    // um instante. Uma repetição depois de 4 s resolve na maioria das vezes; se
+    // continuar sem lista, o motor vai para o backoff em vez de ser chamado de
+    // novo em toda descoberta da fila (medido em 23/10/2026: a mesma consulta
+    // "Nirvana" "Smells Like Teen Spirit" mp3 respondeu 25 resultados uma vez e
+    // três páginas de espera em seguida).
+    if (html && !html.includes(motor.marcadorDeResultado)) {
+      console.log(
+        `[GenericWebProvider] Motor ${motor.id} devolveu página de espera; ` +
+        'aguardando 4s e repetindo a consulta'
+      );
+      await delay(4000);
+      estado.ultimoPedido = Date.now();
+      const repetida = await this.requisitarHtmlDoMotor(motor, url);
+      if (repetida && repetida.includes(motor.marcadorDeResultado)) {
+        estado.bloqueiosSeguidos = 0;
+        return repetida;
+      }
+      registrarBloqueio(motor.id, 'página de espera sem lista de resultados');
+      return null;
+    }
+
+    // HTML de verdade na resposta: o motor está bom de novo e o backoff zera.
+    if (html) estado.bloqueiosSeguidos = 0;
+
+    return html;
+  }
+
+  // Uma requisição real de HTML ao motor: curl quando o fingerprint TLS do Node
+  // é bloqueado (Brave devolve 429 para o axios e 200 para o curl), axios com
+  // retry de 429 nos demais casos.
+  private async requisitarHtmlDoMotor(
+    motor: MotorDeBusca,
+    url: string
+  ): Promise<string | null> {
     let html: string | null = null;
 
     if (motor.viaCurl) {
@@ -296,15 +456,6 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
     if (html === null) {
       const resposta = await this.getComRetry(url);
       html = resposta ? String(resposta.data ?? '') : null;
-    }
-
-    // Página de captcha do motor: registra o cooldown e desiste desta rodada
-    if (html && PADRAO_DESAFIO.test(html)) {
-      motorEmCooldownAte = Date.now() + COOLDOWN_DO_MOTOR;
-      console.warn(
-        `[GenericWebProvider] Motor ${motor.id} pediu captcha — cooldown de ${COOLDOWN_DO_MOTOR / 60000} minutos`
-      );
-      return null;
     }
 
     return html;
@@ -389,7 +540,9 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
       );
       return urls;
     } catch (error) {
-      console.warn(`[GenericWebProvider] Motor ${motor.id} indisponível: ${detalharErro(error).mensagem}`);
+      const detalhe = detalharErro(error);
+      if (detalhe.status === 429) registrarBloqueio(motor.id, 'HTTP 429 (rate limit do motor)');
+      console.warn(`[GenericWebProvider] Motor ${motor.id} indisponível: ${detalhe.mensagem}`);
       return [];
     }
   }

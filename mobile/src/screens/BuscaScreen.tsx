@@ -83,6 +83,9 @@ export default function BuscaScreen(): React.JSX.Element {
   // Versões do termo que ainda aguardam descoberta de fonte de áudio no
   // backend (ficam fora da lista até terem áudio resolvido)
   const [pendentesAudio, setPendentesAudio] = useState(0);
+  // O servidor está montando o catálogo deste termo agora? Enquanto true, uma
+  // lista vazia é espera — não "não encontramos nada".
+  const [ingestaoEmCurso, setIngestaoEmCurso] = useState(false);
 
   // A lista se atualiza sozinha enquanto há versões pendentes. O selo do
   // cabeçalho avisa que isso está acontecendo, para o usuário não achar que
@@ -273,6 +276,7 @@ export default function BuscaScreen(): React.JSX.Element {
       setReleases([]);
       setTotal(0);
       setErro(null);
+      setIngestaoEmCurso(false);
       return;
     }
 
@@ -302,6 +306,7 @@ export default function BuscaScreen(): React.JSX.Element {
         setTotal(resultado.data.total);
         setFromCache(resultado.data.fromCache);
         setPendentesAudio(resultado.data.pendentes_audio ?? 0);
+        setIngestaoEmCurso(resultado.data.ingestao_em_curso === true);
 
         if (!acumular && termoBusca.trim()) {
           adicionarBusca(termoBusca.trim());
@@ -362,6 +367,7 @@ export default function BuscaScreen(): React.JSX.Element {
       setTotal(resultado.data.total);
       setFromCache(resultado.data.fromCache);
       setPendentesAudio(resultado.data.pendentes_audio ?? 0);
+      setIngestaoEmCurso(resultado.data.ingestao_em_curso === true);
     } catch {
       // Atualização de fundo não interrompe o usuário com erro: a lista que
       // ele já vê continua válida e a busca manual segue funcionando.
@@ -383,7 +389,12 @@ export default function BuscaScreen(): React.JSX.Element {
   useEffect(() => {
     const termoAtual = termo.trim();
 
-    if (!termoAtual || pendentesAudio <= 0 || offset !== 0) {
+    // O relógio anda enquanto houver versões aguardando áudio OU enquanto o
+    // servidor estiver ingerindo o termo. Numa busca nova é justamente esse o
+    // período em que a tela está vazia por trabalho em curso — sem este sinal,
+    // ela pararia de se atualizar e mostraria "Nenhuma versão encontrada" para
+    // um catálogo que ainda está sendo montado.
+    if (!termoAtual || (pendentesAudio <= 0 && !ingestaoEmCurso) || offset !== 0) {
       termoDoRelogio.current = null;
       pendentesAnterior.current = 0;
       tentativasAtualizacao.current = 0;
@@ -393,7 +404,10 @@ export default function BuscaScreen(): React.JSX.Element {
     const mudouDeTermo = termoDoRelogio.current !== termoAtual;
     const houveProgresso = pendentesAudio < pendentesAnterior.current;
 
-    if (mudouDeTermo || houveProgresso) {
+    // Com ingestão em curso o fôlego se renova: o limite de tentativas existe
+    // para não consultar o servidor para sempre quando nenhuma fonte aberta é
+    // encontrada, e não para cortar a espera de um trabalho em andamento.
+    if (mudouDeTermo || houveProgresso || ingestaoEmCurso) {
       tentativasAtualizacao.current = 0;
     }
     termoDoRelogio.current = termoAtual;
@@ -409,7 +423,7 @@ export default function BuscaScreen(): React.JSX.Element {
     }, INTERVALO_ATUALIZACAO_MS);
 
     return () => clearInterval(intervalo);
-  }, [termo, pendentesAudio, offset, atualizarSilenciosamente]);
+  }, [termo, pendentesAudio, ingestaoEmCurso, offset, atualizarSilenciosamente]);
 
   const aoMudarTermo = useCallback((novoTermo: string) => {
     setTermo(novoTermo);
@@ -429,6 +443,7 @@ export default function BuscaScreen(): React.JSX.Element {
       setTotal(0);
       setErro(null);
       setPendentesAudio(0);
+      setIngestaoEmCurso(false);
       setCarregando(false);
       return;
     }
@@ -592,7 +607,7 @@ export default function BuscaScreen(): React.JSX.Element {
         </View>
       </View>
 
-      {pendentesAudio > 0 && (
+      {(pendentesAudio > 0 || ingestaoEmCurso) && (
         <View
           style={[
             styles.avisoPendentes,
@@ -604,13 +619,15 @@ export default function BuscaScreen(): React.JSX.Element {
         >
           <Icone nome="relogio" tamanho={14} cor={colors.warning} />
           <Text style={[styles.avisoPendentesTexto, { color: colors.warning }]}>
-            {pendentesAudio} {pendentesAudio === 1 ? 'versão aguardando' : 'versões aguardando'} fonte de áudio
+            {pendentesAudio > 0
+              ? `${pendentesAudio} ${pendentesAudio === 1 ? 'versão aguardando' : 'versões aguardando'} fonte de áudio`
+              : 'Montando o catálogo desta busca'}
             {atualizandoSozinho ? ' · atualizando a lista…' : ''}
           </Text>
         </View>
       )}
     </View>
-  ), [listaFiltrada.length, colors, fromCache, pendentesAudio, atualizandoSozinho]);
+  ), [listaFiltrada.length, colors, fromCache, pendentesAudio, ingestaoEmCurso, atualizandoSozinho]);
 
   return (
     <FundoAtmosfera>
@@ -1055,31 +1072,35 @@ export default function BuscaScreen(): React.JSX.Element {
             >
               <Icone
                 nome={
-                  pendentesAudio > 0
+                  pendentesAudio > 0 || ingestaoEmCurso
                     ? 'ondas'
                     : termoDoReconhecimento
                       ? 'microfone'
                       : 'musica'
                 }
                 tamanho={26}
-                cor={pendentesAudio > 0 ? colors.primary : colors.textSecondary}
+                cor={pendentesAudio > 0 || ingestaoEmCurso ? colors.primary : colors.textSecondary}
               />
             </View>
             <Text style={[styles.estadoTitulo, { color: colors.text }]}>
               {pendentesAudio > 0
                 ? 'Localizando fontes de áudio'
-                : termoDoReconhecimento
-                  ? 'Essa faixa ainda não está no catálogo'
-                  : 'Nenhuma versão encontrada'}
+                : ingestaoEmCurso
+                  ? 'Montando o catálogo desta busca'
+                  : termoDoReconhecimento
+                    ? 'Essa faixa ainda não está no catálogo'
+                    : 'Nenhuma versão encontrada'}
             </Text>
             <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
               {pendentesAudio > 0
                 ? `${pendentesAudio} ${pendentesAudio === 1 ? 'versão encontrada aguarda' : 'versões encontradas aguardam'} a descoberta do áudio em sites abertos.`
-                : termoDoReconhecimento
-                  ? 'A música identificada pelo microfone não tem versões cadastradas no Music Galaxy. Tente buscar só pelo nome do artista.'
-                  : 'Tente outro artista, título ou jeito de escrever.'}
+                : ingestaoEmCurso
+                  ? 'O Music Galaxy está consultando as fontes oficiais e procurando o áudio em sites abertos. A lista se preenche sozinha assim que as primeiras versões ficam prontas.'
+                  : termoDoReconhecimento
+                    ? 'A música identificada pelo microfone não tem versões cadastradas no Music Galaxy. Tente buscar só pelo nome do artista.'
+                    : 'Tente outro artista, título ou jeito de escrever.'}
             </Text>
-            {pendentesAudio > 0 && (
+            {(pendentesAudio > 0 || ingestaoEmCurso) && (
               <View style={styles.estadoAcao}>
                 <CustomButton
                   title="Buscar novamente"
@@ -1089,7 +1110,7 @@ export default function BuscaScreen(): React.JSX.Element {
                 />
               </View>
             )}
-            {pendentesAudio === 0 && termoDoReconhecimento && (
+            {pendentesAudio === 0 && !ingestaoEmCurso && termoDoReconhecimento && (
               <View style={styles.estadoAcao}>
                 <CustomButton
                   title="Tentar de novo"

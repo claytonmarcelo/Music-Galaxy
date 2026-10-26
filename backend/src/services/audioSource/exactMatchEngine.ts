@@ -30,6 +30,8 @@ export class ExactMatchEngine {
     { nome: 'rework', padrao: /\brework(ed)?\b/ },
     { nome: 'sped up', padrao: /\bsped up\b|\bspeed up\b/ },
     { nome: 'slowed', padrao: /\bslowed\b/ },
+    { nome: 'intro', padrao: /\bintro\b/ },
+    { nome: 'outro', padrao: /\boutro\b/ },
   ];
 
   // Rótulos que representam a versão "de fábrica" da música, não uma variante.
@@ -108,6 +110,45 @@ export class ExactMatchEngine {
 
     const distance = this.levenshteinDistance(longer, shorter);
     return (longer.length - distance) / longer.length;
+  }
+
+  // Separa os artistas de um crédito compartilhado: "A & B", "A feat. B",
+  // "A vs. B", "A, B", "A and B". A ficha oficial de uma colaboração lista todos
+  // os artistas, mas o catálogo guarda o artista principal como entidade
+  // (Regra 8) — o arquivo pode chegar com o crédito inteiro sem por isso ser
+  // outra música.
+  //
+  // O ponto-e-vírgula e a barra entram porque o Internet Archive grava o campo
+  // creator como lista e a uni assim: medido em 26/10/2026, o MP3 de "Saideira"
+  // chega com artista "Skank;Skank" — sem separador, a similaridade de artista
+  // era 50% e a faixa morria em PROBABLE_MATCH 82,5 (o corte de correspondência
+  // exata é 90), exatamente quando o catálogo já tinha encontrado o arquivo.
+  private separarCreditos(artista: string): string[] {
+    return artista
+      .split(/\s*(?:&|\band\b|\bfeat\.?|\bfeaturing\b|\bft\.?|\bvs\.?|\bversus\b|\bx\b|\bmeets\b|\bwith\b|,|;|\/|\+)\s*/i)
+      .map((parte) => this.normalize(parte))
+      .filter((parte) => parte.length >= 2);
+  }
+
+  // Similaridade de artista que entende crédito compartilhado: o artista pedido
+  // aparecer entre os creditados vale igualdade. Medido em 23/10/2026: 154
+  // versões de "Lean On" presas em PROBABLE_MATCH 84,3 porque o MP3 se chama
+  // "Major Lazer & DJ Snake - Lean On" e o catálogo guarda "Major Lazer".
+  private similaridadeDeArtista(artistaPedida: string, artistaCandidato: string): number {
+    const direta = this.calculateSimilarity(artistaPedida, artistaCandidato);
+    if (direta >= 0.999) return 1;
+
+    const pedida = this.normalize(artistaPedida);
+    const candidato = this.normalize(artistaCandidato);
+    if (!pedida || !candidato) return direta;
+
+    const creditosDoCandidato = this.separarCreditos(artistaCandidato);
+    const creditosDaPedida = this.separarCreditos(artistaPedida);
+
+    const estaCreditado =
+      creditosDoCandidato.includes(pedida) || creditosDaPedida.includes(candidato);
+
+    return estaCreditado ? 1 : direta;
   }
 
   // Distância de Levenshtein
@@ -220,8 +261,10 @@ export class ExactMatchEngine {
   ): { rejected: boolean; reason: string } {
     const reasons: string[] = [];
 
-    // Regra 1: Artista diferente
-    const artistSimilarity = this.calculateSimilarity(identity.artist, candidate.artist);
+    // Regra 1: Artista diferente. Crédito compartilhado de colaboração não é
+    // artista diferente; um nome que não aparece em nenhum crédito continua
+    // sendo rejeitado.
+    const artistSimilarity = this.similaridadeDeArtista(identity.artist, candidate.artist);
     if (artistSimilarity < 0.5) {
       reasons.push('Artista muito diferente');
     }
@@ -295,7 +338,7 @@ export class ExactMatchEngine {
     }
 
     // Pontuação do artista
-    const artistSimilarity = this.calculateSimilarity(identity.artist, candidate.artist);
+    const artistSimilarity = this.similaridadeDeArtista(identity.artist, candidate.artist);
     const artistScore = this.WEIGHTS.artist * artistSimilarity;
     totalScore += artistScore;
     reasons.push(`Artista: ${(artistSimilarity * 100).toFixed(0)}%`);
