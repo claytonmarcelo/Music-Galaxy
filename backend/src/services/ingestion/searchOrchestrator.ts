@@ -130,32 +130,55 @@ async function executarIngestao(termo: string): Promise<ResultadoIngestion> {
 
   const resultados = await Promise.allSettled(promessas);
 
+  let fontesQueResponderam = 0;
+
   // Persiste por fonte para poder registrar contadores reais no log
   for (const resultado of resultados) {
     if (resultado.status === 'fulfilled') {
       const { fonte, idFonte, releases } = resultado.value;
       fontesChamadas.push(fonte);
+      fontesQueResponderam++;
 
-      if (releases.length > 0) {
-        // Gravação serializada (ver `gravarComExclusividade`): evita que
-        // duas ingestões criem o mesmo artista/obra em paralelo.
-        const contadores = await gravarComExclusividade(() => persistirReleases(releases));
-        worksCreated    += contadores.worksCreated;
-        releasesCreated += contadores.releasesCreated;
-
-        // Log com contadores reais — não estimativas
+      if (releases.length === 0) {
+        // "A fonte respondeu e não tinha nada" também é um fato auditável. Sem
+        // esta linha o log ficava vazio e a busca sem resultado era
+        // indistinguível de uma fonte que não respondeu — medido em 26/10/2026:
+        // "mambolado" e "arthur kusoski" não deixaram NENHUMA linha no
+        // ingestion_log, embora o cache mostrasse a resposta `[]` das duas fontes.
         await registrarLogIngestion({
           metadata_source_id: idFonte,
           request_type:       'search',
           request_query:      chaveCache,
-          status:             'success',
-          works_created:      contadores.worksCreated,
-          releases_created:   contadores.releasesCreated,
+          status:             'not_found',
         });
+        continue;
       }
+
+      // Gravação serializada (ver `gravarComExclusividade`): evita que
+      // duas ingestões criem o mesmo artista/obra em paralelo.
+      const contadores = await gravarComExclusividade(() => persistirReleases(releases));
+      worksCreated    += contadores.worksCreated;
+      releasesCreated += contadores.releasesCreated;
+
+      // Log com contadores reais — não estimativas
+      await registrarLogIngestion({
+        metadata_source_id: idFonte,
+        request_type:       'search',
+        request_query:      chaveCache,
+        status:             'success',
+        works_created:      contadores.worksCreated,
+        releases_created:   contadores.releasesCreated,
+      });
     } else {
       console.error('[ORCHESTRATOR] Erro ao consultar fonte:', resultado.reason);
     }
+  }
+
+  // Se NENHUMA fonte de metadados respondeu, isto não é "acervo vazio": é
+  // consulta incompleta. Devolver zeros aqui faria a API afirmar que a música
+  // não existe quando o que houve foi indisponibilidade da fonte oficial.
+  if (fontesQueResponderam === 0) {
+    throw new Error(`Nenhuma fonte de metadados respondeu para o termo "${termo}"`);
   }
 
   emitirEvento('INGESTION_COMPLETED', { termo, worksCreated, releasesCreated });

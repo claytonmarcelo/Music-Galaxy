@@ -86,6 +86,9 @@ export default function BuscaScreen(): React.JSX.Element {
   // O servidor está montando o catálogo deste termo agora? Enquanto true, uma
   // lista vazia é espera — não "não encontramos nada".
   const [ingestaoEmCurso, setIngestaoEmCurso] = useState(false);
+  // A fonte oficial não respondeu. Lista vazia aqui não é "não existe": é
+  // "não conseguimos consultar agora" — a tela diz isso com todas as letras.
+  const [fontesIndisponiveis, setFontesIndisponiveis] = useState(false);
 
   // A lista se atualiza sozinha enquanto há versões pendentes. O selo do
   // cabeçalho avisa que isso está acontecendo, para o usuário não achar que
@@ -277,6 +280,7 @@ export default function BuscaScreen(): React.JSX.Element {
       setTotal(0);
       setErro(null);
       setIngestaoEmCurso(false);
+      setFontesIndisponiveis(false);
       return;
     }
 
@@ -307,6 +311,7 @@ export default function BuscaScreen(): React.JSX.Element {
         setFromCache(resultado.data.fromCache);
         setPendentesAudio(resultado.data.pendentes_audio ?? 0);
         setIngestaoEmCurso(resultado.data.ingestao_em_curso === true);
+        setFontesIndisponiveis(resultado.data.fontes_indisponiveis === true);
 
         if (!acumular && termoBusca.trim()) {
           adicionarBusca(termoBusca.trim());
@@ -368,6 +373,11 @@ export default function BuscaScreen(): React.JSX.Element {
       setFromCache(resultado.data.fromCache);
       setPendentesAudio(resultado.data.pendentes_audio ?? 0);
       setIngestaoEmCurso(resultado.data.ingestao_em_curso === true);
+      // A reconsulta pelo banco local respondeu: a falha de consulta anterior
+      // deixou de ser o estado da tela, então o aviso sai do ar.
+      if (resultado.data.results.length > 0 || (resultado.data.pendentes_audio ?? 0) > 0) {
+        setFontesIndisponiveis(false);
+      }
     } catch {
       // Atualização de fundo não interrompe o usuário com erro: a lista que
       // ele já vê continua válida e a busca manual segue funcionando.
@@ -1074,12 +1084,20 @@ export default function BuscaScreen(): React.JSX.Element {
                 nome={
                   pendentesAudio > 0 || ingestaoEmCurso
                     ? 'ondas'
-                    : termoDoReconhecimento
-                      ? 'microfone'
-                      : 'musica'
+                    : fontesIndisponiveis
+                      ? 'servidor'
+                      : termoDoReconhecimento
+                        ? 'microfone'
+                        : 'musica'
                 }
                 tamanho={26}
-                cor={pendentesAudio > 0 || ingestaoEmCurso ? colors.primary : colors.textSecondary}
+                cor={
+                  pendentesAudio > 0 || ingestaoEmCurso
+                    ? colors.primary
+                    : fontesIndisponiveis
+                      ? colors.warning
+                      : colors.textSecondary
+                }
               />
             </View>
             <Text style={[styles.estadoTitulo, { color: colors.text }]}>
@@ -1087,18 +1105,22 @@ export default function BuscaScreen(): React.JSX.Element {
                 ? 'Localizando fontes de áudio'
                 : ingestaoEmCurso
                   ? 'Montando o catálogo desta busca'
-                  : termoDoReconhecimento
-                    ? 'Essa faixa ainda não está no catálogo'
-                    : 'Nenhuma versão encontrada'}
+                  : fontesIndisponiveis
+                    ? 'As fontes oficiais não responderam'
+                    : termoDoReconhecimento
+                      ? 'Essa faixa ainda não está no catálogo'
+                      : 'Nenhuma versão encontrada'}
             </Text>
             <Text style={[styles.estadoDica, { color: colors.textSecondary }]}>
               {pendentesAudio > 0
                 ? `${pendentesAudio} ${pendentesAudio === 1 ? 'versão encontrada aguarda' : 'versões encontradas aguardam'} a descoberta do áudio em sites abertos.`
                 : ingestaoEmCurso
                   ? 'O Music Galaxy está consultando as fontes oficiais e procurando o áudio em sites abertos. A lista se preenche sozinha assim que as primeiras versões ficam prontas.'
-                  : termoDoReconhecimento
-                    ? 'A música identificada pelo microfone não tem versões cadastradas no Music Galaxy. Tente buscar só pelo nome do artista.'
-                    : 'Tente outro artista, título ou jeito de escrever.'}
+                  : fontesIndisponiveis
+                    ? 'O Music Galaxy não conseguiu falar com o MusicBrainz nem com o Discogs agora. Isso não significa que a música não exista — tente buscar de novo em alguns instantes.'
+                    : termoDoReconhecimento
+                      ? 'A música identificada pelo microfone não tem versões cadastradas no Music Galaxy. Tente buscar só pelo nome do artista.'
+                      : 'Tente outro artista, título ou jeito de escrever.'}
             </Text>
             {(pendentesAudio > 0 || ingestaoEmCurso) && (
               <View style={styles.estadoAcao}>

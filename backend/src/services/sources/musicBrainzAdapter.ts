@@ -68,6 +68,13 @@ export class MusicBrainzAdapter implements AdapterFonteExterna {
     // 1. O termo é o nome de um artista? Então o catálogo sai das faixas dos
     //    discos dele (álbuns, singles e EPs), que é o que o usuário espera de
     //    uma busca por artista. A falha aqui não impede o fluxo seguinte.
+    //
+    //    "Não respondeu" e "não é artista" são coisas diferentes e não podem
+    //    terminar do mesmo jeito: medido em 26/10/2026, o MusicBrainz devolve
+    //    HTTP 503 ("the web server is currently busy") em 2 de cada 6 chamadas
+    //    nesta máquina. Antes, esse erro virava silêncio e a busca vazia seguinte
+    //    fechava o ciclo afirmando que a música não existe.
+    let erroDaDiscografia: unknown = null;
     try {
       const discografia = await this.buscarDiscografiaDoArtista(termo);
       if (discografia.length > 0) {
@@ -79,6 +86,7 @@ export class MusicBrainzAdapter implements AdapterFonteExterna {
         return discografia;
       }
     } catch (erro) {
+      erroDaDiscografia = erro;
       console.warn(
         '[MusicBrainz] Busca por artista falhou, seguindo para busca por gravação:',
         erro instanceof Error ? erro.message : erro
@@ -110,6 +118,20 @@ export class MusicBrainzAdapter implements AdapterFonteExterna {
     for (const recording of recordings) {
       const releasesDoRecording = this.extrairReleases(recording);
       releases.push(...releasesDoRecording);
+    }
+
+    if (releases.length === 0 && erroDaDiscografia !== null) {
+      // A busca por gravação não achou nada E a discografia não respondeu. Não
+      // podemos devolver "vazio" aqui: o vazio seria lido como "essa música não
+      // existe no catálogo aberto", quando a verdade medida é "a fonte oficial
+      // está indisponível agora". O erro sobe para o orquestrador registrar no
+      // log e para a API avisar que a consulta ficou incompleta.
+      emitirEvento('INGESTION_FAILED', {
+        fonte: this.nomeFonte,
+        termo,
+        erro: erroDaDiscografia instanceof Error ? erroDaDiscografia.message : String(erroDaDiscografia),
+      });
+      throw erroDaDiscografia instanceof Error ? erroDaDiscografia : new Error(String(erroDaDiscografia));
     }
 
     emitirEvento('INGESTION_COMPLETED', {

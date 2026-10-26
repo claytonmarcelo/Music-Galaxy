@@ -57,6 +57,9 @@ export interface RespostaBusca {
     // O servidor ainda está montando o catálogo deste termo (ingestão em
     // curso)? Enquanto for true, uma lista vazia é espera — não "não existe".
     ingestao_em_curso?: boolean;
+    // Nenhuma fonte oficial respondeu à consulta. Diferente de "a música não
+    // existe": aqui o aplicativo não pode afirmar nada sobre a música.
+    fontes_indisponiveis?: boolean;
   };
 }
 

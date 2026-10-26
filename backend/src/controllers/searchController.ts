@@ -527,7 +527,13 @@ export async function buscarMusicas(
     // segue em segundo plano e o aplicativo reconsulta (leve=1) enquanto
     // ingestao_em_curso for true — é assim que a lista aparece sozinha, sem
     // consulta repetida às fontes externas e sem inventar resultado.
+    //
+    // `fonteIndisponivel` é o terceiro estado possível, e antes ele não existedia:
+    // a ingestão estourar virava "nenhuma versão". A tela precisa dizer que não
+    // conseguiu consultar a fonte oficial agora, não que a música não existe.
+    let fonteIndisponivel = false;
     const ingestao = ingerirPorTermo(termo).catch((erro) => {
+      fonteIndisponivel = true;
       console.error(
         '[SEARCH] Ingestão falhou, respondendo só com dados locais:',
         erro instanceof Error ? erro.message : erro
@@ -555,6 +561,9 @@ export async function buscarMusicas(
         // Se a ingestão ultrapassou o teto de espera acima ela continua aqui:
         // o sinal diz ao aplicativo para continuar reconsultando o banco leve.
         ingestao_em_curso: haIngestaoEmCurso(termo),
+        // Nenhuma fonte oficial respondeu: a lista vazia não é uma resposta sobre
+        // a música, é uma resposta sobre a consulta.
+        fontes_indisponiveis: fonteIndisponivel && !haIngestaoEmCurso(termo),
       },
     };
     res.json(resposta);

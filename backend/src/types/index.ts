@@ -115,6 +115,11 @@ export interface RespostaPaginada<T> {
     // Há ingestão deste termo acontecendo no servidor neste momento? Serve
     // para a tela de busca esperar em vez de afirmar que não existe nada.
     ingestao_em_curso?: boolean;
+    // A consulta ficou incompleta porque nenhuma fonte oficial respondeu? Sem
+    // este sinal, "MusicBrainz e Discogs estão fora do ar" e "essa música não
+    // existe no catálogo aberto" chegam iguais na tela — e o aplicativo diria
+    // "nenhuma versão encontrada" sobre uma falha de rede.
+    fontes_indisponiveis?: boolean;
   };
 }
 
