@@ -33,6 +33,7 @@ import { GenericWebProvider } from '../services/audioSource/providers/genericWeb
 import { InternetArchiveProvider } from '../services/audioSource/providers/internetArchiveProvider';
 import { AudioIdentity } from '../services/audioSource/types';
 import { gravarEtiquetas, EtiquetasAudio } from '../services/audioSource/tagWriter';
+import { medirLoudness, calcularEtiquetasDeGanho } from '../services/audioSource/loudness';
 import { USER_AGENT, auditarUrl, criarAgentesSeguros, criarBeforeRedirect } from '../services/audioSource/webAudio';
 
 // Providers permitidos pela Regra 3 — apenas web aberta, sem plataformas.
@@ -563,25 +564,39 @@ async function produzirArquivoCache(
     let arquivoFinal = outputFile;
     let needsConversion = true;
     // Honestidade da qualidade: FLAC gerado de MP3/AAC não é áudio sem perdas.
+    const codecDaFonte = (formatoFonte?.codec ?? '').toLowerCase();
+    const fonteSemPerdas =
+      codecDaFonte === 'flac' ||
+      codecDaFonte === 'alac' ||
+      codecDaFonte === 'wavpack' ||
+      codecDaFonte.startsWith('pcm_');
     let lossless: boolean | null = null;
 
     if (formatoFonte) {
-      console.log(`[AudioDownload] releaseId=${releaseId} stage=detect format=${formatoFonte.format} codec=${formatoFonte.codec}`);
+      console.log(
+        `[AudioDownload] releaseId=${releaseId} stage=detect format=${formatoFonte.format} ` +
+        `codec=${formatoFonte.codec} bitrate=${formatoFonte.bitrateKbps ?? '?'}k ` +
+        `frequencia=${formatoFonte.sampleRate ?? '?'} canais=${formatoFonte.channels ?? '?'}`
+      );
       if (formatoAudio === 'mp3' && formatoFonte.codec === 'mp3') needsConversion = false;
       else if (formatoAudio === 'flac' && formatoFonte.codec === 'flac') needsConversion = false;
 
-      const codecFonte = formatoFonte.codec.toLowerCase();
-      const fonteSemPerdas =
-        codecFonte === 'flac' ||
-        codecFonte === 'alac' ||
-        codecFonte === 'wavpack' ||
-        codecFonte.startsWith('pcm_');
       lossless = formatoAudio === 'flac' ? fonteSemPerdas : false;
     }
 
     if (needsConversion) {
       // Passo 3: converter com FFmpeg para o formato pedido
-      console.log(`[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=converting`);
+      const bitrateAlvoMp3 = escolherBitrateMp3(formatoFonte?.bitrateKbps ?? null, fonteSemPerdas);
+      // Taxa e canais da fonte são preservados quando conhecidos: reamostrar
+      // 48 kHz para 44,1 kHz é perder informação que o arquivo tinha, e isso não
+      // faz parte de nenhum pedido de qualidade.
+      const frequencia = formatoFonte?.sampleRate ?? 44100;
+      const canais = formatoFonte?.channels ?? 2;
+      console.log(
+        `[AudioDownload] releaseId=${releaseId} stage=ffmpeg status=converting ` +
+        `bitrateFonte=${formatoFonte?.bitrateKbps ?? 'desconhecido'}k alvo=${bitrateAlvoMp3}k ` +
+        `frequencia=${frequencia} canais=${canais}`
+      );
       const ffmpegStart = Date.now();
 
       await withTimeout(
@@ -589,9 +604,10 @@ async function produzirArquivoCache(
           const cmd = ffmpeg(sourceFile).setFfmpegPath(ffmpegPath || 'ffmpeg').output(outputFile);
 
           if (formatoAudio === 'flac') {
-            cmd.audioCodec('flac').audioFrequency(44100).audioChannels(2);
+            cmd.audioCodec('flac').audioFrequency(frequencia).audioChannels(canais);
           } else {
-            cmd.audioCodec('libmp3lame').audioBitrate('320k').audioFrequency(44100).audioChannels(2);
+            cmd.audioCodec('libmp3lame').audioBitrate(`${bitrateAlvoMp3}k`)
+              .audioFrequency(frequencia).audioChannels(canais);
           }
 
           cmd
@@ -628,18 +644,33 @@ async function produzirArquivoCache(
     );
     temporarios.push(caminhoEtiquetado);
 
+    // O "volume auto" é medido no arquivo que acabou de ser produzido, antes de
+    // ele virar etiqueta: nenhum áudio é reescrito, só se grava o número que os
+    // tocadores usam para aplicar o ganho na reprodução. Custa ~2,8 s para 3 min
+    // 25 s de MP3 (medição real, loudness.ts) e falhou? Segue sem etiqueta.
+    const inicioMedicao = Date.now();
+    const medida = await medirLoudness(arquivoFinal);
+    const ganho = medida ? calcularEtiquetasDeGanho(medida) : null;
+    console.log(
+      medida
+        ? `[AudioDownload] releaseId=${releaseId} stage=loudness status=ok integrado=${medida.integradoLufs} LUFS pico=${medida.picoDbtp} dBTP lra=${medida.lraLu} LU ms=${Date.now() - inicioMedicao}`
+        : `[AudioDownload] releaseId=${releaseId} stage=loudness status=omitida (sem medida) ms=${Date.now() - inicioMedicao}`
+    );
+
     const etiquetagem = await gravarEtiquetas({
       arquivoOrigem: arquivoFinal,
       destino: caminhoEtiquetado,
       formato: formatoAudio === 'flac' ? 'flac' : 'mp3',
       etiquetas: montarEtiquetas(release),
       capaUrl: release.cover_url ?? null,
+      ganho,
     });
     if (etiquetagem) {
       arquivoFinal = caminhoEtiquetado;
       console.log(
         `[AudioDownload] releaseId=${releaseId} stage=etiquetas status=ok ` +
-        `capa=${etiquetagem.capaEmbutida ? 'oficial embutida' : 'sem capa no banco'}`
+        `capa=${etiquetagem.capaEmbutida ? 'oficial embutida' : 'sem capa no banco'} ` +
+        `ganho=${ganho ? `${ganho.replayGainTrackGain}/${ganho.replayGainTrackPeak}` : 'sem medida'}`
       );
     }
 
@@ -770,7 +801,9 @@ async function gravarStreamComLimite(stream: NodeJS.ReadableStream, destino: str
 }
 
 // Detecta formato/codec reais do arquivo baixado via ffprobe
-async function detectAudioFormat(filePath: string): Promise<{ format: string; codec: string } | null> {
+async function detectAudioFormat(
+  filePath: string
+): Promise<{ format: string; codec: string; bitrateKbps: number | null; sampleRate: number | null; channels: number | null } | null> {
   try {
     return await withTimeout(
       new Promise((resolve, reject) => {
@@ -783,9 +816,16 @@ async function detectAudioFormat(filePath: string): Promise<{ format: string; co
             if (err) return reject(err);
             // Primeira faixa de ÁUDIO — um vídeo com áudio não pode definir o codec
             const faixaAudio = metadata.streams?.find((s) => s.codec_type === 'audio');
+            // O bitrate da faixa é o do áudio; o do contêiner soma as duas coisas.
+            const bitrateBruto = Number(faixaAudio?.bit_rate ?? metadata.format?.bit_rate ?? 0);
             resolve({
               format: metadata.format?.format_name || '',
               codec: faixaAudio?.codec_name || '',
+              bitrateKbps: Number.isFinite(bitrateBruto) && bitrateBruto > 0
+                ? Math.round(bitrateBruto / 1000)
+                : null,
+              sampleRate: faixaAudio?.sample_rate ? Number(faixaAudio.sample_rate) : null,
+              channels: faixaAudio?.channels ? Number(faixaAudio.channels) : null,
             });
           });
       }),
@@ -796,6 +836,26 @@ async function detectAudioFormat(filePath: string): Promise<{ format: string; co
     console.error('[AudioController] Erro ao detectar formato:', error);
     return null;
   }
+}
+
+// Taxas que o LAME aceita em CBR. O bitrate da fonte é arredondado PARA BAIXO
+// nesta escada: prometer 320 kbps a partir de um AAC de 128 gera um arquivo 2,5
+// vezes maior com exatamente o mesmo áudio, e o aplicativo diria uma qualidade
+// que não existe.
+const TAXAS_MP3 = [320, 256, 224, 192, 160, 128, 112, 96, 64] as const;
+
+/**
+ * Bitrate alvo do MP3 gerado. Fonte sem perdas (FLAC/WAV/ALAC/WavPack) vai para
+ * 320 — é a entrega pedida. Fonte com perdas fica no bitrate que realmente tem
+ * (e nunca acima de 320). Sem medida confiável, 320 é o teto conservador.
+ */
+export function escolherBitrateMp3(
+  bitrateFonteKbps: number | null,
+  fonteSemPerdas: boolean
+): number {
+  if (fonteSemPerdas || bitrateFonteKbps === null) return 320;
+  if (bitrateFonteKbps >= 320) return 320;
+  return TAXAS_MP3.find((taxa) => taxa <= bitrateFonteKbps) ?? 64;
 }
 
 // Valida a assinatura do arquivo final (MP3: ID3/sync; FLAC: "fLaC")

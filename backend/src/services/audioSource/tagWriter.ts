@@ -10,13 +10,17 @@
 //
 // Nada aqui é obrigatório para o download existir: se o FFmpeg falhar, o chamador
 // entrega o arquivo validado sem etiquetas. O áudio nunca é reescrito — só
-// copiado (-c copy), para não perder qualidade no caminho.
+// copiado (-c copy), para não perder qualidade no caminho. Junto com a identidade
+// vão as etiquetas de ganho medidas no próprio arquivo (loudness.ts): o "volume
+// auto" é um número que o tocador aplica na reprodução, não um processamento que
+// achata a faixa antes de ela chegar ao usuário.
 
 import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import axios from 'axios';
 import ffmpegPath from 'ffmpeg-static';
 import { USER_AGENT, auditarUrl, criarAgentesSeguros, criarBeforeRedirect } from './webAudio';
+import type { EtiquetasDeGanho } from './loudness';
 
 // O que se grava no arquivo. Tudo vem do banco, como a fonte oficial publicou.
 export interface EtiquetasAudio {
@@ -114,6 +118,7 @@ export function montarParametrosDeEtiquetagem(opcoes: {
   formato: 'mp3' | 'flac';
   etiquetas: EtiquetasAudio;
   caminhoCapa?: string | null;
+  ganho?: EtiquetasDeGanho | null;
 }): string[] {
   const { arquivoOrigem, destino, formato, etiquetas, caminhoCapa } = opcoes;
 
@@ -155,6 +160,19 @@ export function montarParametrosDeEtiquetagem(opcoes: {
   // usam essa par quando `artist` traz o crédito da faixa.
   if (etiquetas.artista) parametros.push('-metadata', `album_artist=${etiquetas.artista}`);
 
+  // Ganho medido no próprio arquivo (loudness.ts): o tocador aplica o volume na
+  // reprodução, o áudio não é reescrito. Uppercase é a grafia que os medidores
+  // consagrados gravam e a que as bibliotecas de DJ procuram.
+  if (opcoes.ganho) {
+    parametros.push('-metadata', `REPLAYGAIN_TRACK_GAIN=${opcoes.ganho.replayGainTrackGain}`);
+    parametros.push('-metadata', `REPLAYGAIN_TRACK_PEAK=${opcoes.ganho.replayGainTrackPeak}`);
+    // R128_TRACK_GAIN é etiqueta de Vorbis comment (FLAC/Opus); num MP3 viraria
+    // um TXXX que nenhum leitor de ID3 conhece, então só vai no FLAC.
+    if (formato === 'flac') {
+      parametros.push('-metadata', `R128_TRACK_GAIN=${opcoes.ganho.r128TrackGain}`);
+    }
+  }
+
   if (caminhoCapa) {
     // Etiqueta da própria imagem: "front cover" é o que o tocador usa como capa.
     parametros.push('-metadata:s:v:0', 'title=Album cover', '-metadata:s:v:0', 'comment=Cover (front)');
@@ -175,6 +193,7 @@ export async function gravarEtiquetas(opcoes: {
   formato: 'mp3' | 'flac';
   etiquetas: EtiquetasAudio;
   capaUrl?: string | null;
+  ganho?: EtiquetasDeGanho | null;
 }): Promise<ResultadoEtiquetagem | null> {
   const { arquivoOrigem, destino, formato, etiquetas } = opcoes;
   const caminhoCapa = `${destino}.capa`;
@@ -190,6 +209,7 @@ export async function gravarEtiquetas(opcoes: {
     formato,
     etiquetas,
     caminhoCapa: temCapa ? caminhoCapa : null,
+    ganho: opcoes.ganho ?? null,
   });
 
   try {

@@ -18,7 +18,8 @@ import {
   heDesafioAntiBot,
 } from '../../src/services/audioSource/providers/genericWebProvider';
 import { montarParametrosDeEtiquetagem } from '../../src/services/audioSource/tagWriter';
-import { montarNomeArquivo } from '../../src/controllers/audioController';
+import { calcularEtiquetasDeGanho, interpretarSaidaEbur128 } from '../../src/services/audioSource/loudness';
+import { montarNomeArquivo, escolherBitrateMp3 } from '../../src/controllers/audioController';
 
 // ---------- Internet Archive: as consultas, na ordem de precisão ----------
 
@@ -209,4 +210,119 @@ test('o nome do arquivo não repete o mesmo título duas vezes', () => {
     montarNomeArquivo({ ...libras, album_name: null, artist_name: 'deadmau5', version_name: 'Ghosts n Stuff' }),
     'deadmau5 - Ghosts n Stuff'
   );
+});
+
+// ---------- Volume auto: a medida real vira etiqueta, o áudio não é reescrito ----------
+
+// Saída VERDADEIRA do `ebur128=peak=true` do FFmpeg deste projeto, colada do
+// stderr ao analisar cache/audio/85ac119d…mp3 (release 3294) em 26/10/2026.
+const SUMARIO_EBUR128_REAL = `[aost#0:0/pcm_s16le @ 000001ff] Output #0, null, to 'NUL':
+size=N/A time=00:03:25.30 bitrate=N/A speed=75.7x
+[Parsed_ebur128_0 @ 000001ff69479000] t: 205.3      TARGET:-23 LUFS    M: -58.9 S: -37.3     I:  -9.1 LUFS       LRA:   4.0 LU  FTPK: -50.8 -50.1 dBFS  TPK:  -0.2  -0.2 dBFS
+[out#0/null @ 000001ff69440600] video:0kB audio:35370kB subtitle:0kB other streams:0kB muxing overhead: unknown
+[Parsed_ebur128_0 @ 000001ff69479000] Summary:
+
+  Integrated loudness:
+    I:          -9.1 LUFS
+    Threshold: -19.2 LUFS
+
+  Loudness range:
+    LRA:         4.0 LU
+    Threshold: -29.1 LUFS
+    LRA low:   -11.7 LUFS
+    LRA high:   -7.8 LUFS
+
+  True peak:
+    Peak:       -0.2 dBFS
+`;
+
+test('o sumário real do FFmpeg é lido sem depender das linhas de progresso', () => {
+  assert.deepEqual(interpretarSaidaEbur128(SUMARIO_EBUR128_REAL), {
+    integradoLufs: -9.1,
+    picoDbtp: -0.2,
+    lraLu: 4.0,
+  });
+});
+
+test('as etiquetas dos dois padrões saem da mesma medida', () => {
+  const medida = interpretarSaidaEbur128(SUMARIO_EBUR128_REAL);
+  assert.ok(medida);
+
+  const etiquetas = calcularEtiquetasDeGanho(medida);
+  // ReplayGain: referência clássica de -18 LUFS → -18 - (-9.1) = -8.90 dB (a
+  // faixa já está alta, então o ganho é negativo: o tocador a ABAIXA).
+  assert.equal(etiquetas.replayGainTrackGain, '-8.90 dB');
+  // -0.2 dBTP em amplitude linear = 10^(-0.2/20) = 0,9772.
+  assert.equal(etiquetas.replayGainTrackPeak, '0.9772');
+  // EBU R128: deslocamento até -23 LUFS em centibel.
+  assert.equal(etiquetas.r128TrackGain, '-1390');
+});
+
+test('faixa quieta recebe sinal de mais e o R128 zera no alvo', () => {
+  const etiquetas = calcularEtiquetasDeGanho({ integradoLufs: -23, picoDbtp: -1, lraLu: 6 });
+
+  assert.equal(etiquetas.replayGainTrackGain, '+5.00 dB');
+  assert.equal(etiquetas.replayGainTrackPeak, '0.8913');
+  assert.equal(etiquetas.r128TrackGain, '0');
+});
+
+test('sem sumário, ou com pista muda, nenhuma etiqueta de ganho é inventada', () => {
+  assert.equal(interpretarSaidaEbur128(''), null);
+  assert.equal(interpretarSaidaEbur128('[Parsed_ebur128_0] sem nada aqui'), null);
+  // FFmpeg imprime `-inf` em pista silenciosa: não é número, logo não é ganho.
+  assert.equal(
+    interpretarSaidaEbur128('Summary:\n\n  Integrated loudness:\n    I:          -inf LUFS\n\n  True peak:\n    Peak:       -inf dBFS\n'),
+    null
+  );
+});
+
+test('as etiquetas de ganho entram no arquivo com a grafia dos medidores', () => {
+  const parametros = montarParametrosDeEtiquetagem({
+    arquivoOrigem: 'a/SOURCE.mp3',
+    destino: 'a/OUTPUT.mp3',
+    formato: 'mp3',
+    etiquetas: { artista: 'Shiraz Lane', titulo: 'Back to Life', album: 'Layla', ano: 2022 },
+    caminhoCapa: null,
+    ganho: { replayGainTrackGain: '-8.90 dB', replayGainTrackPeak: '0.9772', r128TrackGain: '-1390' },
+  });
+
+  assert.ok(parametros.includes('REPLAYGAIN_TRACK_GAIN=-8.90 dB'), parametros.join(' '));
+  assert.ok(parametros.includes('REPLAYGAIN_TRACK_PEAK=0.9772'));
+  // O áudio continua só copiado: medir volume não dá direito de reempacotar.
+  assert.ok(parametros.includes('copy'));
+  assert.ok(!parametros.some((p) => /loudnorm|aresample|dynaudnorm/.test(p)), 'nada de normalização no arquivo');
+});
+
+test('R128_TRACK_GAIN vai só no FLAC — no MP3 seria um TXXX que ninguém lê', () => {
+  const ganho = { replayGainTrackGain: '+1.00 dB', replayGainTrackPeak: '1.1220', r128TrackGain: '400' };
+  const base = {
+    destino: 'a/OUTPUT',
+    etiquetas: { artista: 'Guns N’ Roses', titulo: 'November Rain' },
+    caminhoCapa: null,
+    ganho,
+  };
+
+  const mp3 = montarParametrosDeEtiquetagem({ ...base, arquivoOrigem: 'a/S.mp3', destino: 'a/O.mp3', formato: 'mp3' });
+  const flac = montarParametrosDeEtiquetagem({ ...base, arquivoOrigem: 'a/S.flac', destino: 'a/O.flac', formato: 'flac' });
+
+  assert.ok(!mp3.some((p) => p.includes('R128_TRACK_GAIN')), mp3.join(' '));
+  assert.ok(flac.includes('R128_TRACK_GAIN=400'), flac.join(' '));
+});
+
+// ---------- Qualidade honesta: a taxa do MP3 respeita o que a fonte entrega ----------
+
+test('um MP3 de 128 kbps da fonte não sai etiquetado como 320 kbps', () => {
+  // O caso que existia: todo download era codificado a 320 k, inclusive o que
+  // chegou de um upload em 128 k — arquivo maior, mesma informação, e a tela
+  // dizendo 320 kbps.
+  assert.equal(escolherBitrateMp3(128, false), 128);
+  assert.equal(escolherBitrateMp3(192, false), 192);
+  assert.equal(escolherBitrateMp3(245, false), 224, 'taxa fora da escada cai para a de baixo');
+  assert.equal(escolherBitrateMp3(320, false), 320);
+  assert.equal(escolherBitrateMp3(48, false), 64, 'nada abaixo da menor taxa CBR do MP3');
+});
+
+test('sem perdas e fonte sem taxa conhecida usam o topo da escada', () => {
+  assert.equal(escolherBitrateMp3(96, true), 320, 'FLAC/Vinyl de origem: pode ir a 320');
+  assert.equal(escolherBitrateMp3(null, false), 320, 'ffprobe sem taxa: não se aperta o áudio às cegas');
 });
