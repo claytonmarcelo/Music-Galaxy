@@ -258,6 +258,11 @@ export async function resolverFonte(
   release: DadosReleaseParaAudio,
   opts: { reDescobrir?: boolean } = {}
 ): Promise<FonteAudio | null> {
+  // A resposta guardada na memória da descoberta só vale enquanto a fonte dela
+  // estiver de pé: quando a URL salva morre, devolver do cache a mesma URL faz o
+  // download falhar duas vezes com o mesmo erro.
+  let cacheNaoVale = opts.reDescobrir === true;
+
   // 1. Fonte já salva — valida segurança (Regra 3) e disponibilidade
   if (!opts.reDescobrir && release.audio_source_url) {
     const guard = await auditarUrl(release.audio_source_url);
@@ -270,6 +275,7 @@ export async function resolverFonte(
           pageUrl: release.audio_source_page_url ?? undefined,
         };
       }
+      cacheNaoVale = true;
       console.warn(`[AudioController] Fonte salva indisponível — redescobrindo (releaseId=${release.id})`);
     } else {
       // Fonte antiga viola a Regra 3 ou é insegura — descarta e limpa do banco
@@ -280,7 +286,7 @@ export async function resolverFonte(
 
   // 2. Descoberta global em sites abertos (blogs, fóruns, links diretos)
   try {
-    const discovery = await sourceOrchestrator.discover(montarIdentidade(release));
+    const discovery = await sourceOrchestrator.discover(montarIdentidade(release), { forcarBusca: cacheNaoVale });
     const melhor = discovery.bestCandidate;
 
     if (melhor?.candidate) {

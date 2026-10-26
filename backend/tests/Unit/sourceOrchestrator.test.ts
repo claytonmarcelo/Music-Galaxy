@@ -118,3 +118,32 @@ test('reaproveita o cache quando a fonte foi encontrada', async () => {
   assert.equal(segunda.fromCache, true);
   assert.equal(provider.consultas, 1);
 });
+
+// O cache protege o ritmo de requisições da fila, mas a fila não é o usuário:
+// quando a fonte salva no banco morre, o chamador avisa que a resposta guardada
+// não vale mais. Devolver do cache a mesma URL morta faria o download falhar
+// duas vezes com o mesmo erro (observado em 26/10/2026).
+test('a busca forçada fura o cache positivo em vez de devolver a URL morta', async () => {
+  const provider = new ProviderFalso([candidatoExato()]);
+  const orquestrador = new SourceOrchestrator();
+  orquestrador.registerProvider(provider);
+
+  await semLog(() => orquestrador.discover(identidade));
+  const forcada = await semLog(() => orquestrador.discover(identidade, { forcarBusca: true }));
+
+  assert.equal(forcada.fromCache, false, 'busca forçada tem de ir à fonte, não ao cache');
+  assert.equal(provider.consultas, 2, 'o provider precisa ser reconsultado');
+  assert.notEqual(forcada.bestCandidate, null);
+});
+
+test('a busca forçada também fura o cache negativo', async () => {
+  const provider = new ProviderFalso([]);
+  const orquestrador = new SourceOrchestrator();
+  orquestrador.registerProvider(provider);
+
+  await semLog(() => orquestrador.discover(identidade));
+  const forcada = await semLog(() => orquestrador.discover(identidade, { forcarBusca: true }));
+
+  assert.equal(provider.consultas, 2, 'meia hora de cache negativo não pode negar um pedido novo');
+  assert.equal(forcada.fromCache, false);
+});

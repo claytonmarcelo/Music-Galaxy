@@ -23,6 +23,13 @@ export interface DiscoveryResult {
   fromCache: boolean;
 }
 
+// Chave do cache de descoberta: a identidade musical inteira, com a versão e a
+// duração. Quem força a busca não precisa conhecer a chave — só dizer que a
+// resposta guardada não vale mais.
+function cacheKeyDaIdentidade(identity: AudioIdentity): string {
+  return `${identity.artist}-${identity.title}-${identity.version || 'original'}-${identity.duration || 0}`;
+}
+
 export class SourceOrchestrator {
   private providers: Map<string, IAudioSourceProvider> = new Map();
   private exactMatchEngine: ExactMatchEngine;
@@ -167,15 +174,26 @@ export class SourceOrchestrator {
   }
 
   // Descobrir melhor fonte para uma identidade musical
-  async discover(identity: AudioIdentity): Promise<DiscoveryResult> {
+  async discover(
+    identity: AudioIdentity,
+    opts: { forcarBusca?: boolean } = {}
+  ): Promise<DiscoveryResult> {
     const requestId = this.generateRequestId();
     const startTime = Date.now();
     
     console.log(`[SourceOrchestrator] Starting discovery: requestId=${requestId} identity="${identity.artist} - ${identity.title}"`);
 
-    // Verificar cache primeiro
-    const cacheKey = `${identity.artist}-${identity.title}-${identity.version || 'original'}-${identity.duration || 0}`;
-    const cachedResult = await this.checkCache(cacheKey);
+    // Verificar cache primeiro — MENOS quando o chamador sabe que a resposta
+    // guardada já não vale. Medido em 26/10/2026: a fonte salva no banco tinha
+    // morrido, o log dizia "Fonte salva indisponível — redescobrindo", a busca
+    // caía no cache positivo de 1 h e devolvia a MESMA URL morta — o download
+    // falhava de novo com o mesmo erro e o usuário via a faixa quebrada para
+    // sempre. Pedir de novo tem de significar procurar de novo.
+    const cachedResult = opts.forcarBusca ? null : await this.checkCache(cacheKeyDaIdentidade(identity));
+
+    if (opts.forcarBusca) {
+      console.log(`[SourceOrchestrator] Busca forçada: cache de descoberta ignorado (requestId=${requestId})`);
+    }
     
     if (cachedResult) {
       console.log(
@@ -194,7 +212,11 @@ export class SourceOrchestrator {
       };
     }
 
-    console.log(`[SourceOrchestrator] Cache MISS: requestId=${requestId}`);
+    console.log(
+      opts.forcarBusca
+        ? `[SourceOrchestrator] indo à fonte sem consultar o cache: requestId=${requestId}`
+        : `[SourceOrchestrator] Cache MISS: requestId=${requestId}`
+    );
 
     // Obter providers disponíveis
     const providers = this.getProviders();
@@ -295,7 +317,7 @@ export class SourceOrchestrator {
     // várias requisições de metadados — toda vez que a mesma faixa sem fonte
     // volta à frente da fila numa busca nova. Sem isso, o IP do servidor bate no
     // ritmo que faz o Brave devolver captcha.
-    await this.saveCache(cacheKey, result);
+    await this.saveCache(cacheKeyDaIdentidade(identity), result);
 
     return result;
   }
