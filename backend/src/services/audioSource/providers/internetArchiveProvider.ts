@@ -378,6 +378,67 @@ function pareceAssinaturaDeSite(artista?: string): boolean {
     /\b(y2mate|ssyoutube|savefrom|mp3juices|320kbps|download)\b/i.test(texto);
 }
 
+// Escapa caracteres que quebram a sintaxe Lucene da busca do Archive.
+function escaparParaFraseLucene(texto: string): string {
+  return texto
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/[\u0000-\u001f]/g, ' ')
+    .trim();
+}
+
+// Nome quebrado nos termos que o índice realmente guarda, unidos por AND.
+// Apóstrofo e pontuação não são token no índice — é por isso que a frase exata
+// perde o upload "Soul II Soul's".
+export function termosLuceneDoNome(texto: string): string {
+  return texto
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((termo) => termo.length >= 2)
+    .join(' AND ');
+}
+
+// Consultas em ordem de precisão decrescente:
+//   1. artista + título em qualquer campo (acha singles e álbuns);
+//   2. artista + título no criador (itens enviados pelo próprio artista);
+//   3. somente artista — e aqui o artista também pode estar só no título do
+//      item, porque muitos uploads não preenchem o campo criador: medido em
+//      26/10/2026, "Skank - Calango (1994)" tem creator "Album" e só aparece
+//      quando o título entra na consulta.
+//   4. artista termo a termo (sem frase) com o título ainda como frase. Só
+//      entra quando as três primeiras não acharam nada (o laço do provedor
+//      pula a consulta larga se já houver candidato). Motivo medido nesta
+//      rodada: "Keep On Movin'" existe no acervo como o upload
+//      "Soul II Soul's KEEP ON MOVIN'" e `creator:("Soul II Soul")` não casa o
+//      possessivo — a consulta nova chegou ao item (o provedor passou de
+//      "Consulta 3: 1 item" mudo para "Consulta 4: 1 itens" com candidato).
+//      A/B em 20 faixas pendentes: as três consultas de hoje encontram item em
+//      10/20, com esta variante são 14/20; sozinha ela regredia (Cannibal
+//      Corpse 6→0), por isso é aditiva. O candidato extra continua obrigado a
+//      passar pelo `ExactMatchEngine` (≥ 90).
+export function montarConsultasDoArchive(identity: AudioIdentity): string[] {
+  const artista = escaparParaFraseLucene(identity.artist);
+  const titulo = escaparParaFraseLucene(identity.title);
+
+  if (!artista || !titulo) return [];
+
+  const consultas: string[] = [
+    `mediatype:audio AND (creator:("${artista}") OR title:("${artista}")) AND (title:("${titulo}") OR "${titulo}")`,
+    `mediatype:audio AND creator:("${artista}") AND (title:("${titulo}") OR "${titulo}")`,
+    `mediatype:audio AND (creator:("${artista}") OR title:("${artista}"))`,
+  ];
+
+  // O título continua exigido como frase: é ele que dá a precisão da consulta
+  // larga, então afrouxar só o nome do artista não incha a resposta.
+  const artistaPorTermos = termosLuceneDoNome(identity.artist);
+  if (artistaPorTermos) {
+    consultas.push(
+      `mediatype:audio AND (creator:(${artistaPorTermos}) OR title:(${artistaPorTermos})) AND (title:("${titulo}") OR "${titulo}")`
+    );
+  }
+
+  return consultas;
+}
+
 export class InternetArchiveProvider extends BaseAudioSourceProvider {
   readonly providerId = 'internet-archive';
   readonly timeouts: ProviderTimeouts = {
@@ -410,8 +471,8 @@ export class InternetArchiveProvider extends BaseAudioSourceProvider {
         };
       }
 
-      const consultas = this.montarConsultas(identity);
-      const limitesPorConsulta = [4, 3, 2];
+      const consultas = montarConsultasDoArchive(identity);
+      const limitesPorConsulta = [4, 3, 2, 3];
       const identificadoresVistos = new Set<string>();
       const candidatos: AudioCandidate[] = [];
       let fonteForteEncontrada = false;
@@ -420,9 +481,10 @@ export class InternetArchiveProvider extends BaseAudioSourceProvider {
         if (fonteForteEncontrada) break;
         if (candidatos.length >= LIMITE_TOTAL_CANDIDATOS) break;
         if (!this.dentroDoOrcamento(inicio)) break;
-        // A terceira consulta (só artista) é o último recurso: gasta mais
-        // metadados e só vale a pena quando nada foi encontrado antes.
-        if (indice === 2 && candidatos.length > 0) continue;
+        // As duas últimas consultas (só artista, e artista termo a termo) são o
+        // último recurso: gastam mais metadados e só valem a pena quando nada
+        // foi encontrado antes.
+        if (indice >= 2 && candidatos.length > 0) continue;
 
         let documentos: DocumentoBusca[] = [];
         try {
@@ -514,35 +576,6 @@ export class InternetArchiveProvider extends BaseAudioSourceProvider {
         durationMs: Date.now() - inicio,
       };
     }
-  }
-
-  // Consultas em ordem de precisão decrescente:
-  //   1. artista + título em qualquer campo (acha singles e álbuns);
-  //   2. artista + título no criador (itens enviados pelo próprio artista);
-  //   3. somente artista — e aqui o artista também pode estar só no título do
-  //      item, porque muitos uploads não preenchem o campo criador: medido em
-  //      26/10/2026, "Skank - Calango (1994)" tem creator "Album" e só aparece
-  //      quando o título entra na consulta.
-  private montarConsultas(identity: AudioIdentity): string[] {
-    const artista = this.escaparLucene(identity.artist);
-    const titulo = this.escaparLucene(identity.title);
-
-    if (!artista || !titulo) return [];
-
-    return [
-      `mediatype:audio AND (creator:("${artista}") OR title:("${artista}")) AND (title:("${titulo}") OR "${titulo}")`,
-      `mediatype:audio AND creator:("${artista}") AND (title:("${titulo}") OR "${titulo}")`,
-      `mediatype:audio AND (creator:("${artista}") OR title:("${artista}"))`,
-    ];
-  }
-
-  // Escapa caracteres que quebram a sintaxe Lucene da busca do Archive.
-  private escaparLucene(texto: string): string {
-    return texto
-      .replace(/\\/g, '\\\\')
-      .replace(/"/g, '\\"')
-      .replace(/[\u0000-\u001f]/g, ' ')
-      .trim();
   }
 
   // Consulta o advancedsearch (API pública, sem autenticação).

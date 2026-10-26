@@ -220,6 +220,29 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const PADRAO_DESAFIO =
   /schedule a captcha|flagged as being suspicious|aggressive bot activity/i;
 
+// A página de espera tem texto próprio, medido nesta rodada: o Marginalia devolve
+// 1 KB com "Wait For A Moment — The search engine is currently barraged by
+// queries from bots" e um link com token para prosseguir. Nombrar a página pelo
+// que ela é evita chamar de "espera" uma resposta que não é espera.
+const PADRAO_PAGINA_DE_ESPERA =
+  /wait for a moment|barraged by queries from bots/i;
+
+// Resposta legítima de "não achei nada": HTTP 200, página completa, sem lista.
+// Medido em 26/10/2026 atravessando a própria página de espera da Marginalia:
+// "No search results found." / "Showing 0 search results." com 16.285 bytes e
+// nenhum bloco de resultado. Isto não é bloqueio — o motor respondeu. Confundir
+// as duas coisas colocava o motor em cooldown exponencial de 5 min a 2 h a cada
+// consulta honesta sem resultado, e foi assim que o generic-web entregou zero
+// candidatos em todas as sondas desta rodada.
+const PADRAO_SEM_RESULTADO =
+  /no search results found|showing 0 search results|no results found|did not match any documents/i;
+
+// As três leituras de uma resposta de motor, separadas para poderem ser
+// conferidas uma a uma (é a confusão entre elas que cegava o provedor inteiro).
+export const heDesafioAntiBot = (html: string): boolean => PADRAO_DESAFIO.test(html);
+export const hePaginaDeEspera = (html: string): boolean => PADRAO_PAGINA_DE_ESPERA.test(html);
+export const hePaginaSemResultado = (html: string): boolean => PADRAO_SEM_RESULTADO.test(html);
+
 // Palavras obrigatórias para um resultado de busca ser aceito: TODAS as
 // palavras do artista E do título (com 2+ letras, sem acentos/caixa).
 // É o que implementa a regra do usuário: só visitar páginas que têm a música
@@ -257,7 +280,10 @@ function contemTodasAsPalavras(texto: string, palavras: string[]): boolean {
 export class GenericWebProvider extends BaseAudioSourceProvider {
   readonly providerId = 'generic-web';
   readonly timeouts: ProviderTimeouts = {
-    search: 30000,      // 30 segundos para a descoberta completa
+    search: 45000,      // 45 segundos: o ritmo do motor (20 s) é global e as
+                        // duas consultas precisam caber com sobra para VISITAR
+                        // as páginas achadas — com 30 s a lista chegava depois
+                        // do orçamento e a descoberta fechava sem abrir nada
     metadata: 10000,    // 10 segundos para metadados
     download: 600000,   // 10 minutos para download de arquivos grandes
   };
@@ -350,10 +376,22 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
   // Frases CURTAS entre aspas ("artista" "título") — o Brave respeita aspas
   // em frases curtas, mas ignora uma frase longa "artista título" inteira.
   private montarConsultas(identity: AudioIdentity): string[] {
+    const aspas = `"${identity.artist}" "${identity.title}"`;
+    // Duas consultas, não quatro. Cada consulta paga o ritmo do motor (20 s no
+    // mínimo, dividido com os três trabalhadores da fila) e medir com `"mp3"`,
+    // `"flac"` e `"download"` da mesma frase não mudava a lista de páginas: o
+    // que decide o resultado é o nome do artista e da faixa. A segunda, sem
+    // aspas, só existe porque a frase exata é rigorosa demais — medido em
+    // 26/10/2026 com Soul II Soul "Keep On Movin'": entre aspas a Marginalia não
+    // achava nada (o upload diz "Soul II Soul's"), sem aspas devolveu 7 páginas
+    // compatíveis, e a descoberta fechava com "paginas=0" porque o orçamento de
+    // 30 s tinha ido todo em esperas de ritmo antes de visitar a primeira.
+    // Segurança inalterada: o bloco continua precisando de TODAS as palavras
+    // (artista + título), cada página passa pelo guard da Regra 3 e o candidato
+    // tem de chegar a EXACT_MATCH ≥ 90.
     return [
-      `"${identity.artist}" "${identity.title}" mp3`,
-      `"${identity.artist}" "${identity.title}" flac`,
-      `"${identity.artist}" "${identity.title}" download`,
+      `${aspas} mp3`,
+      `${identity.artist} ${identity.title} mp3`,
     ];
   }
 
@@ -398,6 +436,18 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
       return null;
     }
 
+    // Resposta legítima de "sem resultados": não há lista para ler, mas também
+    // não há bloqueio. Sai daqui com página vazia e o backoff zerado, para que a
+    // próxima consulta (e o outro motor) continue; o cooldown de 5 minutos não
+    // pode ser punição por o motor ter respondido o que não tem.
+    if (html && !html.includes(motor.marcadorDeResultado) && hePaginaSemResultado(html)) {
+      estado.bloqueiosSeguidos = 0;
+      console.log(
+        `[GenericWebProvider] Motor ${motor.id} não encontrou a música (sem bloqueio do motor)`
+      );
+      return '';
+    }
+
     // HTTP 200 que não é lista de resultados: o Marginalia devolve uma página
     // de espera ("barraged by queries from bots") que ele mesmo manda aguardar
     // um instante. Uma repetição depois de 4 s resolve na maioria das vezes; se
@@ -417,7 +467,20 @@ export class GenericWebProvider extends BaseAudioSourceProvider {
         estado.bloqueiosSeguidos = 0;
         return repetida;
       }
-      registrarBloqueio(motor.id, 'página de espera sem lista de resultados');
+      // A repetição revelou que a espera só antecedia um "sem resultados".
+      if (repetida && hePaginaSemResultado(repetida)) {
+        estado.bloqueiosSeguidos = 0;
+        console.log(
+          `[GenericWebProvider] Motor ${motor.id} não encontrou a música (sem bloqueio do motor)`
+        );
+        return '';
+      }
+      registrarBloqueio(
+        motor.id,
+        PADRAO_PAGINA_DE_ESPERA.test(html)
+          ? 'página de espera do motor'
+          : 'resposta sem lista de resultados'
+      );
       return null;
     }
 

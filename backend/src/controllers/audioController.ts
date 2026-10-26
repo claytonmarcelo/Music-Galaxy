@@ -32,6 +32,7 @@ import { DirectLinkProvider } from '../services/audioSource/providers/directLink
 import { GenericWebProvider } from '../services/audioSource/providers/genericWebProvider';
 import { InternetArchiveProvider } from '../services/audioSource/providers/internetArchiveProvider';
 import { AudioIdentity } from '../services/audioSource/types';
+import { gravarEtiquetas, EtiquetasAudio } from '../services/audioSource/tagWriter';
 import { USER_AGENT, auditarUrl, criarAgentesSeguros, criarBeforeRedirect } from '../services/audioSource/webAudio';
 
 // Providers permitidos pela Regra 3 — apenas web aberta, sem plataformas.
@@ -92,6 +93,12 @@ export interface DadosReleaseParaAudio {
   version_name: string;
   work_title: string;
   artist_name: string;
+  // Só o download usa: as etiquetas e a capa oficial que vão dentro do arquivo
+  // (Regra 1). A fila de resolução não precisa delas, por isso são opcionais.
+  album_name?: string | null;
+  release_year?: number | null;
+  label?: string | null;
+  cover_url?: string | null;
 }
 
 // Linha vinda do banco — combina a identidade com o tipo de row do mysql2
@@ -140,6 +147,10 @@ async function buscarRelease(releaseId: number): Promise<ReleaseAudioRow | null>
        r.audio_source_provider,
        r.audio_source_page_url,
        r.version_name,
+       r.album_name,
+       r.release_year,
+       r.label,
+       r.cover_url,
        w.title  AS work_title,
        a.name   AS artist_name
      FROM releases r
@@ -193,6 +204,34 @@ function extrairVersaoReal(versionName: string): string | undefined {
   // Sem parênteses: o nome inteiro só conta se tiver um qualificador real
   if (PADRAO_VERSAO_REAL.test(versionName)) return versionName.trim();
   return undefined;
+}
+
+// Nome do arquivo entregue no download, no jeito dos gerenciadores:
+// "Artista - Álbum - Música". O nome vem como a fonte oficial publicou (Regra 8)
+// e a única liberdade é não repetir o mesmo título — em single, obra, disco e
+// faixa têm o mesmo nome oficial e o arquivo sairia "Artista - Música - Música".
+export function montarNomeArquivo(release: DadosReleaseParaAudio): string {
+  const tituloDaFaixa = release.version_name || release.work_title;
+  const partes = [release.artist_name, release.album_name ?? '', tituloDaFaixa]
+    .map((parte) => (parte ?? '').trim())
+    .filter(Boolean);
+
+  return [...new Set(partes)].join(' - ').replace(/[<>:"/\\|?*]/g, '').trim().substring(0, 200);
+}
+
+// Etiquetas que vão dentro do arquivo. Nada é inventado: o que não existe no
+// banco não é gravado (das 1.005 versões com áudio, 18 não têm álbum, 68 não têm
+// ano e 339 não têm gravadora — essas saem sem o campo, não com um palpite), e a
+// capa é a oficial da fonte (Regra 1) — sem capa no banco, o arquivo sai sem
+// imagem embutida.
+function montarEtiquetas(release: DadosReleaseParaAudio): EtiquetasAudio {
+  return {
+    artista: release.artist_name,
+    titulo: release.version_name || release.work_title,
+    album: release.album_name?.trim() || null,
+    ano: release.release_year ?? null,
+    gravadora: release.label?.trim() || null,
+  };
 }
 
 // Monta a identidade musical usada pelo Exact Match Engine.
@@ -409,10 +448,12 @@ export async function downloadAudio(req: Request, res: Response): Promise<void> 
   const formatoAudio = queryFormat === 'flac' ? 'flac' : 'mp3';
   const mimeType = formatoAudio === 'flac' ? 'audio/flac' : 'audio/mpeg';
 
-  const nomeArquivo = `${release.artist_name} - ${release.work_title} - ${release.version_name}`
-    .replace(/[<>:"/\\|?*]/g, '')
-    .trim()
-    .substring(0, 200);
+  // Nome do arquivo no jeito do gerenciador de download: artista — álbum —
+  // música. O nome oficial vem como a fonte publicou (Regra 8); o que se faz
+  // aqui é não repetir o mesmo título duas vezes, porque em single o título da
+  // obra e do lançamento são o mesmo nome, e o arquivo sairia
+  // "Artista - Música - Música".
+  const nomeArquivo = montarNomeArquivo(release);
 
   try {
     // Passo 1: cache permanente — HIT entrega direto
@@ -575,6 +616,32 @@ async function produzirArquivoCache(
 
     // Passo 4: validar assinatura do arquivo final
     await validarArquivo(arquivoFinal, formatoAudio, releaseId);
+
+    // Passo 4.5: etiquetas e capa oficial dentro do arquivo — a métrica dos
+    // gerenciadores de download, para o arquivo chegar identificável em qualquer
+    // tocador. Falhou? O original validado segue igual: o download não depende
+    // disto. A capa é sempre a oficial da fonte (Regra 1) e substitui qualquer
+    // imagem que o upload trouxe, porque o áudio é mapeado sozinho.
+    const caminhoEtiquetado = path.join(
+      tempDir,
+      `etiquetado_${releaseId}_${timestamp}.${formatoAudio}`
+    );
+    temporarios.push(caminhoEtiquetado);
+
+    const etiquetagem = await gravarEtiquetas({
+      arquivoOrigem: arquivoFinal,
+      destino: caminhoEtiquetado,
+      formato: formatoAudio === 'flac' ? 'flac' : 'mp3',
+      etiquetas: montarEtiquetas(release),
+      capaUrl: release.cover_url ?? null,
+    });
+    if (etiquetagem) {
+      arquivoFinal = caminhoEtiquetado;
+      console.log(
+        `[AudioDownload] releaseId=${releaseId} stage=etiquetas status=ok ` +
+        `capa=${etiquetagem.capaEmbutida ? 'oficial embutida' : 'sem capa no banco'}`
+      );
+    }
 
     // Passo 5: mover para o cache PERMANENTE e devolver o caminho definitivo.
     // set() move o arquivo (rename) — o unlink do finally vira no-op seguro.
